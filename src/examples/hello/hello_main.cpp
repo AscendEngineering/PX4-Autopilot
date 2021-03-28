@@ -42,15 +42,65 @@
 
 #include <px4_platform_common/app.h>
 #include <px4_platform_common/init.h>
+#include <px4_platform_common/posix.h>
 #include <stdio.h>
+#include <uORB/topics/vehicle_acceleration.h>
 
 int PX4_MAIN(int argc, char **argv)
 {
 	px4::init(argc, argv, "hello");
 
 	printf("hello\n");
-	HelloExample hello;
-	hello.main();
+	/* subscribe to vehicle_acceleration topic */
+	int sensor_sub_fd = orb_subscribe(ORB_ID(vehicle_acceleration));
+	/* limit the update rate to 5 Hz */
+	orb_set_interval(sensor_sub_fd, 5);
+
+	px4_pollfd_struct_t fds[] = {
+		{ .fd = sensor_sub_fd,   .events = POLLIN },
+		/* there could be more file descriptors here, in the form like:
+		 * { .fd = other_sub_fd,   .events = POLLIN },
+		 */
+	};
+
+	int error_counter = 0;
+	while(true){
+		int poll_ret = px4_poll(fds, 1, 1000);
+		// HelloExample hello;
+		// hello.main();
+		/* handle the poll result */
+		if (poll_ret == 0) {
+			/* this means none of our providers is giving us data */
+			PX4_ERR("Got no data within a second");
+
+		} else if (poll_ret < 0) {
+			/* this is seriously bad - should be an emergency */
+			if (error_counter < 10 || error_counter % 50 == 0) {
+				/* use a counter to prevent flooding (and slowing us down) */
+				PX4_ERR("ERROR return value from poll(): %d", poll_ret);
+			}
+
+			error_counter++;
+
+		} else {
+
+			if (fds[0].revents & POLLIN) {
+				/* obtained data for the first file descriptor */
+				struct vehicle_acceleration_s accel;
+				/* copy sensors raw data into local buffer */
+				orb_copy(ORB_ID(vehicle_acceleration), sensor_sub_fd, &accel);
+				PX4_INFO("Accelerometer:\t%8.4f\t%8.4f\t%8.4f",
+					 (double)accel.xyz[0],
+					 (double)accel.xyz[1],
+					 (double)accel.xyz[2]);
+
+			}
+
+			/* there could be more file descriptors here, in the form like:
+			 * if (fds[1..n].revents & POLLIN) {}
+			 */
+		}
+	}
 
 	printf("goodbye\n");
 	return 0;
