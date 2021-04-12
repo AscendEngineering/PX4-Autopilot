@@ -83,7 +83,7 @@ int PX4_MAIN(int argc, char **argv)
 	};
 
 	//set mode to position control
-	//send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
+	send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
 
 	printf("here4\n");
 
