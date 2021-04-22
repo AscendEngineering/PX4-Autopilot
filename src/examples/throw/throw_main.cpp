@@ -13,8 +13,10 @@
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/vehicle_acceleration.h>
 #include <uORB/topics/vehicle_command.h>
+#include <uORB/topics/vehicle_control_mode.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/vehicle_status_flags.h>
+#include <uORB/topics/vehicle_odometry.h>
 
 
 // #include "Arming/PreFlightCheck/PreFlightCheck.hpp>
@@ -69,14 +71,19 @@ int PX4_MAIN(int argc, char **argv)
 {
 	px4::init(argc, argv, "throw");
 
-	printf("throw\n");
+	printf("...waiting for drone throw\n");
 	/* subscribe to vehicle_acceleration topic */
-	int sensor_sub_fd = orb_subscribe(ORB_ID(vehicle_acceleration));
+	int acc_sub_fd = orb_subscribe(ORB_ID(vehicle_acceleration));
+	int control_sub_fd = orb_subscribe(ORB_ID(vehicle_control_mode));
+	int odom_sub_fd = orb_subscribe(ORB_ID(vehicle_odometry));
 	/* limit the update rate to 5 Hz */
-	orb_set_interval(sensor_sub_fd, 5);
+	orb_set_interval(acc_sub_fd, 5);
+	orb_set_interval(control_sub_fd, 5);
+	orb_set_interval(odom_sub_fd, 5);
 
 	px4_pollfd_struct_t fds[] = {
-		{ .fd = sensor_sub_fd,   .events = POLLIN },
+		{ .fd = acc_sub_fd,   .events = POLLIN },
+		{ .fd = control_sub_fd,   .events = POLLIN },
 		/* there could be more file descriptors here, in the form like:
 		 * { .fd = other_sub_fd,   .events = POLLIN },
 		 */
@@ -85,13 +92,11 @@ int PX4_MAIN(int argc, char **argv)
 	//set mode to position control
 	send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
 
-	printf("here4\n");
-
 	int error_counter = 0;
 	bool activated = false;
 	while(true){
 		//px4_sleep(1);
-		int poll_ret = px4_poll(fds, 1, 1000);
+		int poll_ret = px4_poll(fds, 2, 1000);
 		//printf("here5\n");
 		// throwExample throw;
 		// throw.main();
@@ -115,27 +120,27 @@ int PX4_MAIN(int argc, char **argv)
 				/* obtained data for the first file descriptor */
 				struct vehicle_acceleration_s accel;
 				/* copy sensors raw data into local buffer */
-				orb_copy(ORB_ID(vehicle_acceleration), sensor_sub_fd, &accel);
+				orb_copy(ORB_ID(vehicle_acceleration), acc_sub_fd, &accel);
 				// PX4_INFO("Accelerometer:\t%8.4f\t%8.4f\t%8.4f",
 				// 	 (double)accel.xyz[0],
 				// 	 (double)accel.xyz[1],
 				// 	 (double)accel.xyz[2]);
 
 				if((double)accel.xyz[2] > -1.0 && !activated){
-					PX4_INFO("arming");
+
+					PX4_INFO("...arming");
 					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.f, 21196.f);
-					px4_sleep(1);
+					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
+						     PX4_CUSTOM_SUB_MODE_AUTO_TAKEOFF);
+
 					//send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
 
 					// send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
 					// 	     PX4_CUSTOM_SUB_MODE_AUTO_LOITER);
 					// PX4_INFO("loiter");
 
-					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
-						     PX4_CUSTOM_SUB_MODE_AUTO_TAKEOFF);
 
-
-					PX4_INFO("takeoff");
+					//arm
 					activated = true;
 				}
 
@@ -173,6 +178,17 @@ int PX4_MAIN(int argc, char **argv)
 				// 		true /* fRunPreArmChecks */, &_mavlink_log_pub, &_status_flags,
 				// 		_arm_requirements, hrt_elapsed_time(&_boot_timestamp),
 				// 		arm_disarm_reason_t::TRANSITION_TO_STANDBY);
+
+			}
+			else if(fds[1].revents & POLLIN){
+				struct vehicle_control_mode_s control;
+				orb_copy(ORB_ID(vehicle_control_mode), control_sub_fd, &control);
+				if(control.flag_armed == true && activated){
+					//printf(("Armed: " + std::to_string(control.flag_armed) + "\n").c_str() );
+					// send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
+					// 	     PX4_CUSTOM_SUB_MODE_AUTO_TAKEOFF);
+					// PX4_INFO("...catching");
+				}
 
 			}
 
