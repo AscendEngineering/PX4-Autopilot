@@ -21,3 +21,5 @@ param set MAV_TYPE ${MAV_TYPE}
 
 set MIXER_FILE etc/mixers-sitl/uuv_x_sitl.main.mix
 set MIXER custom
+
+throw start

@@ -63,39 +63,37 @@ namespace {
 int PX4_MAIN(int argc, char **argv)
 {
 	px4::init(argc, argv, "throw");
+	px4_sleep(5);
 
 	printf("...waiting for drone arm\n");
 	/* subscribe to vehicle_acceleration topic */
 	int acc_sub_fd = orb_subscribe(ORB_ID(vehicle_acceleration));
 	int control_sub_fd = orb_subscribe(ORB_ID(vehicle_control_mode));
 	int odom_sub_fd = orb_subscribe(ORB_ID(vehicle_odometry));
-	int vehicle_status_sub_fd = orb_subscribe(ORB_ID(vehicle_status));
 	int safety_sub_fd = orb_subscribe(ORB_ID(safety));
 	/* limit the update rate to 5 Hz */
 	orb_set_interval(acc_sub_fd, 5);
 	orb_set_interval(control_sub_fd, 5);
 	orb_set_interval(odom_sub_fd, 5);
-	orb_set_interval(vehicle_status_sub_fd, 5);
 	orb_set_interval(safety_sub_fd, 5);
 
 	px4_pollfd_struct_t fds[] = {
 		{ .fd = acc_sub_fd,   .events = POLLIN },
 		{ .fd = control_sub_fd,   .events = POLLIN },
 		{ .fd = safety_sub_fd,   .events = POLLIN },
-
 		/* there could be more file descriptors here, in the form like:
 		 * { .fd = other_sub_fd,   .events = POLLIN },
 		 */
 	};
 
 	//set mode to position control
-	//send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
+	send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
 
 	int error_counter = 0;
 	bool activated = false;
 	bool armed = false;
 	while(true){
-		int poll_ret = px4_poll(fds, 3, 1000);
+		int poll_ret = px4_poll(fds, 2, 1000);
 		//printf("here5\n");
 		// throwExample throw;
 		// throw.main();
@@ -116,8 +114,6 @@ int PX4_MAIN(int argc, char **argv)
 		} else {
 
 			if (fds[0].revents & POLLIN) {
-
-
 				/* obtained data for the first file descriptor */
 				struct vehicle_acceleration_s accel;
 				/* copy sensors raw data into local buffer */
@@ -127,21 +123,18 @@ int PX4_MAIN(int argc, char **argv)
 				// 	 (double)accel.xyz[1],
 				// 	 (double)accel.xyz[2]);
 
-				if((double)accel.xyz[2] > -1.0 && !activated && armed){
+				if((double)accel.xyz[2] > -1.0 && !activated){
 
+					PX4_INFO("...arming");
+					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.f, 21196.f);
 					//send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
-					PX4_INFO("taking off");
-
-					//this is the one
 					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
 						     PX4_CUSTOM_SUB_MODE_AUTO_TAKEOFF);
-
-
 
 					// send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
 					// 	     PX4_CUSTOM_SUB_MODE_AUTO_MISSION);
 
-					// send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
+					//send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
 
 					// send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
 					// 	     PX4_CUSTOM_SUB_MODE_AUTO_LOITER);
@@ -200,27 +193,11 @@ int PX4_MAIN(int argc, char **argv)
 
 			}
 			else if(fds[2].revents & POLLIN){
-				//PX4_INFO("got something");
-
-				// //listen for safety switch
-				// struct vehicle_status_s vehicle_status_status;
-				// orb_copy(ORB_ID(vehicle_status), vehicle_status_sub_fd, &vehicle_status_status);
-				// PX4_INFO("%i",vehicle_status_status.arming_state);
-
+				//SYS_STATUS
 				struct safety_s safety_status;
-				orb_copy(ORB_ID(safety), safety_sub_fd, &safety_status);
-
-				if(safety_status.safety_off && !armed){
-
-				// if(vehicle_status_status.arming_state == 100){
-
-					//log
+				orb_copy(ORB_ID(safety_s), safety_sub_fd, &safety_status);
+				if(safety_status.safety_off){
 					PX4_INFO("safety off");
-
-					//force arm
-					PX4_INFO("arming...");
-					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.f, 21196.f);
-					armed = true;
 				}
 
 			}
