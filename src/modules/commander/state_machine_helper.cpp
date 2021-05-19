@@ -535,6 +535,7 @@ bool set_nav_state(vehicle_status_s *status, actuator_armed_s *armed, commander_
 		} else if (status->data_link_lost && data_link_loss_act_configured
 			   && is_armed && !landed) {
 			// Data link lost, data link loss reaction configured -> do configured reaction
+			printf("here1");
 			enable_failsafe(status, old_failsafe, mavlink_log_pub, reason_no_datalink);
 			set_link_loss_nav_state(status, armed, status_flags, internal_state, data_link_loss_act, 0);
 
@@ -551,19 +552,23 @@ bool set_nav_state(vehicle_status_s *status, actuator_armed_s *armed, commander_
 			// All links lost, no data link loss reaction configured -> immediately do RC loss reaction
 			// Lost all communication, by default it's considered unsafe to continue the mission
 			// Note this case is reached after the previous one when flying mission completely without RC
+			printf("here2");
 			enable_failsafe(status, old_failsafe, mavlink_log_pub, reason_no_datalink);
 			set_link_loss_nav_state(status, armed, status_flags, internal_state, rc_loss_act, 0);
 
-		} else if (status->rc_signal_lost && !rc_loss_act_configured
-			   && status->data_link_lost && !data_link_loss_act_configured
-			   && is_armed && !landed
-			   && mission_finished) {
-			// All links lost, all link loss reactions disabled -> return after mission
-			// Pilot disabled all reactions, finish mission but then return to avoid lost vehicle
-			enable_failsafe(status, old_failsafe, mavlink_log_pub, reason_no_datalink);
-			set_link_loss_nav_state(status, armed, status_flags, internal_state, link_loss_actions_t::AUTO_RTL, 0);
+		}
+		// else if (status->rc_signal_lost && !rc_loss_act_configured
+		// 	   && status->data_link_lost && !data_link_loss_act_configured
+		// 	   && is_armed && !landed
+		// 	   && mission_finished) {
+		// 	// All links lost, all link loss reactions disabled -> return after mission
+		// 	// Pilot disabled all reactions, finish mission but then return to avoid lost vehicle
+		// 	printf("here3");
+		// 	//enable_failsafe(status, old_failsafe, mavlink_log_pub, reason_no_datalink);
+		// 	//set_link_loss_nav_state(status, armed, status_flags, internal_state, link_loss_actions_t::AUTO_RTL, 0);
 
-		} else if (!stay_in_failsafe) {
+		// }
+		else if (!stay_in_failsafe) {
 			// normal mission operation if there's no need to stay in failsafe
 			status->nav_state = vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION;
 		}
@@ -581,7 +586,7 @@ bool set_nav_state(vehicle_status_s *status, actuator_armed_s *armed, commander_
 		} else if (status->data_link_lost && data_link_loss_act_configured && !landed && is_armed) {
 			/* also go into failsafe if just datalink is lost, and we're actually in air */
 			set_link_loss_nav_state(status, armed, status_flags, internal_state, data_link_loss_act, 0);
-
+			printf("here4");
 			enable_failsafe(status, old_failsafe, mavlink_log_pub, reason_no_datalink);
 
 		} else if (rc_lost && !data_link_loss_act_configured && status->data_link_lost && is_armed) {
@@ -653,7 +658,7 @@ bool set_nav_state(vehicle_status_s *status, actuator_armed_s *armed, commander_
 		} else if (status->data_link_lost && data_link_loss_act_configured && !landed && is_armed) {
 			// failsafe: just datalink is lost and we're in air
 			set_link_loss_nav_state(status, armed, status_flags, internal_state, data_link_loss_act, 0);
-
+			printf("here5");
 			enable_failsafe(status, old_failsafe, mavlink_log_pub, reason_no_datalink);
 
 			// Orbit can only be started via vehicle_command (mavlink). Consequently, recovery from failsafe into orbit

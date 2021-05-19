@@ -127,7 +127,7 @@ int PX4_MAIN(int argc, char **argv)
 				// 	 (double)accel.xyz[1],
 				// 	 (double)accel.xyz[2]);
 
-				if((double)accel.xyz[2] > -1.0 && !activated && armed){
+				if((double)accel.xyz[2] > -1.0 && !activated ){
 
 					//send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
 					PX4_INFO("taking off");
