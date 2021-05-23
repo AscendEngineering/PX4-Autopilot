@@ -40,6 +40,4 @@ px4_add_module(
 		throw_start.cpp
 		throw_example.cpp
 	DEPENDS
-		circuit_breaker
-		px4_work_queue
 	)
