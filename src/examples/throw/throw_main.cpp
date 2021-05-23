@@ -21,9 +21,15 @@
 #include <uORB/topics/actuator_armed.h>
 
 #include <lib/parameters/param.h>
+#include <uORB/topics/led_control.h>
+#include <uORB/topics/tune_control.h>
 
 
-
+// Pairing request
+hrt_abstime		_pairing_start{0};
+int			_pairing_button_counter{0};
+uORB::Publication<led_control_s> _to_led_control{ORB_ID(led_control)};
+uORB::Publication<tune_control_s> _to_tune_control{ORB_ID(tune_control)};
 
 
 namespace {
@@ -57,6 +63,53 @@ namespace {
 		return vcmd_pub.publish(vcmd);
 	}
 	#endif
+
+	void CheckPairingRequest(bool button_pressed){
+		// Need to press the button 3 times within 2 seconds
+		const hrt_abstime now = hrt_absolute_time();
+
+		if (now - _pairing_start > 2_s) {
+			// reset state
+			_pairing_start = 0;
+			_pairing_button_counter = 0;
+		}
+
+		if (!_safety_btn_prev_sate && button_pressed) {
+			if (_pairing_start == 0) {
+				_pairing_start = now;
+			}
+
+			++_pairing_button_counter;
+		}
+
+		if (_pairing_button_counter == 3) {
+			// vehicle_command_s vcmd{};
+			// vcmd.command = vehicle_command_s::VEHICLE_CMD_START_RX_PAIR;
+			// vcmd.param1 = 10.f; // GCS pairing request handled by a companion.
+			// vcmd.timestamp = hrt_absolute_time();
+			// _to_command.publish(vcmd);
+			// PX4_DEBUG("Sending GCS pairing request");
+
+			led_control_s led_control{};
+			led_control.led_mask = 0xff;
+			led_control.mode = led_control_s::MODE_BLINK_FAST;
+			led_control.color = led_control_s::COLOR_GREEN;
+			led_control.num_blinks = 1;
+			led_control.priority = 0;
+			led_control.timestamp = hrt_absolute_time();
+			_to_led_control.publish(led_control);
+
+			tune_control_s tune_control{};
+			tune_control.tune_id = tune_control_s::TUNE_ID_NOTIFY_POSITIVE;
+			tune_control.volume = tune_control_s::VOLUME_LEVEL_DEFAULT;
+			tune_control.timestamp = hrt_absolute_time();
+			_to_tune_control.publish(tune_control);
+
+			// reset state
+			_pairing_start = 0;
+			_pairing_button_counter = 0;
+		}
+	}
 }
 
 
@@ -88,17 +141,16 @@ int PX4_MAIN(int argc, char **argv)
 		 */
 	};
 
-	//set mode to position control
-	//send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
+
+	const bool safety_button_pressed = px4_arch_gpioread(GPIO_BTN_SAFETY);
+	printf("safety %d",safety_button_pressed);
 
 	int error_counter = 0;
 	bool activated = false;
 	bool armed = false;
 	while(true){
 		int poll_ret = px4_poll(fds, 3, 1000);
-		//printf("here5\n");
-		// throwExample throw;
-		// throw.main();
+
 		/* handle the poll result */
 		if (poll_ret == 0) {
 			/* this means none of our providers is giving us data */
@@ -122,11 +174,6 @@ int PX4_MAIN(int argc, char **argv)
 				struct vehicle_acceleration_s accel;
 				/* copy sensors raw data into local buffer */
 				orb_copy(ORB_ID(vehicle_acceleration), acc_sub_fd, &accel);
-				// PX4_INFO("Accelerometer:\t%8.4f\t%8.4f\t%8.4f",
-				// 	 (double)accel.xyz[0],
-				// 	 (double)accel.xyz[1],
-				// 	 (double)accel.xyz[2]);
-
 				if((double)accel.xyz[2] > -1.0 && !activated ){
 
 					//send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
@@ -136,83 +183,23 @@ int PX4_MAIN(int argc, char **argv)
 					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
 						     PX4_CUSTOM_SUB_MODE_AUTO_TAKEOFF);
 
-
-
-					// send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
-					// 	     PX4_CUSTOM_SUB_MODE_AUTO_MISSION);
-
-					// send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
-
-					// send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
-					// 	     PX4_CUSTOM_SUB_MODE_AUTO_LOITER);
-					// PX4_INFO("loiter");
-
-
 					//arm
 					activated = true;
 				}
-
-				// vehicle_status_s        _status{};
-				// safety_s		_safety{};
-				// actuator_armed_s        _armed{};
-				// vehicle_status_flags_s  _status_flags{};
-				// struct arm_requirements_t {
-				// 	bool arm_authorization = false;
-				// 	bool esc_check = false;
-				// 	bool global_position = false;
-				// 	bool mission = false;
-				// } _arm_requirements;
-				// hrt_abstime	_boot_timestamp{0};
-
-				// enum class arm_disarm_reason_t {
-				// 	TRANSITION_TO_STANDBY = 0,
-				// 	RC_STICK = 1,
-				// 	RC_SWITCH = 2,
-				// 	COMMAND_INTERNAL = 3,
-				// 	COMMAND_EXTERNAL = 4,
-				// 	MISSION_START = 5,
-				// 	SAFETY_BUTTON = 6,
-				// 	AUTO_DISARM_LAND = 7,
-				// 	AUTO_DISARM_PREFLIGHT = 8,
-				// 	KILL_SWITCH = 9,
-				// 	LOCKDOWN = 10,
-				// 	FAILURE_DETECTOR = 11,
-				// 	SHUTDOWN = 12,
-				// 	UNIT_TEST = 13
-				// };
-
-				// orb_advert_t _mavlink_log_pub{nullptr};
-				// arming_state_transition(&_status, _safety, vehicle_status_s::ARMING_STATE_STANDBY, &_armed,
-				// 		true /* fRunPreArmChecks */, &_mavlink_log_pub, &_status_flags,
-				// 		_arm_requirements, hrt_elapsed_time(&_boot_timestamp),
-				// 		arm_disarm_reason_t::TRANSITION_TO_STANDBY);
 
 			}
 			else if(fds[1].revents & POLLIN){
 				struct vehicle_control_mode_s control;
 				orb_copy(ORB_ID(vehicle_control_mode), control_sub_fd, &control);
-				if(control.flag_armed == true && activated){
-					//printf(("Armed: " + std::to_string(control.flag_armed) + "\n").c_str() );
-					// send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
-					// 	     PX4_CUSTOM_SUB_MODE_AUTO_TAKEOFF);
-					// PX4_INFO("...catching");
-				}
+				if(control.flag_armed == true && activated){}
 
 			}
 			else if(fds[2].revents & POLLIN){
-				//PX4_INFO("got something");
-
-				// //listen for safety switch
-				// struct vehicle_status_s vehicle_status_status;
-				// orb_copy(ORB_ID(vehicle_status), vehicle_status_sub_fd, &vehicle_status_status);
-				// PX4_INFO("%i",vehicle_status_status.arming_state);
 
 				struct safety_s safety_status;
 				orb_copy(ORB_ID(safety), safety_sub_fd, &safety_status);
 
 				if(safety_status.safety_off && !armed){
-
-				// if(vehicle_status_status.arming_state == 100){
 
 					//log
 					PX4_INFO("safety off");
