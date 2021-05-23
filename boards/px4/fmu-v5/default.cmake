@@ -51,7 +51,7 @@ px4_add_board(
 		rc_input
 		roboclaw
 		rpm
-		safety_button
+		#safety_button
 		telemetry # all available telemetry drivers
 		test_ppm
 		tone_alarm

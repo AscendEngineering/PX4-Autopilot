@@ -23,10 +23,11 @@
 #include <lib/parameters/param.h>
 #include <uORB/topics/led_control.h>
 #include <uORB/topics/tune_control.h>
-
+using namespace time_literals;
 
 // Pairing request
-hrt_abstime		_pairing_start{0};
+hrt_abstime		_button_start{0};
+hrt_abstime		_total_time{0};
 int			_pairing_button_counter{0};
 uORB::Publication<led_control_s> _to_led_control{ORB_ID(led_control)};
 uORB::Publication<tune_control_s> _to_tune_control{ORB_ID(tune_control)};
@@ -64,50 +65,33 @@ namespace {
 	}
 	#endif
 
-	void CheckPairingRequest(bool button_pressed){
-		// Need to press the button 3 times within 2 seconds
-		const hrt_abstime now = hrt_absolute_time();
+	bool CheckButton(){
+		const bool safety_button_pressed = px4_arch_gpioread(GPIO_BTN_SAFETY);
 
-		if (now - _pairing_start > 2_s) {
-			// reset state
-			_pairing_start = 0;
-			_pairing_button_counter = 0;
-		}
+		if(safety_button_pressed){
 
-		if (!_safety_btn_prev_sate && button_pressed) {
-			if (_pairing_start == 0) {
-				_pairing_start = now;
+			//add time if button pressed
+			if(_button_start==0){
+				_button_start = hrt_absolute_time();
+			}
+			else{
+				_total_time = (hrt_absolute_time() - _button_start);
 			}
 
-			++_pairing_button_counter;
+		}
+		else{
+			_button_start = 0;
+			_total_time = 0;
 		}
 
-		if (_pairing_button_counter == 3) {
-			// vehicle_command_s vcmd{};
-			// vcmd.command = vehicle_command_s::VEHICLE_CMD_START_RX_PAIR;
-			// vcmd.param1 = 10.f; // GCS pairing request handled by a companion.
-			// vcmd.timestamp = hrt_absolute_time();
-			// _to_command.publish(vcmd);
-			// PX4_DEBUG("Sending GCS pairing request");
-
-			led_control_s led_control{};
-			led_control.led_mask = 0xff;
-			led_control.mode = led_control_s::MODE_BLINK_FAST;
-			led_control.color = led_control_s::COLOR_GREEN;
-			led_control.num_blinks = 1;
-			led_control.priority = 0;
-			led_control.timestamp = hrt_absolute_time();
-			_to_led_control.publish(led_control);
-
-			tune_control_s tune_control{};
-			tune_control.tune_id = tune_control_s::TUNE_ID_NOTIFY_POSITIVE;
-			tune_control.volume = tune_control_s::VOLUME_LEVEL_DEFAULT;
-			tune_control.timestamp = hrt_absolute_time();
-			_to_tune_control.publish(tune_control);
-
-			// reset state
-			_pairing_start = 0;
-			_pairing_button_counter = 0;
+		//pressed for more than 3 seconds?
+		if(_total_time >= 3_s ){
+			_button_start = 0;
+			_total_time = 0;
+			return true;
+		}
+		else{
+			return false;
 		}
 	}
 }
@@ -142,9 +126,6 @@ int PX4_MAIN(int argc, char **argv)
 	};
 
 
-	const bool safety_button_pressed = px4_arch_gpioread(GPIO_BTN_SAFETY);
-	printf("safety %d",safety_button_pressed);
-
 	int error_counter = 0;
 	bool activated = false;
 	bool armed = false;
@@ -176,10 +157,9 @@ int PX4_MAIN(int argc, char **argv)
 				orb_copy(ORB_ID(vehicle_acceleration), acc_sub_fd, &accel);
 				if((double)accel.xyz[2] > -1.0 && !activated ){
 
-					//send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
 					PX4_INFO("taking off");
 
-					//this is the one
+					// //this is the one
 					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_AUTO,
 						     PX4_CUSTOM_SUB_MODE_AUTO_TAKEOFF);
 
@@ -201,13 +181,6 @@ int PX4_MAIN(int argc, char **argv)
 
 				if(safety_status.safety_off && !armed){
 
-					//log
-					PX4_INFO("safety off");
-
-					//force arm
-					PX4_INFO("arming...");
-					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.f, 21196.f);
-					armed = true;
 				}
 
 			}
@@ -215,6 +188,16 @@ int PX4_MAIN(int argc, char **argv)
 			/* there could be more file descriptors here, in the form like:
 			 * if (fds[1..n].revents & POLLIN) {}
 			 */
+		}
+
+
+		bool button_activated = CheckButton();
+		if(button_activated){
+			//force arm
+			PX4_INFO("arming...");
+			send_vehicle_command(vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.f, 21196.f);
+			armed = true;
+
 		}
 	}
 
