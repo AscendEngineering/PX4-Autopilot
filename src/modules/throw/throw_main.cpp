@@ -65,35 +65,7 @@ namespace {
 	}
 	#endif
 
-	bool CheckButton(){
-		const bool safety_button_pressed = px4_arch_gpioread(GPIO_BTN_SAFETY);
 
-		if(safety_button_pressed){
-
-			//add time if button pressed
-			if(_button_start==0){
-				_button_start = hrt_absolute_time();
-			}
-			else{
-				_total_time = (hrt_absolute_time() - _button_start);
-			}
-
-		}
-		else{
-			_button_start = 0;
-			_total_time = 0;
-		}
-
-		//pressed for more than 3 seconds?
-		if(_total_time >= 3_s ){
-			_button_start = 0;
-			_total_time = 0;
-			return true;
-		}
-		else{
-			return false;
-		}
-	}
 }
 
 
@@ -105,14 +77,11 @@ int PX4_MAIN(int argc, char **argv)
 	/* subscribe to vehicle_acceleration topic */
 	int acc_sub_fd = orb_subscribe(ORB_ID(vehicle_acceleration));
 	int control_sub_fd = orb_subscribe(ORB_ID(vehicle_control_mode));
-	int odom_sub_fd = orb_subscribe(ORB_ID(vehicle_odometry));
-	int vehicle_status_sub_fd = orb_subscribe(ORB_ID(vehicle_status));
 	int safety_sub_fd = orb_subscribe(ORB_ID(safety));
+
 	/* limit the update rate to 5 Hz */
 	orb_set_interval(acc_sub_fd, 5);
 	orb_set_interval(control_sub_fd, 5);
-	orb_set_interval(odom_sub_fd, 5);
-	orb_set_interval(vehicle_status_sub_fd, 5);
 	orb_set_interval(safety_sub_fd, 5);
 
 	px4_pollfd_struct_t fds[] = {
@@ -129,7 +98,7 @@ int PX4_MAIN(int argc, char **argv)
 	int error_counter = 0;
 	bool activated = false;
 	bool armed = false;
-	while(true){
+	while(!activated){
 		int poll_ret = px4_poll(fds, 3, 1000);
 
 		/* handle the poll result */
@@ -155,7 +124,7 @@ int PX4_MAIN(int argc, char **argv)
 				struct vehicle_acceleration_s accel;
 				/* copy sensors raw data into local buffer */
 				orb_copy(ORB_ID(vehicle_acceleration), acc_sub_fd, &accel);
-				if((double)accel.xyz[2] > -1.0 && !activated ){
+				if((double)accel.xyz[2] > -1.0 && armed && !activated ){
 
 					PX4_INFO("taking off");
 
@@ -171,7 +140,9 @@ int PX4_MAIN(int argc, char **argv)
 			else if(fds[1].revents & POLLIN){
 				struct vehicle_control_mode_s control;
 				orb_copy(ORB_ID(vehicle_control_mode), control_sub_fd, &control);
-				if(control.flag_armed == true && activated){}
+				if(!control.flag_armed){
+					armed = false;
+				}
 
 			}
 			else if(fds[2].revents & POLLIN){
@@ -179,28 +150,18 @@ int PX4_MAIN(int argc, char **argv)
 				struct safety_s safety_status;
 				orb_copy(ORB_ID(safety), safety_sub_fd, &safety_status);
 
-				if(safety_status.safety_off && !armed){
-
+				if(safety_status.override_enabled && !armed){
+					PX4_INFO("arming...");
+					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.f, 21196.f);
+					armed = true;
 				}
 
 			}
 
-			/* there could be more file descriptors here, in the form like:
-			 * if (fds[1..n].revents & POLLIN) {}
-			 */
 		}
 
-
-		bool button_activated = CheckButton();
-		if(button_activated){
-			//force arm
-			PX4_INFO("arming...");
-			send_vehicle_command(vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.f, 21196.f);
-			armed = true;
-
-		}
 	}
 
-	printf("goodbye\n");
+	printf("throw has finished...goodbye\n");
 	return 0;
 }

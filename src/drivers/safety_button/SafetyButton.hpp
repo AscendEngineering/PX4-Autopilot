@@ -90,6 +90,7 @@ private:
 	bool				_safety_disabled{false};	///< circuit breaker to disable the safety button
 	bool				_safety_btn_off{false};		///< State of the safety button read from the HW button
 	bool				_safety_btn_prev_sate{false};	///< Previous state of the HW button
+	bool				_arm_btn{false};
 
 	// Pairing request
 	hrt_abstime		_pairing_start{0};

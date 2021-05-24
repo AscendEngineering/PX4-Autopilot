@@ -56,6 +56,7 @@ px4_add_board(
 		sensors
 		#sih
 		simulator
+		throw
 		temperature_compensation
 		uuv_att_control
 		uuv_pos_control
@@ -92,7 +93,7 @@ px4_add_board(
 		fake_magnetometer
 		fixedwing_control # Tutorial code from https://px4.io/dev/example_fixedwing_control
 		hello
-		throw
+		#throw
 		#hwtest # Hardware test
 		#matlab_csv_serial
 		px4_mavlink_debug # Tutorial code from http://dev.px4.io/en/debug/debug_values.html

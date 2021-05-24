@@ -76,7 +76,7 @@ SafetyButton::CheckButton()
 	 * Note that safety cannot be turned on again by button because a button
 	 * hardware problem could accidentally disable it in flight.
 	 */
-	if (safety_button_pressed && !_safety_btn_off) {
+	if (safety_button_pressed ) {
 
 		if (_button_counter <= CYCLE_COUNT) {
 			_button_counter++;
@@ -85,6 +85,7 @@ SafetyButton::CheckButton()
 		if (_button_counter == CYCLE_COUNT) {
 			// switch safety off -> ready to arm state
 			_safety_btn_off = true;
+			_arm_btn = true;
 		}
 
 	} else {
@@ -193,21 +194,22 @@ SafetyButton::Run()
 	CheckButton();
 
 	// control safety switch LED & publish safety topic
-	if (!PX4_MFT_HW_SUPPORTED(PX4_MFT_PX4IO)) {
-		FlashButton();
+	FlashButton();
 
-		const bool safety_off = _safety_btn_off || _safety_disabled;
+	const bool safety_off = _safety_btn_off || _safety_disabled;
 
-		// publish immediately on change, otherwise at 1 Hz
-		if ((hrt_elapsed_time(&_safety.timestamp) >= 1_s)
-		    || (_safety.safety_off != safety_off)) {
+	// publish immediately on change, otherwise at 1 Hz
+	if ((hrt_elapsed_time(&_safety.timestamp) >= 1_s)
+		|| (_safety.safety_off != safety_off)) {
 
-			_safety.safety_switch_available = true;
-			_safety.safety_off = safety_off;
-			_safety.timestamp = hrt_absolute_time();
+		_safety.safety_switch_available = true;
+		_safety.safety_off = safety_off;
+		_safety.timestamp = hrt_absolute_time();
 
-			_to_safety.publish(_safety);
-		}
+		_safety.override_enabled = _arm_btn;
+		_arm_btn = false;
+
+		_to_safety.publish(_safety);
 	}
 }
 

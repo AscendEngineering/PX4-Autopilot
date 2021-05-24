@@ -51,7 +51,7 @@ px4_add_board(
 		rc_input
 		roboclaw
 		rpm
-		#safety_button
+		safety_button
 		telemetry # all available telemetry drivers
 		test_ppm
 		tone_alarm
@@ -88,6 +88,7 @@ px4_add_board(
 		sensors
 		sih
 		temperature_compensation
+		throw
 		uuv_att_control
 		uuv_pos_control
 		vmount
@@ -128,7 +129,6 @@ px4_add_board(
 		fake_magnetometer
 		fixedwing_control # Tutorial code from https://px4.io/dev/example_fixedwing_control
 		hello
-		throw
 		hwtest # Hardware test
 		#matlab_csv_serial
 		px4_mavlink_debug # Tutorial code from http://dev.px4.io/en/debug/debug_values.html
