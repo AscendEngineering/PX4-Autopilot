@@ -186,6 +186,7 @@ set(worlds
 	warehouse
 	windy
 	yosemite
+	horsefly
 )
 
 set(all_posix_vmd_make_targets)
