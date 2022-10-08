@@ -1043,6 +1043,16 @@ void Navigator::set_cruising_speed(float speed)
 	}
 }
 
+void Navigator::set_vertical_speed(float speed)
+{
+	if (_vstatus.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING) {
+		_mission_vertical_speed_mc = speed;
+
+	}
+
+	//fixed wing?
+}
+
 void Navigator::reset_cruising_speed()
 {
 	_mission_cruising_speed_mc = -1.0f;

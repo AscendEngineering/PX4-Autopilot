@@ -215,6 +215,13 @@ public:
 	float get_cruising_speed();
 
 	/**
+	 * Get the vertical speed
+	 *
+	 * @return the desired vertical speed for this mission
+	 */
+	float get_vertical_speed();
+
+	/**
 	 * Set the cruising speed
 	 *
 	 * Passing a negative value or leaving the parameter away will reset the cruising speed
@@ -226,10 +233,20 @@ public:
 	void set_cruising_speed(float speed = -1.0f);
 
 	/**
+	 * Set the vertical speed
+	 *
+	 * Passing a negative value or leaving the parameter away will reset the vertical speed
+	 * to its default value.
+	 *
+	 */
+	void set_vertical_speed(float speed = -1.0f);
+
+	/**
 	 * Reset cruising speed to default values
 	 *
 	 * For VTOL: resets both cruising speeds.
 	 */
+
 	void reset_cruising_speed();
 
 	/**
@@ -409,6 +426,7 @@ private:
 
 	float _mission_cruising_speed_mc{-1.0f};
 	float _mission_cruising_speed_fw{-1.0f};
+	float _mission_vertical_speed_mc{-1.0f};
 	float _mission_throttle{NAN};
 
 	bool _mission_landing_in_progress{false};	/**< this flag gets set if the mission is currently executing on a landing pattern
