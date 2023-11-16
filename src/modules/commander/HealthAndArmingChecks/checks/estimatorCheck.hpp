@@ -102,6 +102,7 @@ private:
 	bool _position_reliant_on_optical_flow{false};
 
 	bool _gps_was_fused{false};
+	bool _ev_was_fused{false};
 
 	bool _nav_failure_imminent_warned{false};
 
