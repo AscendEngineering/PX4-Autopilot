@@ -104,7 +104,7 @@ depends on MODULES_MAVLINK
 
 menuconfig MAVLINK_DISTANCE_SENSOR
 depends on MODULES_MAVLINK
-	bool "Enable stream"
+	bool "distance sensor"
 	default n
 
 menuconfig MAVLINK_EFI_STATUS
@@ -164,12 +164,12 @@ depends on MODULES_MAVLINK
 
 menuconfig MAVLINK_HEARTBEAT
 depends on MODULES_MAVLINK
-	bool "Enable stream"
+	bool "heartbeat"
 	default n
 
 menuconfig MAVLINK_HIGHRES_IMU
 depends on MODULES_MAVLINK
-	bool "Enable stream"
+	bool "highres imu"
 	default n
 
 menuconfig MAVLINK_HIL_ACTUATOR_CONTROLS
@@ -244,7 +244,7 @@ depends on MODULES_MAVLINK
 
 menuconfig MAVLINK_OPTICAL_FLOW_RAD
 depends on MODULES_MAVLINK
-	bool "Enable stream"
+	bool "optical flow rad"
 	default n
 
 menuconfig MAVLINK_ORBIT_EXECUTION_STATUS
@@ -319,7 +319,7 @@ depends on MODULES_MAVLINK
 
 menuconfig MAVLINK_SYS_STATUS
 depends on MODULES_MAVLINK
-	bool "Enable stream"
+	bool "sys status"
 	default n
 
 menuconfig MAVLINK_SYSTEM_TIME
@@ -334,7 +334,7 @@ depends on MODULES_MAVLINK
 
 menuconfig MAVLINK_TIMESYNC
 depends on MODULES_MAVLINK
-	bool "Enable stream"
+	bool "timesync"
 	default n
 
 menuconfig MAVLINK_TRAJECTORY_REPRESENTATION_WAYPOINTS
@@ -369,7 +369,7 @@ depends on MODULES_MAVLINK
 
 menuconfig MAVLINK_CURRENT_MODE
 depends on MODULES_MAVLINK
-	bool "Enable stream"
+	bool "current mode"
 	default n
 
 menuconfig MAVLINK_ADSB_VEHICLE
@@ -389,7 +389,7 @@ depends on MODULES_MAVLINK
 
 menuconfig MAVLINK_DEBUG
 depends on MODULES_MAVLINK
-	bool "Enable stream"
+	bool "debug"
 	default n
 
 menuconfig MAVLINK_DEBUG_FLOAT_ARRAY
