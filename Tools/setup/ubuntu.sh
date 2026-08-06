@@ -66,6 +66,8 @@ elif [[ "${UBUNTU_RELEASE}" == "20.04" ]]; then
 	echo "Ubuntu 20.04"
 elif [[ "${UBUNTU_RELEASE}" == "22.04" ]]; then
 	echo "Ubuntu 22.04"
+elif [[ "${UBUNTU_RELEASE}" == "24.04" ]]; then
+	echo "Ubuntu 24.04"
 fi
 
 
@@ -135,9 +137,6 @@ if [[ $INSTALL_NUTTX == "true" ]]; then
 		libisl-dev \
 		libmpc-dev \
 		libmpfr-dev \
-		libncurses5 \
-		libncurses5-dev \
-		libncursesw5-dev \
 		libtool \
 		pkg-config \
 		screen \
@@ -149,6 +148,16 @@ if [[ $INSTALL_NUTTX == "true" ]]; then
 	if [[ "${UBUNTU_RELEASE}" == "20.04" || "${UBUNTU_RELEASE}" == "22.04" ]]; then
 		sudo DEBIAN_FRONTEND=noninteractive apt-get -y --quiet --no-install-recommends install \
 		kconfig-frontends \
+		libncurses5 \
+		libncurses5-dev \
+		libncursesw5-dev \
+		;
+	fi
+
+	# Ubuntu 24.04 uses ncurses6 instead of ncurses5
+	if [[ "${UBUNTU_RELEASE}" == "24.04" ]]; then
+		sudo DEBIAN_FRONTEND=noninteractive apt-get -y --quiet --no-install-recommends install \
+		libncurses-dev \
 		;
 	fi
 
@@ -205,6 +214,8 @@ if [[ $INSTALL_SIM == "true" ]]; then
 		java_version=13
 	elif [[ "${UBUNTU_RELEASE}" == "22.04" ]]; then
 		java_version=11
+	elif [[ "${UBUNTU_RELEASE}" == "24.04" ]]; then
+		java_version=17
 	else
 		java_version=14
 	fi
@@ -230,6 +241,15 @@ if [[ $INSTALL_SIM == "true" ]]; then
 
 		# Install Gazebo
 		gazebo_packages="gz-garden"
+	elif [[ "${UBUNTU_RELEASE}" == "24.04" ]]; then
+		echo "Gazebo (Harmonic) will be installed"
+		# Add Gazebo binary repository
+		sudo wget https://packages.osrfoundation.org/gazebo.gpg -O /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
+		echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/gazebo-stable.list > /dev/null
+		sudo apt-get update -y --quiet
+
+		# Install Gazebo Harmonic
+		gazebo_packages="gz-harmonic"
 	else
 		sudo sh -c 'echo "deb http://packages.osrfoundation.org/gazebo/ubuntu-stable `lsb_release -cs` main" > /etc/apt/sources.list.d/gazebo-stable.list'
 		wget http://packages.osrfoundation.org/gazebo.key -O - | sudo apt-key add -
