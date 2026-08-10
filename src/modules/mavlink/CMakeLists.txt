@@ -97,6 +97,17 @@ target_include_directories(mavlink_c
 		${MAVLINK_LIBRARY_DIR}/${MAVLINK_DIALECT_UAVIONIX}
 )
 
+# Build optional source file list
+set(MAVLINK_OPTIONAL_SRCS)
+
+if(CONFIG_MAVLINK_MISSION)
+	list(APPEND MAVLINK_OPTIONAL_SRCS mavlink_mission.cpp)
+endif()
+
+if(CONFIG_MAVLINK_FTP)
+	list(APPEND MAVLINK_OPTIONAL_SRCS mavlink_ftp.cpp)
+endif()
+
 px4_add_module(
 	MODULE modules__mavlink
 	MAIN mavlink
@@ -107,11 +118,9 @@ px4_add_module(
 		mavlink.c
 		mavlink_command_sender.cpp
 		mavlink_events.cpp
-		mavlink_ftp.cpp
 		mavlink_log_handler.cpp
 		mavlink_main.cpp
 		mavlink_messages.cpp
-		mavlink_mission.cpp
 		mavlink_parameters.cpp
 		mavlink_rate_limiter.cpp
 		mavlink_receiver.cpp
@@ -124,6 +133,7 @@ px4_add_module(
 		MavlinkStatustextHandler.cpp
 		open_drone_id_translations.cpp
 		tune_publisher.cpp
+		${MAVLINK_OPTIONAL_SRCS}
 	MODULE_CONFIG
 		module.yaml
 		mavlink_params.yaml

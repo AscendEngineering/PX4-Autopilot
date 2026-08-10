@@ -1,0 +1,39 @@
+CONFIG_BOARD_SERIAL_TEL1="/dev/ttyS0"
+
+# Enable UAVCAN node driver (provides AppDescriptor for CAN bootloader)
+CONFIG_BOARD_UAVCAN_INTERFACES=1
+CONFIG_DRIVERS_UAVCANNODE=y
+CONFIG_UAVCANNODE_FLOW_MEASUREMENT=y
+CONFIG_UAVCANNODE_RANGE_SENSOR_MEASUREMENT=y
+# CONFIG_UAVCANNODE_RAW_IMU is not set
+
+# Bootloaders for CAN firmware updates
+CONFIG_DRIVERS_BOOTLOADERS=y
+
+# Disable unnecessary system commands to save flash
+# CONFIG_SYSTEMCMDS_TOP is not set
+# CONFIG_SYSTEMCMDS_PERF is not set
+# CONFIG_SYSTEMCMDS_WORK_QUEUE is not set
+# CONFIG_SYSTEMCMDS_TOPIC_LISTENER is not set
+
+# Only need ONE IMU driver - keep ICM42688P, disable others
+# CONFIG_DRIVERS_IMU_BOSCH_BMI088 is not set
+# CONFIG_DRIVERS_IMU_INVENSENSE_IIM42652 is not set
+
+# Only need ONE flow sensor - keep PAW3902
+# CONFIG_DRIVERS_OPTICAL_FLOW_PAA3905 is not set
+
+# Disable gyro calibration module (save space)
+# CONFIG_MODULES_GYRO_CALIBRATION is not set
+
+# MAVLink config - minimal streams only
+CONFIG_MAVLINK_DISTANCE_SENSOR=y
+CONFIG_MAVLINK_HEARTBEAT=y
+# CONFIG_MAVLINK_HIGHRES_IMU is not set
+CONFIG_MAVLINK_MINIMAL=y
+CONFIG_MAVLINK_MSG_SELECT=y
+CONFIG_MAVLINK_OPTICAL_FLOW_RAD=y
+CONFIG_MODULES_MAVLINK=y
+# Disable mission/FTP to save flash (not needed for flow sensor)
+CONFIG_MAVLINK_MISSION=n
+CONFIG_MAVLINK_FTP=n

@@ -115,9 +115,13 @@ static constexpr vehicle_odometry_s vehicle_odometry_empty {
 MavlinkReceiver::MavlinkReceiver(Mavlink &parent) :
 	ModuleParams(nullptr),
 	_mavlink(parent),
+#if defined(CONFIG_MAVLINK_FTP)
 	_mavlink_ftp(parent),
+#endif
 	_mavlink_log_handler(parent),
+#if defined(CONFIG_MAVLINK_MISSION)
 	_mission_manager(parent),
+#endif
 	_parameters_manager(parent),
 	_mavlink_timesync(parent)
 {
@@ -425,8 +429,10 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 
 	}
 
+#if defined(CONFIG_MAVLINK_MISSION)
 	/* handle packet with mission manager */
 	_mission_manager.handle_message(msg);
+#endif
 
 	/* handle packet with parameter component */
 	if (_mavlink.boot_complete()) {
@@ -440,10 +446,12 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 		}
 	}
 
+#if defined(CONFIG_MAVLINK_FTP)
 	if (_mavlink.ftp_enabled()) {
 		/* handle packet with ftp component */
 		_mavlink_ftp.handle_message(msg);
 	}
+#endif
 
 	/* handle packet with log component */
 	_mavlink_log_handler.handle_message(msg);
@@ -3910,18 +3918,24 @@ MavlinkReceiver::run()
 		CheckHeartbeats(t);
 
 		if (t - last_send_update > timeout * 1000) {
+#if defined(CONFIG_MAVLINK_MISSION)
 			_mission_manager.check_active_mission();
+#endif
 			_mavlink.lock_send();
+#if defined(CONFIG_MAVLINK_MISSION)
 			_mission_manager.send();
+#endif
 
 			if (_mavlink.get_mode() != Mavlink::MAVLINK_MODE::MAVLINK_MODE_IRIDIUM) {
 				_parameters_manager.send();
 				_mavlink.set_sending_parameters(_parameters_manager.send_active());
 			}
 
+#if defined(CONFIG_MAVLINK_FTP)
 			if (_mavlink.ftp_enabled()) {
 				_mavlink_ftp.send();
 			}
+#endif
 
 			_mavlink_log_handler.send();
 			_mavlink.unlock_send();

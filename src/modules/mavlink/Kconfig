@@ -4,17 +4,27 @@ menuconfig MODULES_MAVLINK
 	---help---
 		Enable support for mavlink
 
+menuconfig MAVLINK_MINIMAL
+depends on MODULES_MAVLINK
+	bool "Minimal MAVLink streams (flow sensor only)"
+	default n
+	---help---
+		When enabled, only compile essential streams for flow sensors:
+		HEARTBEAT, OPTICAL_FLOW_RAD, DISTANCE_SENSOR, STATUSTEXT.
+		Use this for constrained flash devices like ARK Flow.
+		Saves ~100KB of flash compared to full MAVLink.
+
 menuconfig MAVLINK_DIALECT
 depends on MODULES_MAVLINK
-        string "Mavlink dialect"
-        default "common"
+	string "Mavlink dialect"
+	default "common"
 	---help---
 		Select the Mavlink dialect to generate and use.
 
 menuconfig MAVLINK_UAVCAN_PARAMETERS
 depends on MODULES_MAVLINK && DRIVERS_UAVCAN
-        bool "Mavlink UAVCAN parameter support"
-        default y
+	bool "Mavlink UAVCAN parameter support"
+	default y
 	---help---
 		Expose UAVCAN parameters over Mavlink.
 
@@ -24,3 +34,19 @@ menuconfig USER_MAVLINK
 	depends on BOARD_PROTECTED && MODULES_MAVLINK
 	---help---
 		Put mavlink in userspace memory
+
+menuconfig MAVLINK_MISSION
+depends on MODULES_MAVLINK
+	bool "Mavlink mission protocol support"
+	default y
+	---help---
+		Enable mission upload/download protocol. Disable to save flash on
+		constrained devices that don't need waypoint missions.
+
+menuconfig MAVLINK_FTP
+depends on MODULES_MAVLINK
+	bool "Mavlink FTP protocol support"
+	default y
+	---help---
+		Enable MAVLink FTP file transfer protocol. Disable to save flash on
+		constrained devices.

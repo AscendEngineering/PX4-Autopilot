@@ -56,6 +56,15 @@
 #include <uORB/SubscriptionMultiArray.hpp>
 #include <uORB/topics/vehicle_status.h>
 
+// === Minimal streams (always included) ===
+#include "streams/HEARTBEAT.hpp"
+#include "streams/STATUSTEXT.hpp"
+#include "streams/OPTICAL_FLOW_RAD.hpp"
+#include "streams/DISTANCE_SENSOR.hpp"
+
+// === Full MAVLink streams (excluded when CONFIG_MAVLINK_MINIMAL is set) ===
+#ifndef CONFIG_MAVLINK_MINIMAL
+
 #include "streams/ACTUATOR_OUTPUT_STATUS.hpp"
 #include "streams/ALTITUDE.hpp"
 #include "streams/ATTITUDE.hpp"
@@ -68,11 +77,7 @@
 #include "streams/COMMAND_LONG.hpp"
 #include "streams/COMPONENT_INFORMATION.hpp"
 #include "streams/COMPONENT_METADATA.hpp"
-#include "streams/DISTANCE_SENSOR.hpp"
 #include "streams/EFI_STATUS.hpp"
-#if defined(MAVLINK_MSG_ID_ESTIMATOR_SENSOR_FUSION_STATUS)
-#include "streams/ESTIMATOR_SENSOR_FUSION_STATUS.hpp"
-#endif
 #include "streams/ESC_INFO.hpp"
 #include "streams/ESC_STATUS.hpp"
 #include "streams/ESTIMATOR_STATUS.hpp"
@@ -80,13 +85,9 @@
 #include "streams/FLIGHT_INFORMATION.hpp"
 #include "streams/GLOBAL_POSITION_SENSOR.hpp"
 #include "streams/GLOBAL_POSITION_INT.hpp"
-#if defined(MAVLINK_MSG_ID_GNSS_INTEGRITY)
-#include "streams/GNSS_INTEGRITY.hpp"
-#endif
 #include "streams/GPS_GLOBAL_ORIGIN.hpp"
 #include "streams/GPS_RAW_INT.hpp"
 #include "streams/GPS_STATUS.hpp"
-#include "streams/HEARTBEAT.hpp"
 #include "streams/HIGHRES_IMU.hpp"
 #include "streams/HIL_ACTUATOR_CONTROLS.hpp"
 #include "streams/HIL_STATE_QUATERNION.hpp"
@@ -102,8 +103,6 @@
 #include "streams/OPEN_DRONE_ID_BASIC_ID.hpp"
 #include "streams/OPEN_DRONE_ID_LOCATION.hpp"
 #include "streams/OPEN_DRONE_ID_SYSTEM.hpp"
-#include "streams/OPEN_DRONE_ID_ARM_STATUS.hpp"
-#include "streams/OPTICAL_FLOW_RAD.hpp"
 #include "streams/ORBIT_EXECUTION_STATUS.hpp"
 #include "streams/PING.hpp"
 #include "streams/POSITION_TARGET_GLOBAL_INT.hpp"
@@ -116,7 +115,6 @@
 #include "streams/SCALED_IMU3.hpp"
 #include "streams/SCALED_PRESSURE.hpp"
 #include "streams/SERVO_OUTPUT_RAW.hpp"
-#include "streams/STATUSTEXT.hpp"
 #include "streams/STORAGE_INFORMATION.hpp"
 #include "streams/SYS_STATUS.hpp"
 #include "streams/SYSTEM_TIME.hpp"
@@ -125,44 +123,56 @@
 #include "streams/VFR_HUD.hpp"
 #include "streams/VIBRATION.hpp"
 #include "streams/WIND_COV.hpp"
-#if defined(MAVLINK_MSG_ID_FIGURE_EIGHT_EXECUTION_STATUS)
-#include "streams/FIGURE_EIGHT_EXECUTION_STATUS.hpp"
-#endif // MAVLINK_MSG_ID_FIGURE_EIGHT_EXECUTION_STATUS
-#if defined(MAVLINK_MSG_ID_FUEL_STATUS)
-#include "streams/FUEL_STATUS.hpp"
-#endif // MAVLINK_MSG_ID_FUEL_STATUS
 
-#ifdef MAVLINK_MSG_ID_AVAILABLE_MODES // Only defined if development.xml is used
+// Streams that require specific MAVLink message IDs (development.xml)
+#ifdef MAVLINK_MSG_ID_ESTIMATOR_SENSOR_FUSION_STATUS
+#include "streams/ESTIMATOR_SENSOR_FUSION_STATUS.hpp"
+#endif
+#ifdef MAVLINK_MSG_ID_GNSS_INTEGRITY
+#include "streams/GNSS_INTEGRITY.hpp"
+#endif
+#ifdef MAVLINK_MSG_ID_FIGURE_EIGHT_EXECUTION_STATUS
+#include "streams/FIGURE_EIGHT_EXECUTION_STATUS.hpp"
+#endif
+#ifdef MAVLINK_MSG_ID_FUEL_STATUS
+#include "streams/FUEL_STATUS.hpp"
+#endif
+#ifdef MAVLINK_MSG_ID_AVAILABLE_MODES
 #include "streams/AVAILABLE_MODES.hpp"
 #include "streams/CURRENT_MODE.hpp"
 #endif
-
-#ifdef MAVLINK_MSG_ID_ESC_EEPROM // Only defined if development.xml is used
+#ifdef MAVLINK_MSG_ID_ESC_EEPROM
 #include "streams/ESC_EEPROM.hpp"
 #endif
 
+// Open Drone ID ARM Status
+#include "streams/OPEN_DRONE_ID_ARM_STATUS.hpp"
+
+// Non-constrained flash only (gimbal, debug, etc.)
 #if !defined(CONSTRAINED_FLASH)
-# include "streams/ADSB_VEHICLE.hpp"
-# include "streams/AUTOPILOT_STATE_FOR_GIMBAL_DEVICE.hpp"
-# include "streams/BATTERY_INFO.hpp"
-# include "streams/DEBUG.hpp"
-# include "streams/DEBUG_FLOAT_ARRAY.hpp"
-# include "streams/DEBUG_VECT.hpp"
-# include "streams/GIMBAL_DEVICE_ATTITUDE_STATUS.hpp"
-# include "streams/GIMBAL_DEVICE_SET_ATTITUDE.hpp"
-# include "streams/GIMBAL_MANAGER_INFORMATION.hpp"
-# include "streams/GIMBAL_MANAGER_STATUS.hpp"
-# include "streams/GIMBAL_DEVICE_INFORMATION.hpp"
-# include "streams/GPS2_RAW.hpp"
-# include "streams/HIGH_LATENCY2.hpp"
-# include "streams/LINK_NODE_STATUS.hpp"
-# include "streams/NAMED_VALUE_FLOAT.hpp"
-# include "streams/ODOMETRY.hpp"
-# include "streams/SCALED_PRESSURE2.hpp"
-# include "streams/SCALED_PRESSURE3.hpp"
-# include "streams/UAVIONIX_ADSB_OUT_CFG.hpp"
-# include "streams/UAVIONIX_ADSB_OUT_DYNAMIC.hpp"
+#include "streams/ADSB_VEHICLE.hpp"
+#include "streams/AUTOPILOT_STATE_FOR_GIMBAL_DEVICE.hpp"
+#include "streams/BATTERY_INFO.hpp"
+#include "streams/DEBUG.hpp"
+#include "streams/DEBUG_FLOAT_ARRAY.hpp"
+#include "streams/DEBUG_VECT.hpp"
+#include "streams/GIMBAL_DEVICE_ATTITUDE_STATUS.hpp"
+#include "streams/GIMBAL_DEVICE_SET_ATTITUDE.hpp"
+#include "streams/GIMBAL_MANAGER_INFORMATION.hpp"
+#include "streams/GIMBAL_MANAGER_STATUS.hpp"
+#include "streams/GIMBAL_DEVICE_INFORMATION.hpp"
+#include "streams/GPS2_RAW.hpp"
+#include "streams/HIGH_LATENCY2.hpp"
+#include "streams/LINK_NODE_STATUS.hpp"
+#include "streams/NAMED_VALUE_FLOAT.hpp"
+#include "streams/ODOMETRY.hpp"
+#include "streams/SCALED_PRESSURE2.hpp"
+#include "streams/SCALED_PRESSURE3.hpp"
+#include "streams/UAVIONIX_ADSB_OUT_CFG.hpp"
+#include "streams/UAVIONIX_ADSB_OUT_DYNAMIC.hpp"
 #endif // !CONSTRAINED_FLASH
+
+#endif // !CONFIG_MAVLINK_MINIMAL
 
 // ensure PX4 rotation enum and MAV_SENSOR_ROTATION align
 static_assert(MAV_SENSOR_ROTATION_NONE == static_cast<MAV_SENSOR_ORIENTATION>(ROTATION_NONE),
@@ -269,7 +279,9 @@ static const StreamListItem streams_list[] = {
 #if defined(SYS_STATUS_HPP)
 	create_stream_list_item<MavlinkStreamSysStatus>(),
 #endif // SYS_STATUS_HPP
+#if defined(BATTERY_STATUS_HPP)
 	create_stream_list_item<MavlinkStreamBatteryStatus>(),
+#endif // BATTERY_STATUS_HPP
 #if defined(BATTERY_INFO_HPP)
 	create_stream_list_item<MavlinkStreamBatteryInfo>(),
 #endif // BATTERY_INFO_HPP
