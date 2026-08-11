@@ -6,6 +6,8 @@
 param set-default IMU_GYRO_RATEMAX 1000
 param set-default SENS_FLOW_RATE 150
 param set-default SENS_IMU_CLPNOTI 0
+# Force MAVLink v2 to enable extension fields (signal_quality)
+param set-default MAV_PROTO_VER 2
 
 param set-default SENS_AFBR_S_RATE 25
 param set-default SENS_AFBR_L_RATE 5
@@ -17,3 +19,4 @@ paa3905 -s start -Y 180
 iim42653 -R 0 -s start
 
 afbrs50 start
+mavlink start -d /dev/ttyS0 -m config -b 115200
