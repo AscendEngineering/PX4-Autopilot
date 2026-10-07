@@ -56,3 +56,8 @@ jobs:
 
     - name: Test submodule check
       run: python3 -m unittest discover -s Tools -p 'test_check_submodules.py' -v
+
+    - name: Test Raspberry Pi platform layer (RP2040 and RP2350)
+      run: |
+        git submodule update --init --depth 1 platforms/nuttx/NuttX/nuttx
+        python3 -m unittest -v platforms/nuttx/src/px4/rpi/rpi_common/tests/test_platform.py

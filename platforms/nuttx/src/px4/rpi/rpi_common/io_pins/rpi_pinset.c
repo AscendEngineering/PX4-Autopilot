@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2021 PX4 Development Team. All rights reserved.
+ *   Copyright (C) 2026 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,48 +32,56 @@
  ****************************************************************************/
 
 /**
- * @file board_mcu_version.c
- * Implementation of RP2040/RP2350 based SoC version API
+ * @file rpi_pinset.c
+ *
+ * GPIO pinset configuration for RP2040/RP2350 via the rpi_gpio_* aliases.
  */
 
 #include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/defines.h>
+#include <systemlib/px4_macros.h>
 
-// SYSINFO CHIP_ID identifies the chip and its silicon revision (the ARM CPUID
-// register would only identify the core). Layout, same on both chips:
-//   MANUFACTURER [11:0] = 0x927   PART [27:12] = RPI_CHIP_ID_PART   REVISION [31:28]
-#define CHIP_ID				getreg32(RPI_SYSINFO_BASE + 0x0)
-#define CHIP_ID_MANUFACTURER_MASK	0x00000fff
-#define CHIP_ID_MANUFACTURER_RPI	0x927
-#define CHIP_ID_PART_SHIFT		12
-#define CHIP_ID_PART_MASK		0xffff
-#define CHIP_ID_REVISION_SHIFT		28
-#define CHIP_ID_REVISION_MASK		0xf
+#include <arch/board/board.h>
 
-int board_mcu_version(char *rev, const char **revstr, const char **errata)
+#include <px4_arch/micro_hal.h>
+#include <errno.h>
+
+int rpi_gpioconfig(uint32_t pinset)
 {
-	const uint32_t chip_id = CHIP_ID;
-	const int revision = (chip_id >> CHIP_ID_REVISION_SHIFT) & CHIP_ID_REVISION_MASK;
-
-	if ((chip_id & CHIP_ID_MANUFACTURER_MASK) != CHIP_ID_MANUFACTURER_RPI ||
-	    ((chip_id >> CHIP_ID_PART_SHIFT) & CHIP_ID_PART_MASK) != RPI_CHIP_ID_PART) {
-		return -1;
+	if ((pinset & GPIO_NUM_MASK) >= RPI_GPIO_NUM) {
+		return -EINVAL;
 	}
 
-	if (revstr) {
-		*revstr = RPI_CHIP_NAME;
+	rpi_gpio_set_pulls(pinset & GPIO_NUM_MASK, pinset & GPIO_PU_MASK, pinset & GPIO_PD_MASK);
+
+	if ((pinset & GPIO_FUN_MASK) >> GPIO_FUN_SHIFT == RPI_GPIO_FUNC_SIO) {
+		// Set the level before enabling the output so the pin never glitches to the wrong state
+		rpi_gpio_put(pinset & GPIO_NUM_MASK, pinset & GPIO_SET_MASK);
+		rpi_gpio_setdir(pinset & GPIO_NUM_MASK, pinset & GPIO_OUT_MASK);
 	}
 
-	if (rev) {
-		// Raw silicon revision number as the chip reports it (RP2040: 1 = B0/B1, 2 = B2)
-		*rev = revision < 10 ? '0' + revision : '?';
+	rpi_gpio_set_function(pinset & GPIO_NUM_MASK, (pinset & GPIO_FUN_MASK) >> GPIO_FUN_SHIFT);
+
+	return OK;
+}
+
+// Be careful when using this function. Current nuttx implementation allows for only one type of interrupt
+// (out of four types rising, falling, level high, level low) to be active at a time.
+int rpi_setgpioevent(uint32_t pinset, bool risingedge, bool fallingedge, bool event, xcpt_t func, void *arg)
+{
+	int ret = -ENOSYS;
+
+	if (fallingedge & event & (func != NULL)) {
+		ret = rpi_gpio_irq_attach(pinset & GPIO_NUM_MASK, RPI_GPIO_INTR_EDGE_LOW, func, arg);
+		rpi_gpio_enable_irq(pinset & GPIO_NUM_MASK);
+
+	} else if (risingedge & event & (func != NULL)) {
+		ret = rpi_gpio_irq_attach(pinset & GPIO_NUM_MASK, RPI_GPIO_INTR_EDGE_HIGH, func, arg);
+		rpi_gpio_enable_irq(pinset & GPIO_NUM_MASK);
+
+	} else {
+		rpi_gpio_disable_irq(pinset & GPIO_NUM_MASK);
+		ret = rpi_gpio_irq_attach(pinset & GPIO_NUM_MASK, RPI_GPIO_INTR_EDGE_LOW, NULL, NULL);
 	}
 
-	if (errata) {
-		// None known that PX4 needs to warn about. (RP2040's missing unique id is
-		// not silicon errata; see board_identity.c.)
-		*errata = NULL;
-	}
-
-	return revision;
+	return ret;
 }

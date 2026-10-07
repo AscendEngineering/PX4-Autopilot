@@ -214,10 +214,10 @@ rp2040_boardinitialize(void)
 
 	// Disable IE and enable OD on GPIO 26-29 (These are ADC Pins)
 	// Do this only for the channels configured in board_config.h
-	rp2040_gpioconfig(27 | GPIO_FUN(RP2040_GPIO_FUNC_NULL));		/* BATT_VOLTAGE_SENS */
+	px4_arch_configgpio(27 | GPIO_FUN(RP2040_GPIO_FUNC_NULL));		/* BATT_VOLTAGE_SENS */
 	clrbits_reg32(RP2040_PADS_BANK0_GPIO_IE, RP2040_PADS_BANK0_GPIO(27));	/* BATT_VOLTAGE_SENS */
 	setbits_reg32(RP2040_PADS_BANK0_GPIO_OD, RP2040_PADS_BANK0_GPIO(27));	/* BATT_VOLTAGE_SENS */
-	rp2040_gpioconfig(28 | GPIO_FUN(RP2040_GPIO_FUNC_NULL));		/* BATT_VOLTAGE_SENS */
+	px4_arch_configgpio(28 | GPIO_FUN(RP2040_GPIO_FUNC_NULL));		/* BATT_VOLTAGE_SENS */
 	clrbits_reg32(RP2040_PADS_BANK0_GPIO_IE, RP2040_PADS_BANK0_GPIO(28));	/* BATT_CURRENT_SENS */
 	setbits_reg32(RP2040_PADS_BANK0_GPIO_OD, RP2040_PADS_BANK0_GPIO(28));	/* BATT_CURRENT_SENS */
 
@@ -268,7 +268,7 @@ rp2040_boardinitialize(void)
 	// stm32_configgpio(GPIO_PPM_IN);
 
 	/* configure SPI all interfaces GPIO */
-	rp2040_spiinitialize();
+	rpi_spiinitialize();
 
 }
 

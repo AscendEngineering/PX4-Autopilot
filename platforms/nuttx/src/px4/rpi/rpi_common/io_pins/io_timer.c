@@ -34,7 +34,7 @@
 /**
  * @file io_timer.c
  *
- * Servo driver supporting PWM servos connected to RP2040 PWM blocks.
+ * Servo driver supporting PWM servos connected to RP2040/RP2350 PWM blocks.
  */
 
 #include <px4_platform_common/px4_config.h>
@@ -58,7 +58,7 @@
 
 #include <px4_arch/io_timer.h>
 
-// RP2040 PWM block has 8 slices (timers) and each has 2 independent outputs (channels) A and B.
+// The PWM block has 8 (RP2040) or 12 (RP2350) slices (timers) and each has 2 independent outputs (channels) A and B.
 // All the channels can output pwm. However, only channel B can be used for input where the timer
 // will be working in edge sensitive mode or level sensitive mode. Be careful when choosing the
 // timer and channel for input capture. Each timer has an independent 8.4 fractional divider.
@@ -73,11 +73,12 @@
 #define BOARD_PWM_FREQ 1000000
 #endif
 
-#if !defined(BOARD_ONESHOT_FREQ)
-#define BOARD_ONESHOT_FREQ 8000000
-#endif
+// PWM slices count clk_sys, which the board sets in its NuttX board.h (125MHz on RP2040, 150MHz on RP2350)
+#define TIM_SRC_CLOCK_FREQ BOARD_SYS_FREQ
 
-#define TIM_SRC_CLOCK_FREQ 125000000
+// DIV.INT is 8 bits wide (datasheet 12.5.2.4), so a slice can divide clk_sys by at most 255.
+static_assert(TIM_SRC_CLOCK_FREQ / BOARD_PWM_FREQ >= 1 && TIM_SRC_CLOCK_FREQ / BOARD_PWM_FREQ <= 255,
+	      "BOARD_PWM_FREQ must be between BOARD_SYS_FREQ/255 and BOARD_SYS_FREQ");
 
 #define MAX_CHANNELS_PER_TIMER 2
 
@@ -85,104 +86,28 @@
 #define _REG32(_base, _reg)	(*(volatile uint32_t *)(_base + _reg))
 #define REG(_tmr, _reg)		_REG32(io_timers[_tmr].base, _reg)
 
-// Register offsets
-#define RP2040_PWM_CSR_OFFSET		0x00	// Control and status register
-#define RP2040_PWM_DIV_OFFSET		0x04	// Clock divide register
-#define RP2040_PWM_CTR_OFFSET		0x08	// Direct access to the PWM counter
-#define RP2040_PWM_CCR_OFFSET		0x0c	// Counter compare values
-#define RP2040_PWM_TOP_OFFSET		0x10	// Counter wrap value
-#define RP2040_PWM_EN_OFFSET		0xa0	// This register aliases the CSR_EN bits for all channels
-#define RP2040_PWM_INTR_OFFSET		0xa4	// Raw Interrupts
-#define RP2040_PWM_INTE_OFFSET		0xa8	// Interrupt Enable
-#define RP2040_PWM_INTF_OFFSET		0xac	// Interrupt Force
-#define RP2040_PWM_INTS_OFFSET		0xb0	// Interrupt status after masking & forcing
-
-/* Timer register accessors */
-#define rCSR(_tmr)		REG(_tmr,RP2040_PWM_CSR_OFFSET)
-#define rDIV(_tmr)		REG(_tmr,RP2040_PWM_DIV_OFFSET)
-#define rCTR(_tmr)		REG(_tmr,RP2040_PWM_CTR_OFFSET)
-#define rCCR(_tmr)		REG(_tmr,RP2040_PWM_CCR_OFFSET)
-#define rTOP(_tmr)		REG(_tmr,RP2040_PWM_TOP_OFFSET)
-#define rEN			_REG32(RP2040_PWM_BASE,RP2040_PWM_EN_OFFSET)
-#define rINTR			_REG32(RP2040_PWM_BASE,RP2040_PWM_INTR_OFFSET)
-#define rINTE			_REG32(RP2040_PWM_BASE,RP2040_PWM_INTE_OFFSET)
-#define rINTF			_REG32(RP2040_PWM_BASE,RP2040_PWM_INTF_OFFSET)
-#define rINTS			_REG32(RP2040_PWM_BASE,RP2040_PWM_INTS_OFFSET)
+/* Timer register accessors.
+ *
+ * io_timers[].base already points at the slice's CSR, so per-slice registers
+ * are at the slice-0 offsets. The shared registers differ between the chips
+ * (see the chip's px4_arch/micro_hal.h): twelve slices push EN to 0xf0 on RP2350.
+ */
+#define rCSR(_tmr)		REG(_tmr,RPI_PWM_CSR_OFFSET(0))
+#define rDIV(_tmr)		REG(_tmr,RPI_PWM_DIV_OFFSET(0))
+#define rCTR(_tmr)		REG(_tmr,RPI_PWM_CTR_OFFSET(0))
+#define rCCR(_tmr)		REG(_tmr,RPI_PWM_CC_OFFSET(0))
+#define rTOP(_tmr)		REG(_tmr,RPI_PWM_TOP_OFFSET(0))
+#define rEN			_REG32(RPI_PWM_BASE,RPI_PWM_EN_OFFSET)
 
 //					 				  NotUsed   PWMOut  PWMIn Capture OneShot Trigger
-io_timer_channel_allocation_t channel_allocations[IOTimerChanModeSize] = { UINT16_MAX,   0,  0,  0, 0, 0 };
+io_timer_channel_allocation_t channel_allocations[IOTimerChanModeSize] = { UINT32_MAX,   0,  0,  0, 0, 0 };
 
-typedef uint8_t io_timer_allocation_t; /* big enough to hold MAX_IO_TIMERS */
+typedef uint16_t io_timer_allocation_t; /* big enough to hold MAX_IO_TIMERS */
+
+static io_timer_channel_allocation_t enabled_channels;
 
 static io_timer_allocation_t once = 0;	// Used to trace whether the timer is initialized or not
 
-typedef struct channel_stat_t {
-	uint32_t 			isr_cout;
-	uint32_t 			overflows;
-} channel_stat_t;
-
-// static channel_stat_t io_timer_channel_stats[MAX_TIMER_IO_CHANNELS];
-
-static struct channel_handler_entry {
-	channel_handler_t callback;
-	void			  *context;
-} channel_handlers[MAX_TIMER_IO_CHANNELS];
-
-
-static int io_timer_handler(int irq, void *context, void *arg)//uint16_t timer_index)
-{
-	/* Read the count at the time of the interrupt */
-
-	// uint16_t count = rCNT(timer_index);
-
-	// /* Read the HRT at the time of the interrupt */
-
-	// hrt_abstime now = hrt_absolute_time();
-
-	// const io_timers_t *tmr = &io_timers[timer_index];
-
-	// /* What is pending */
-
-	// uint32_t statusr = rSTATUS(timer_index);
-
-	// /* Acknowledge all that are pending */
-
-	// rSTATUS(timer_index) = 0;
-
-	// /* Iterate over the timer_io_channels table */
-
-	// uint32_t first_channel_index = io_timers_channel_mapping.element[timer_index].first_channel_index;
-	// uint32_t last_channel_index = first_channel_index + io_timers_channel_mapping.element[timer_index].channel_count;
-
-	// for (unsigned chan_index = first_channel_index; chan_index < last_channel_index; chan_index++) {
-
-	// 	uint16_t chan = 1 << chan_index;
-
-	// 	if (statusr & chan) {
-
-	// 		io_timer_channel_stats[chan_index].isr_cout++;
-
-	// 		/* Call the client to read the rCnV etc and clear the CHnF */
-
-	// 		if (channel_handlers[chan_index].callback) {
-	// 			channel_handlers[chan_index].callback(channel_handlers[chan_index].context, tmr,
-	// 							      chan_index, &timer_io_channels[chan_index],
-	// 							      now, count, _REG32(tmr->base, KINETIS_FTM_CV_OFFSET(chan_index)));
-	// 		}
-	// 	}
-
-	// 	/* Did it set again during call out ?*/
-
-	// 	if (rSTATUS(timer_index) & chan) {
-
-	// 		/* Error we has a second edge before we serviced the fist */
-
-	// 		io_timer_channel_stats[chan_index].overflows++;
-	// 	}
-	// }
-
-	return 0;
-}
 
 static inline int validate_timer_index(unsigned timer)
 {
@@ -272,7 +197,7 @@ int io_timer_validate_channel_index(unsigned channel)
 
 		/* test timer for validity */
 
-		if ((io_timers[timer].base != 0) &&
+		if ((validate_timer_index(timer) == 0) &&
 		    (timer_io_channels[channel].gpio_out != 0) &&
 		    (timer_io_channels[channel].gpio_in != 0)) {
 			rv = 0;
@@ -323,32 +248,6 @@ int io_timer_get_channel_mode(unsigned channel)
 	return -1;
 }
 
-static int reallocate_channel_resources(uint32_t channels, io_timer_channel_mode_t mode,
-					io_timer_channel_mode_t new_mode)
-{
-	/* If caller mode is not based on current setting adjust it */
-
-	if ((channels & channel_allocations[IOTimerChanMode_NotUsed]) == channels) {
-		mode = IOTimerChanMode_NotUsed;
-	}
-
-	/* Remove old set of channels from original */
-
-	channel_allocations[mode] &= ~channels;
-
-	/* Will this change ?*/
-
-	uint32_t before = channel_allocations[new_mode] & channels;
-
-	/* add in the new set */
-
-	channel_allocations[new_mode] |= channels;
-
-	/* Indicate a mode change */
-
-	return before ^ channels;
-}
-
 static inline int allocate_channel_resource(unsigned channel, io_timer_channel_mode_t mode)
 {
 	int rv = io_timer_is_channel_free(channel);
@@ -382,6 +281,7 @@ int io_timer_free_channel(unsigned channel)
 		return -EINVAL;
 	}
 
+	irqstate_t flags = px4_enter_critical_section();
 	int mode = io_timer_get_channel_mode(channel);
 
 	if (mode > IOTimerChanMode_NotUsed) {
@@ -390,6 +290,7 @@ int io_timer_free_channel(unsigned channel)
 
 	}
 
+	px4_leave_critical_section(flags);
 	return 0;
 }
 
@@ -411,7 +312,7 @@ static int allocate_channel(unsigned channel, io_timer_channel_mode_t mode)
 
 static int timer_set_rate(unsigned timer, unsigned rate)
 {
-	// RP2040 has a buffer for rTOP, so there shouldn't be any need to turn the timer off to change rTOP value
+	// The PWM slice double-buffers rTOP, so there shouldn't be any need to turn the timer off to change rTOP value
 	rTOP(timer) = (BOARD_PWM_FREQ / rate) - 1;
 
 	return 0;
@@ -419,21 +320,8 @@ static int timer_set_rate(unsigned timer, unsigned rate)
 
 static inline uint32_t freq2div(uint32_t freq)
 {
-	return (TIM_SRC_CLOCK_FREQ << 4) / freq;
-}
-
-static inline void io_timer_set_oneshot_mode(unsigned timer)
-{
-	/* Ideally, we would want per channel One pulse mode in HW
-	 * Alas OPE stops the Timer not the channel
-	 * todo:We can do this in an ISR later
-	 * But since we do not have that
-	 * We try to get the longest rate we can.
-	 *  On 16 bit timers this is 8.1 Ms.
-	 */
-
-	rTOP(timer) = 0xffff;
-	rDIV(timer) = freq2div(BOARD_ONESHOT_FREQ);
+	// 8.4 fixed point; widen first, as 150MHz << 4 does not fit in a signed int
+	return (uint32_t)(((uint64_t)TIM_SRC_CLOCK_FREQ << RPI_PWM_DIV_INT_SHIFT) / freq);
 }
 
 static inline void io_timer_set_PWM_mode(unsigned timer)
@@ -443,45 +331,20 @@ static inline void io_timer_set_PWM_mode(unsigned timer)
 
 void io_timer_trigger(void)
 {
-	// This function is probably not important for RP2040 as the buffered registers are updated automatically on the timer wrap.
-
-	// int oneshots = io_timer_get_mode_channels(IOTimerChanMode_OneShot);
-	// uint32_t action_cache[MAX_IO_TIMERS] = {0};
-	// int actions = 0;
-
-	// /* Pre-calculate the list of timers to Trigger */
-
-	// for (int timer = 0; timer < MAX_IO_TIMERS; timer++) {
-	// 	if (validate_timer_index(timer) == 0) {
-	// 		int channels = get_timer_channels(timer);
-
-	// 		if (oneshots & channels) {
-	// 			action_cache[actions++] = io_timers[timer].base;
-	// 		}
-	// 	}
-	// }
-
-	// /* Now do them all wit the shortest delay in between */
-
-	// irqstate_t flags = px4_enter_critical_section();
-
-	// for (actions = 0; actions < MAX_IO_TIMERS && action_cache[actions] != 0; actions++) {
-	// 	_REG32(action_cache[actions], KINETIS_FTM_SYNC_OFFSET) |= FTM_SYNC;
-	// }
-
-	// px4_leave_critical_section(flags);
+	// OneShot is not supported; rate zero and OneShot channel allocation are rejected.
 }
 
 int io_timer_init_timer(unsigned timer)
 {
-	/* Do this only once per timer */
+	if (validate_timer_index(timer) != 0) {
+		return -EINVAL;
+	}
 
+	/* Do this only once per timer, including when called from another CPU. */
+	irqstate_t flags = px4_enter_critical_section();
 	int rv = is_timer_uninitalized(timer);
 
 	if (rv == 0) {
-
-		irqstate_t flags = px4_enter_critical_section();
-
 		set_timer_initalized(timer);
 
 		/* disable and configure the timer */
@@ -500,96 +363,62 @@ int io_timer_init_timer(unsigned timer)
 
 		timer_set_rate(timer, 50);
 
-		/*
-		 * Note that the timer is left disabled with IRQ subs installed
-		 * and active but DEIR bits are not set.
-		 */
-		xcpt_t handler = io_timer_handler;
-
-		if (handler) {
-			irq_attach(RP2040_PWM_IRQ_WRAP, handler, NULL);
-			up_enable_irq(RP2040_PWM_IRQ_WRAP);
-		}
-
-		px4_leave_critical_section(flags);
+		// No PWM wrap interrupt is used: the slice free-runs and CC/TOP are double buffered.
 	}
 
+	px4_leave_critical_section(flags);
 	return rv;
 }
 
 
 int io_timer_set_rate(unsigned timer, unsigned rate)
 {
-	int rv = EBUSY;
-
-	/* Get the channel bits that belong to the timer */
-
-	uint32_t channels = get_timer_channels(timer);
-
-	/* Check that all channels are either in PWM or Oneshot */
-
-	if ((channels & (channel_allocations[IOTimerChanMode_PWMOut] |
-			 channel_allocations[IOTimerChanMode_OneShot] |
-			 channel_allocations[IOTimerChanMode_NotUsed])) ==
-	    channels) {
-
-		/* Change only a timer that is owned by pwm or one shot */
-
-		/* Request to use OneShot ?*/
-
-		if (rate == 0) {
-
-			/* Request to use OneShot
-			 *
-			 * We are here because ALL these channels were either PWM or Oneshot
-			 * Now they need to be Oneshot
-			 */
-
-			/* Did the allocation change */
-			if (reallocate_channel_resources(channels, IOTimerChanMode_PWMOut, IOTimerChanMode_OneShot)) {
-				io_timer_set_oneshot_mode(timer);
-			}
-
-		} else {
-
-			/* Request to use PWM
-			 *
-			 * We are here because  ALL these channels were either PWM or Oneshot
-			 * Now they need to be PWM
-			 */
-
-			if (reallocate_channel_resources(channels, IOTimerChanMode_OneShot, IOTimerChanMode_PWMOut)) {
-				io_timer_set_PWM_mode(timer);
-			}
-
-			timer_set_rate(timer, rate);
-		}
-
-		rv = OK;
+	if (validate_timer_index(timer) != 0) {
+		return -EINVAL;
 	}
 
+	if (rate == 0) {
+		return -ENOTSUP;
+	}
+
+	if (rate > BOARD_PWM_FREQ || BOARD_PWM_FREQ / rate > UINT16_MAX + 1u) {
+		return -ERANGE;
+	}
+
+	irqstate_t flags = px4_enter_critical_section();
+	uint32_t channels = get_timer_channels(timer);
+	int rv = -EBUSY;
+
+	if ((channels & (channel_allocations[IOTimerChanMode_PWMOut] |
+			 channel_allocations[IOTimerChanMode_NotUsed])) == channels) {
+		rv = timer_set_rate(timer, rate);
+	}
+
+	px4_leave_critical_section(flags);
 	return rv;
 }
 
 int io_timer_channel_init(unsigned channel, io_timer_channel_mode_t mode,
 			  channel_handler_t channel_handler, void *context)
 {
-	// RP2040 doesn't have any specific configuration for each channel except the CCR value.
-	// And RP2040 doesn't really have the hardware capability for input capture.
+	// The PWM slice has no per-channel configuration beyond the CC value, and no
+	// hardware input capture.
 
 	/* figure out the GPIO config first */
 	switch (mode) {
 
-	case IOTimerChanMode_OneShot:
 	case IOTimerChanMode_PWMOut:
-	case IOTimerChanMode_Trigger:
-	case IOTimerChanMode_NotUsed:
 		break;
+
+	case IOTimerChanMode_OneShot:
+	case IOTimerChanMode_Trigger:
+		return -ENOTSUP;
 
 	default:
 		return -EINVAL;
 	}
 
+	irqstate_t flags = px4_enter_critical_section();
 	int rv = allocate_channel(channel, mode);
 
 	/* Valid channel should now be reserved in new mode */
@@ -600,126 +429,55 @@ int io_timer_channel_init(unsigned channel, io_timer_channel_mode_t mode,
 
 		io_timer_init_timer(channels_timer(channel));
 
-		/* configure the channel */ // Nothing to configure here really.
-
-		// uint32_t chan = timer_io_channels[channel].timer_channel;
-
-		channel_handlers[channel].callback = channel_handler;
-		channel_handlers[channel].context = context;
+		/* Nothing to configure per channel; the PWM wrap interrupt is not used,
+		 * so channel_handler and context are accepted but never called. */
 	}
 
+	px4_leave_critical_section(flags);
 	return rv;
 }
 
 int io_timer_set_enable(bool state, io_timer_channel_mode_t mode, io_timer_channel_allocation_t masks)
 {
-	typedef struct action_cache_rp_t {
-		// uint32_t cnsc_offset;
-		// uint32_t cnsc_value;
-		uint32_t gpio;
-	} action_cache_rp_t;
-	struct action_cache_t {
-		uint32_t base;
-		uint32_t index;
-		action_cache_rp_t cnsc[MAX_CHANNELS_PER_TIMER];
-	} action_cache[MAX_IO_TIMERS];
+	if (mode == IOTimerChanMode_OneShot) {
+		return -ENOTSUP;
+	}
 
-	memset(action_cache, 0, sizeof(action_cache));
-
-	// uint32_t bits =  state ? CnSC_PWMOUT_INIT : 0;
-
-	switch (mode) {
-	case IOTimerChanMode_NotUsed:
-	case IOTimerChanMode_PWMOut:
-	case IOTimerChanMode_OneShot:
-	case IOTimerChanMode_Trigger:
-		break;
-
-	default:
+	if (mode != IOTimerChanMode_PWMOut) {
 		return -EINVAL;
 	}
 
-	/* Was the request for all channels in this mode ?*/
-
-	if (masks == IO_TIMER_ALL_MODES_CHANNELS) {
-
-		/* Yes - we provide them */
-
-		masks = channel_allocations[mode];
-
-	} else {
-
-		/* No - caller provided mask */
-
-		/* Only allow the channels in that mode to be affected */
-
-		masks &= channel_allocations[mode];
-
-	}
-
-	/* Pre calculate all the changes */
-
-	for (int chan_index = 0; masks != 0 && chan_index < MAX_TIMER_IO_CHANNELS; chan_index++) {
-		if (masks & (1 << chan_index)) {
-			masks &= ~(1 << chan_index);
-
-			if (io_timer_validate_channel_index(chan_index) == 0) {
-				// uint32_t chan = timer_io_channels[chan_index].timer_channel;
-				uint32_t timer = channels_timer(chan_index);
-				action_cache[timer].base  = io_timers[timer].base;
-				// action_cache[timer].cnsc[action_cache[timer].index].cnsc_offset = io_timers[timer].base + KINETIS_FTM_CSC_OFFSET(chan);
-				// action_cache[timer].cnsc[action_cache[timer].index].cnsc_value = bits;
-
-				if ((state &&
-				     (mode == IOTimerChanMode_PWMOut ||
-				      mode == IOTimerChanMode_OneShot ||
-				      mode == IOTimerChanMode_Trigger))) {
-					action_cache[timer].cnsc[action_cache[timer].index].gpio = timer_io_channels[chan_index].gpio_out;
-				}
-
-				action_cache[timer].index++;
-			}
-		}
-	}
-
 	irqstate_t flags = px4_enter_critical_section();
+	masks = masks == IO_TIMER_ALL_MODES_CHANNELS ? channel_allocations[mode] : masks & channel_allocations[mode];
 
+	for (unsigned channel = 0; channel < MAX_TIMER_IO_CHANNELS; channel++) {
+		const io_timer_channel_allocation_t bit = 1u << channel;
 
-	for (unsigned actions = 0; actions < arraySize(action_cache); actions++) {
-		// uint32_t any_on = 0;
+		if (!(masks & bit) || io_timer_validate_channel_index(channel) != 0) {
+			continue;
+		}
 
-		if (action_cache[actions].base != 0) {
-			for (unsigned int index = 0; index < action_cache[actions].index; index++) {
+		unsigned timer = channels_timer(channel);
+		uint32_t gpio = timer_io_channels[channel].gpio_out;
 
-				if (action_cache[actions].cnsc[index].gpio) {
-					px4_arch_configgpio(action_cache[actions].cnsc[index].gpio);
-				}
+		if (state) {
+			enabled_channels |= bit;
+			rCSR(timer) |= RPI_PWM_CSR_EN;
+			px4_arch_configgpio(gpio);
 
-				// _REG(action_cache[actions].cnsc[index].cnsc_offset) = action_cache[actions].cnsc[index].cnsc_value;
-				// any_on |= action_cache[actions].cnsc[index].cnsc_value;
+		} else {
+			// Disconnect this output and drive it low even if its sibling keeps counting.
+			px4_arch_configgpio((gpio & GPIO_NUM_MASK) | GPIO_OUT | GPIO_FUN(RPI_GPIO_FUNC_SIO));
+			enabled_channels &= ~bit;
+
+			if (!(enabled_channels & get_timer_channels(timer))) {
+				rCSR(timer) &= ~RPI_PWM_CSR_EN;
+				rCTR(timer) = 0;
 			}
-
-			/* Any On ?*/
-
-			/* Assume not */
-			// uint32_t regval = _REG32(action_cache[actions].base, KINETIS_FTM_SC_OFFSET);
-			// regval &= ~(FTM_SC_CLKS_MASK);
-
-			// if (any_on != 0) {
-
-			// 	/* force an update to preload all registers */
-			// 	_REG32(action_cache[actions].base, KINETIS_FTM_SYNC_OFFSET) |= FTM_SYNC;
-
-			// 	/* arm requires the timer be enabled */
-			// 	regval |= (FTM_SC_CLKS_EXTCLK);
-			// }
-
-			_REG32(action_cache[actions].base, RP2040_PWM_CSR_OFFSET) |= state;
 		}
 	}
 
 	px4_leave_critical_section(flags);
-
 	return 0;
 }
 
@@ -737,11 +495,15 @@ int io_timer_set_ccr(unsigned channel, uint16_t value)
 
 		} else {
 
-			/* configure the channel */
-			int regVal = rCCR(channels_timer(channel));
-			regVal &= ~(0xffff << (timer_io_channels[channel].timer_channel) * 16);
-			regVal |= value << (timer_io_channels[channel].timer_channel) * 16;
+			/* configure the channel: CC holds A in bits 15:0 and B in bits 31:16. The APB
+			 * bus replicates narrow writes, so this has to be a read-modify-write. */
+			const unsigned shift = timer_io_channels[channel].timer_channel * RPI_PWM_CC_B_SHIFT;
+			irqstate_t flags = px4_enter_critical_section();
+			uint32_t regVal = rCCR(channels_timer(channel));
+			regVal &= ~((uint32_t)RPI_PWM_CC_A_MASK << shift);
+			regVal |= (uint32_t)value << shift;
 			rCCR(channels_timer(channel)) = regVal;
+			px4_leave_critical_section(flags);
 		}
 	}
 
@@ -758,7 +520,8 @@ uint16_t io_channel_get_ccr(unsigned channel)
 		if ((mode == IOTimerChanMode_PWMOut) ||
 		    (mode == IOTimerChanMode_OneShot) ||
 		    (mode == IOTimerChanMode_Trigger)) {
-			value = rCCR(channels_timer(channel)) >> (timer_io_channels[channel].timer_channel) * 16;
+			const unsigned shift = timer_io_channels[channel].timer_channel * RPI_PWM_CC_B_SHIFT;
+			value = (rCCR(channels_timer(channel)) >> shift) & RPI_PWM_CC_A_MASK;
 		}
 	}
 

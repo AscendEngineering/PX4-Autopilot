@@ -53,12 +53,12 @@ static void spi_bus_configgpio_cs(const px4_spi_bus_t *bus)
 {
 	for (int i = 0; i < SPI_BUS_MAX_DEVICES; ++i) {
 		if (bus->devices[i].cs_gpio != 0) {
-			px4_arch_configgpio(bus->devices[i].cs_gpio | GPIO_FUN(RP2040_GPIO_FUNC_SIO));
+			px4_arch_configgpio(bus->devices[i].cs_gpio | GPIO_FUN(RPI_GPIO_FUNC_SIO));
 		}
 	}
 }
 
-__EXPORT void rp2040_spiinitialize()
+__EXPORT void rpi_spiinitialize()
 {
 	px4_set_spi_buses_from_hw_version();
 	board_control_spi_sensors_power_configgpio();
@@ -73,38 +73,38 @@ __EXPORT void rp2040_spiinitialize()
 	}
 
 	/* Set default SPI pin */
-#if defined(CONFIG_RP2040_SPI0) && defined(GPIO_SPI0_SCLK) && defined(GPIO_SPI0_MISO) && defined(GPIO_SPI0_MOSI)
+#if defined(RPI_SPI0_ENABLED) && defined(GPIO_SPI0_SCLK) && defined(GPIO_SPI0_MISO) && defined(GPIO_SPI0_MOSI)
 	px4_arch_configgpio(GPIO_SPI0_SCLK);
 	px4_arch_configgpio(GPIO_SPI0_MISO);
 	px4_arch_configgpio(GPIO_SPI0_MOSI);
 #endif
 
-#if defined(CONFIG_RP2040_SPI1) && defined(GPIO_SPI1_SCLK) && defined(GPIO_SPI1_MISO) && defined(GPIO_SPI1_MOSI)
+#if defined(RPI_SPI1_ENABLED) && defined(GPIO_SPI1_SCLK) && defined(GPIO_SPI1_MISO) && defined(GPIO_SPI1_MOSI)
 	px4_arch_configgpio(GPIO_SPI1_SCLK);
 	px4_arch_configgpio(GPIO_SPI1_MISO);
 	px4_arch_configgpio(GPIO_SPI1_MOSI);
 #endif
 
-#ifdef CONFIG_RP2040_SPI0
+#ifdef RPI_SPI0_ENABLED
 	ASSERT(_spi_bus0);
 
 	if (board_has_bus(BOARD_SPI_BUS, PX4_BUS_NUMBER_TO_PX4(0))) {
 		spi_bus_configgpio_cs(_spi_bus0);
 	}
 
-#endif // CONFIG_RP2040_SPI0
+#endif // RPI_SPI0_ENABLED
 
-#ifdef CONFIG_RP2040_SPI1
+#ifdef RPI_SPI1_ENABLED
 	ASSERT(_spi_bus1);
 
 	if (board_has_bus(BOARD_SPI_BUS, PX4_BUS_NUMBER_TO_PX4(1))) {
 		spi_bus_configgpio_cs(_spi_bus1);
 	}
 
-#endif // CONFIG_RP2040_SPI1
+#endif // RPI_SPI1_ENABLED
 }
 
-static inline void rp2040_spixselect(const px4_spi_bus_t *bus, struct spi_dev_s *dev, uint32_t devid, bool selected)
+static inline void rpi_spixselect(const px4_spi_bus_t *bus, struct spi_dev_s *dev, uint32_t devid, bool selected)
 {
 	for (int i = 0; i < SPI_BUS_MAX_DEVICES; ++i) {
 		if (bus->devices[i].cs_gpio == 0) {
@@ -120,55 +120,59 @@ static inline void rp2040_spixselect(const px4_spi_bus_t *bus, struct spi_dev_s 
 
 
 /****************************************************************************
- * Name:  rp2040_spi0/1select and rp2040_spi0/1status
+ * Name:  rpi_spi0/1select and rpi_spi0/1status
+ *
+ * Note: each rpi_ name here is a #define of the NuttX rp2040_ or rp23xx_
+ * symbol (see the chip's px4_arch/micro_hal.h), so these definitions are
+ * what NuttX's SPI driver links against; a board does not provide them.
  *
  * Description:
- *   The external functions, rp2040_spi0/1select and rp2040_spi0/1status
+ *   The external functions, rpi_spi0/1select and rpi_spi0/1status
  *   must be provided by board-specific logic.
  *   They are implementations of the select and status methods of the SPI
  *   interface defined by struct spi_ops_s (see include/nuttx/spi/spi.h).
- *   All other methods (including rp2040_spibus_initialize()) are provided by
- *   common RP2040 logic.  To use this common SPI logic on your board:
+ *   All other methods (including rpi_spibus_initialize()) are provided by
+ *   common RP2040/RP2350 logic.  To use this common SPI logic on your board:
  *
- *   1. Provide logic in rp2040_boardinitialize() to configure SPI chip
+ *   1. Provide logic in the board initialization to configure SPI chip
  *      select pins.
- *   2. Provide rp2040_spi0/1select() and rp2040_spi0/1status()
+ *   2. Provide rpi_spi0/1select() and rpi_spi0/1status()
  *      functions in your board-specific logic.
  *      These functions will perform chip selection and status operations
  *      using GPIOs in the way your board is configured.
- *   3. Add a calls to rp2040_spibus_initialize() in your low level
+ *   3. Add a calls to rpi_spibus_initialize() in your low level
  *      application initialization logic
- *   4. The handle returned by rp2040_spibus_initialize() may then be used to
+ *   4. The handle returned by rpi_spibus_initialize() may then be used to
  *      bind the SPI driver to higher level logic (e.g., calling
  *      mmcsd_spislotinitialize(), for example, will bind the SPI driver to
  *      the SPI MMC/SD driver).
  *
  ****************************************************************************/
-#ifdef CONFIG_RP2040_SPI0
-void rp2040_spi0select(FAR struct spi_dev_s *dev, uint32_t devid,
-		       bool selected)
+#ifdef RPI_SPI0_ENABLED
+void rpi_spi0select(FAR struct spi_dev_s *dev, uint32_t devid,
+		    bool selected)
 {
 	spiinfo("devid: %d CS: %s\n", (int)devid,
 		selected ? "assert" : "de-assert");
-	rp2040_spixselect(_spi_bus0, dev, devid, selected);
+	rpi_spixselect(_spi_bus0, dev, devid, selected);
 }
 
-uint8_t rp2040_spi0status(FAR struct spi_dev_s *dev, uint32_t devid)
+uint8_t rpi_spi0status(FAR struct spi_dev_s *dev, uint32_t devid)
 {
 	return SPI_STATUS_PRESENT;
 }
 #endif
 
-#ifdef CONFIG_RP2040_SPI1
-void rp2040_spi1select(FAR struct spi_dev_s *dev, uint32_t devid,
-		       bool selected)
+#ifdef RPI_SPI1_ENABLED
+void rpi_spi1select(FAR struct spi_dev_s *dev, uint32_t devid,
+		    bool selected)
 {
 	spiinfo("devid: %d CS: %s\n", (int)devid,
 		selected ? "assert" : "de-assert");
-	rp2040_spixselect(_spi_bus1, dev, devid, selected);
+	rpi_spixselect(_spi_bus1, dev, devid, selected);
 }
 
-uint8_t rp2040_spi1status(FAR struct spi_dev_s *dev, uint32_t devid)
+uint8_t rpi_spi1status(FAR struct spi_dev_s *dev, uint32_t devid)
 {
 	return SPI_STATUS_PRESENT;
 }
@@ -243,7 +247,7 @@ __EXPORT void board_spi_reset(int ms, int bus_mask)
 			}
 		}
 
-#if defined(CONFIG_RP2040_SPI0)
+#if defined(RPI_SPI0_ENABLED)
 
 		if (px4_spi_buses[bus].bus == 1) {
 			px4_arch_configgpio(PX4_GPIO_PIN_OFF(GPIO_SPI0_SCLK));
@@ -252,7 +256,7 @@ __EXPORT void board_spi_reset(int ms, int bus_mask)
 		}
 
 #endif
-#if defined(CONFIG_RP2040_SPI1)
+#if defined(RPI_SPI1_ENABLED)
 
 		if (px4_spi_buses[bus].bus == 2) {
 			px4_arch_configgpio(PX4_GPIO_PIN_OFF(GPIO_SPI1_SCLK));
@@ -307,7 +311,7 @@ __EXPORT void board_spi_reset(int ms, int bus_mask)
 			}
 		}
 
-#if defined(CONFIG_RP2040_SPI0)
+#if defined(RPI_SPI0_ENABLED)
 
 		if (px4_spi_buses[bus].bus == 1) {
 			px4_arch_configgpio(GPIO_SPI0_SCLK);
@@ -316,7 +320,7 @@ __EXPORT void board_spi_reset(int ms, int bus_mask)
 		}
 
 #endif
-#if defined(CONFIG_RP2040_SPI1)
+#if defined(RPI_SPI1_ENABLED)
 
 		if (px4_spi_buses[bus].bus == 2) {
 			px4_arch_configgpio(GPIO_SPI1_SCLK);
