@@ -47,15 +47,16 @@
 
 int rpi_gpioconfig(uint32_t pinset)
 {
-	if ((pinset & GPIO_NUM_MASK) > RPI_GPIO_NUM) {
+	if ((pinset & GPIO_NUM_MASK) >= RPI_GPIO_NUM) {
 		return -EINVAL;
 	}
 
 	rpi_gpio_set_pulls(pinset & GPIO_NUM_MASK, pinset & GPIO_PU_MASK, pinset & GPIO_PD_MASK);
 
 	if ((pinset & GPIO_FUN_MASK) >> GPIO_FUN_SHIFT == RPI_GPIO_FUNC_SIO) {
-		rpi_gpio_setdir(pinset & GPIO_NUM_MASK, pinset & GPIO_OUT_MASK);
+		// Set the level before enabling the output so the pin never glitches to the wrong state
 		rpi_gpio_put(pinset & GPIO_NUM_MASK, pinset & GPIO_SET_MASK);
+		rpi_gpio_setdir(pinset & GPIO_NUM_MASK, pinset & GPIO_OUT_MASK);
 	}
 
 	rpi_gpio_set_function(pinset & GPIO_NUM_MASK, (pinset & GPIO_FUN_MASK) >> GPIO_FUN_SHIFT);

@@ -61,26 +61,29 @@ __BEGIN_DECLS
 //
 // The pinset below is defined using a 16-bit value where,
 // bits		Function
-// 0-4		GPIO number. 0-29 is valid.
-// 5		Pull up
-// 6		Pull down
-// 7		Direction
-// 8		Set/clear
-// 9-13		GPIO function select
-// 14-15	Unused
-#define GPIO_PU		(1 << 5)	// Pull-up resistor
-#define GPIO_PD		(1 << 6)	// Pull-down resistor
-#define GPIO_OUT	(1 << 7)	// Output enable
-#define GPIO_SET	(1 << 8)	// Output set
-#define GPIO_FUN(func)	(func << 9)	// Function select
+// 0-5		GPIO number. 0-29 is valid on RP2040 and RP2350A, 0-47 on RP2350B.
+// 6		Pull up
+// 7		Pull down
+// 8		Direction
+// 9		Set/clear
+// 10-14	GPIO function select
+// 15		Unused
+//
+// The pin field is six bits wide so that one layout covers the 48 GPIOs of
+// RP2350B; rpi_gpioconfig() rejects pins the running chip does not have.
+#define GPIO_PU		(1 << 6)	// Pull-up resistor
+#define GPIO_PD		(1 << 7)	// Pull-down resistor
+#define GPIO_OUT	(1 << 8)	// Output enable
+#define GPIO_SET	(1 << 9)	// Output set
+#define GPIO_FUN(func)	(func << 10)	// Function select
 
-#define GPIO_NUM_MASK	0x1f		// GPIO pin number mask
-#define	GPIO_PU_MASK	0x20		// Pull-up enable mask
-#define	GPIO_PD_MASK	0x40		// Pull-down enable mask
-#define	GPIO_OUT_MASK	0x80		// Output enable mask
-#define	GPIO_SET_MASK	0x100		// Output set mask
-#define	GPIO_FUN_MASK	0x3E00		// GPIO function select mask
-#define GPIO_FUN_SHIFT	9		// GPIO function select position
+#define GPIO_NUM_MASK	0x3f		// GPIO pin number mask
+#define	GPIO_PU_MASK	0x40		// Pull-up enable mask
+#define	GPIO_PD_MASK	0x80		// Pull-down enable mask
+#define	GPIO_OUT_MASK	0x100		// Output enable mask
+#define	GPIO_SET_MASK	0x200		// Output set mask
+#define	GPIO_FUN_MASK	0x7c00		// GPIO function select mask
+#define GPIO_FUN_SHIFT	10		// GPIO function select position
 
 int rpi_gpioconfig(uint32_t pinset);
 int rpi_setgpioevent(uint32_t pinset, bool risingedge, bool fallingedge, bool event, xcpt_t func, void *arg);
