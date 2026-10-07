@@ -46,7 +46,7 @@ __BEGIN_DECLS
 #ifdef BOARD_NUM_IO_TIMERS
 #define MAX_IO_TIMERS			BOARD_NUM_IO_TIMERS
 #else
-#define MAX_IO_TIMERS			8
+#define MAX_IO_TIMERS			RPI_PWM_NUM_SLICES
 #endif
 #if DIRECT_PWM_OUTPUT_CHANNELS > 8
 #define MAX_TIMER_IO_CHANNELS	DIRECT_PWM_OUTPUT_CHANNELS
@@ -92,7 +92,7 @@ typedef uint32_t io_timer_channel_allocation_t; /* big enough to hold MAX_TIMER_
  */
 typedef struct io_timers_t {
 	uint32_t		base;
-	// uint32_t		clock_register;		// Not required for rp2040
+	// uint32_t		clock_register;		// Not required for RP2040/RP2350
 	// uint32_t		clock_bit;
 	// uint32_t		vectorno;
 	// dshot_conf_t	dshot;
