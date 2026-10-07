@@ -33,69 +33,47 @@
 
 /**
  * @file board_mcu_version.c
- * Implementation of RP2040 based SoC version API
+ * Implementation of RP2040/RP2350 based SoC version API
  */
 
 #include <px4_platform_common/px4_config.h>
 #include <px4_platform_common/defines.h>
 
-#define RP2040_CPUID_BASE	(RP2040_PPB_BASE + 0xed00)
-
-/* magic numbers from reference manual */
-
-enum MCU_REV {
-	MCU_REV_RP2040_REV_1 = 0x1
-};
-
-/* Define any issues with the Silicon as lines separated by \n
- * omitting the last \n
- */
-#define RP2040_ERRATA "This device does not have a unique id!"
-
-
-// RP2040 datasheet CPUID register
-# define REVID_MASK    0xF
-# define DEVID_MASK    0xFFFFFFF0
-
-# define RP2040_DEVICE_ID	0x410CC60
-
+// SYSINFO CHIP_ID identifies the chip and its silicon revision (the ARM CPUID
+// register would only identify the core). Layout, same on both chips:
+//   MANUFACTURER [11:0] = 0x927   PART [27:12] = RPI_CHIP_ID_PART   REVISION [31:28]
+#define CHIP_ID				getreg32(RPI_SYSINFO_BASE + 0x0)
+#define CHIP_ID_MANUFACTURER_MASK	0x00000fff
+#define CHIP_ID_MANUFACTURER_RPI	0x927
+#define CHIP_ID_PART_SHIFT		12
+#define CHIP_ID_PART_MASK		0xffff
+#define CHIP_ID_REVISION_SHIFT		28
+#define CHIP_ID_REVISION_MASK		0xf
 
 int board_mcu_version(char *rev, const char **revstr, const char **errata)
 {
-	uint32_t abc = getreg32(RP2040_CPUID_BASE);
+	const uint32_t chip_id = CHIP_ID;
+	const int revision = (chip_id >> CHIP_ID_REVISION_SHIFT) & CHIP_ID_REVISION_MASK;
 
-	int32_t chip_version = (abc & DEVID_MASK) > 4;
-	enum MCU_REV revid = abc & REVID_MASK;
-	const char *chip_errata = NULL;
-
-	switch (chip_version) {
-
-
-	case RP2040_DEVICE_ID:
-		*revstr = "RP2040";
-		chip_errata = RP2040_ERRATA;
-		break;
-
-	default:
-		*revstr = "RPI???";
-		break;
+	if ((chip_id & CHIP_ID_MANUFACTURER_MASK) != CHIP_ID_MANUFACTURER_RPI ||
+	    ((chip_id >> CHIP_ID_PART_SHIFT) & CHIP_ID_PART_MASK) != RPI_CHIP_ID_PART) {
+		return -1;
 	}
 
-	switch (revid) {
+	if (revstr) {
+		*revstr = RPI_CHIP_NAME;
+	}
 
-	case MCU_REV_RP2040_REV_1:
-		*rev = '1';
-		break;
-
-	default:
-		*rev = '?';
-		revid = -1;
-		break;
+	if (rev) {
+		// Raw silicon revision number as the chip reports it (RP2040: 1 = B0/B1, 2 = B2)
+		*rev = revision < 10 ? '0' + revision : '?';
 	}
 
 	if (errata) {
-		*errata = chip_errata;
+		// None known that PX4 needs to warn about. (RP2040's missing unique id is
+		// not silicon errata; see board_identity.c.)
+		*errata = NULL;
 	}
 
-	return revid;
+	return revision;
 }

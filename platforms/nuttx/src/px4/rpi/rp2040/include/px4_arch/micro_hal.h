@@ -64,6 +64,7 @@ __BEGIN_DECLS
 #define RPI_FLASH_BASE			RP2040_FLASH_BASE
 #define RPI_ADC_BASE			RP2040_ADC_BASE
 #define RPI_PWM_BASE			RP2040_PWM_BASE
+#define RPI_SYSINFO_BASE		RP2040_SYSINFO_BASE
 
 /* GPIO */
 #define RPI_GPIO_NUM			RP2040_GPIO_NUM
@@ -147,6 +148,14 @@ __BEGIN_DECLS
 #define RPI_TIMER_INTE_OFFSET		0x38
 #define RPI_TIMER_INTF_OFFSET		0x3c
 #define RPI_TIMER_INTS_OFFSET		0x40
+
+/* SYSINFO CHIP_ID: manufacturer 0x927 in [11:0], part in [27:12], silicon
+ * revision in [31:28]. See the RP2040 datasheet, SYSINFO registers. */
+#define RPI_CHIP_ID_PART		0x0002
+
+/* RP2040 has no unique id register (pico-sdk derives one from the external
+ * flash), so RPI_UNIQUE_ID_WORD is left undefined and board_identity.c falls
+ * back to a fixed value. */
 
 #define PX4_SOC_ARCH_ID             PX4_SOC_ARCH_ID_UNUSED
 #define PX4_FLASH_BASE              RPI_FLASH_BASE
