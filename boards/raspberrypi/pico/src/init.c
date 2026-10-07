@@ -268,7 +268,7 @@ rp2040_boardinitialize(void)
 	// stm32_configgpio(GPIO_PPM_IN);
 
 	/* configure SPI all interfaces GPIO */
-	rp2040_spiinitialize();
+	rpi_spiinitialize();
 
 }
 

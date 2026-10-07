@@ -40,8 +40,16 @@
 static inline constexpr px4_spi_bus_device_t initSPIDevice(uint32_t devid, SPI::CS cs_gpio, SPI::DRDY drdy_gpio = {})
 {
 	px4_spi_bus_device_t ret{};
-	ret.cs_gpio = getGPIOPin(cs_gpio.pin) | (GPIO_OUT | GPIO_SET);
-	ret.drdy_gpio = getGPIOPin(drdy_gpio.pin) | GPIO_PU;	// GPIO_PU taken from kinetis
+
+	if (cs_gpio.pin == GPIO::Invalid) {
+		return ret;
+	}
+
+	ret.cs_gpio = getGPIOPin(cs_gpio.pin) | GPIO_OUT | GPIO_SET | GPIO_FUN(RPI_GPIO_FUNC_SIO);
+
+	if (drdy_gpio.pin != GPIO::Invalid) {
+		ret.drdy_gpio = getGPIOPin(drdy_gpio.pin) | GPIO_PU | GPIO_FUN(RPI_GPIO_FUNC_SIO);
+	}
 
 	if (PX4_SPIDEVID_TYPE(devid) == 0) { // it's a PX4 device (internal or external)
 		ret.devid = PX4_SPIDEV_ID(PX4_SPI_DEVICE_ID, devid);
@@ -87,7 +95,9 @@ static inline constexpr px4_spi_bus_t initSPIBus(SPI::Bus bus, const px4_spi_bus
 	ret.bus = (int)bus;
 	ret.topology = BusTopology::Internal;
 
-	ret.power_enable_gpio = getGPIOPin(power_enable.pin) | GPIO_OUT;
+	if (power_enable.pin != GPIO::Invalid) {
+		ret.power_enable_gpio = getGPIOPin(power_enable.pin) | GPIO_OUT | GPIO_FUN(RPI_GPIO_FUNC_SIO);
+	}
 
 	return ret;
 }
@@ -120,4 +130,35 @@ static inline constexpr SPI::bus_device_external_cfg_t initSPIConfigExternal(SPI
 	return ret;
 }
 
-constexpr bool validateSPIConfig(const px4_spi_bus_t spi_buses_conf[SPI_BUS_MAX_BUS_ITEMS]);
+// Other families define this per chip (keyed on CONFIG_<CHIP>_SPIn); here the
+// chip's micro_hal.h already resolves that to RPI_SPIn_ENABLED, so one copy serves both.
+constexpr bool validateSPIConfig(const px4_spi_bus_t spi_busses_conf[SPI_BUS_MAX_BUS_ITEMS])
+{
+	const bool nuttx_enabled_spi_buses[] = {
+#ifdef RPI_SPI0_ENABLED
+		true,
+#else
+		false,
+#endif
+#ifdef RPI_SPI1_ENABLED
+		true,
+#else
+		false,
+#endif
+	};
+
+	for (unsigned i = 0; i < sizeof(nuttx_enabled_spi_buses) / sizeof(nuttx_enabled_spi_buses[0]); ++i) {
+		bool found_bus = false;
+
+		for (int j = 0; j < SPI_BUS_MAX_BUS_ITEMS; ++j) {
+			if (spi_busses_conf[j].bus == (int)i + 1) {
+				found_bus = true;
+			}
+		}
+
+		// Either the bus is enabled in NuttX and configured in spi_busses_conf, or disabled and not configured
+		constexpr_assert(found_bus == nuttx_enabled_spi_buses[i], "SPI bus config mismatch (CONFIG_RP2040_SPIx / CONFIG_RP23XX_SPIx)");
+	}
+
+	return false;
+}

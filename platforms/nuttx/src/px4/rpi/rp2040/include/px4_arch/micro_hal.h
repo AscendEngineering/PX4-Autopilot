@@ -80,10 +80,22 @@ __BEGIN_DECLS
 #define rpi_gpio_enable_irq		rp2040_gpio_enable_irq
 #define rpi_gpio_disable_irq		rp2040_gpio_disable_irq
 
-/* SPI and I2C bus initialization */
+/* SPI and I2C. The spiNselect/status names are what NuttX's SPI driver
+ * calls; rpi_common/spi/spi.cpp defines them through these aliases. */
 #define rpi_spibus_initialize		rp2040_spibus_initialize
 #define rpi_i2cbus_initialize		rp2040_i2cbus_initialize
 #define rpi_i2cbus_uninitialize		rp2040_i2cbus_uninitialize
+#define rpi_spi0select			rp2040_spi0select
+#define rpi_spi0status			rp2040_spi0status
+#define rpi_spi1select			rp2040_spi1select
+#define rpi_spi1status			rp2040_spi1status
+
+#if defined(CONFIG_RP2040_SPI0)
+#  define RPI_SPI0_ENABLED		1
+#endif
+#if defined(CONFIG_RP2040_SPI1)
+#  define RPI_SPI1_ENABLED		1
+#endif
 
 /* PWM */
 #define RPI_PWM_NUM_SLICES		8

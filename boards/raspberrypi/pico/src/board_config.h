@@ -104,14 +104,14 @@ __BEGIN_DECLS
 #ifndef __ASSEMBLY__
 
 /****************************************************************************************************
- * Name: rp2040_spiinitialize
+ * Name: rpi_spiinitialize
  *
  * Description:
  *   Called to configure SPI chip select GPIO pins for the PX4FMU board.
  *
  ****************************************************************************************************/
 
-extern void rp2040_spiinitialize(void);
+extern void rpi_spiinitialize(void);
 
 
 /****************************************************************************************************
