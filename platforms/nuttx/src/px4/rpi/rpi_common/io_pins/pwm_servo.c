@@ -34,7 +34,7 @@
 /*
  * @file pwm_servo.c
  *
- * Servo driver supporting PWM servos connected to RP2040 PWM blocks.
+ * Servo driver supporting PWM servos connected to RP2040/RP2350 PWM blocks.
  *
  */
 

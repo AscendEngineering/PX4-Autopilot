@@ -35,7 +35,7 @@
 
 #include <stdint.h>
 
-#include <hardware/rp2040_memorymap.h>
+#include <px4_arch/micro_hal.h>
 
 #include <px4_platform_common/constexpr_util.h>
 
@@ -68,29 +68,9 @@ struct TimerChannel {
 
 static inline constexpr uint32_t timerBaseRegister(Timer::Timer timer)
 {
-	switch (timer) {
-	case Timer::Timer0: return RP2040_PWM_BASE + 0x00;
-
-	case Timer::Timer1: return RP2040_PWM_BASE + 0x14;
-
-	case Timer::Timer2: return RP2040_PWM_BASE + 0x28;
-
-	case Timer::Timer3: return RP2040_PWM_BASE + 0x3c;
-
-	case Timer::Timer4: return RP2040_PWM_BASE + 0x50;
-
-	case Timer::Timer5: return RP2040_PWM_BASE + 0x64;
-
-	case Timer::Timer6: return RP2040_PWM_BASE + 0x78;
-
-	case Timer::Timer7: return RP2040_PWM_BASE + 0x8c;
-
-	default: break;
-	}
-
-	return 0;
+	// Timer0 is 1 so that an unset io_timers_t entry (0) is invalid
+	return RPI_PWM_BASE + RPI_PWM_CSR_OFFSET(timer - 1);
 }
-
 
 /*
  * GPIO
@@ -98,7 +78,7 @@ static inline constexpr uint32_t timerBaseRegister(Timer::Timer timer)
 
 namespace GPIO
 {
-// RP2040 doesn't have PORTS
+// RP2040 and RP2350 don't have PORTS
 enum Pin {
 	Pin0 = 0,
 	Pin1,
