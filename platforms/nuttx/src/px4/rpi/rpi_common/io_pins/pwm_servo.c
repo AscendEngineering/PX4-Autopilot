@@ -84,6 +84,8 @@ int up_pwm_servo_init(uint32_t channel_mask)
 
 	// Now allocate the new set
 
+	uint32_t initialized_channels = 0;
+
 	for (unsigned channel = 0; channel_mask != 0 &&  channel < MAX_TIMER_IO_CHANNELS; channel++) {
 		if (channel_mask & (1 << channel)) {
 
@@ -93,12 +95,21 @@ int up_pwm_servo_init(uint32_t channel_mask)
 				io_timer_free_channel(channel);
 			}
 
-			io_timer_channel_init(channel, IOTimerChanMode_PWMOut, NULL, NULL);
-			channel_mask &= ~(1 << channel);
+			int ret = io_timer_channel_init(channel, IOTimerChanMode_PWMOut, NULL, NULL);
+			channel_mask &= ~(1u << channel);
+
+			if (ret == OK) {
+				initialized_channels |= 1u << channel;
+
+			} else if (ret != -EBUSY) {
+				return ret;
+			}
+
+			/* -EBUSY: timer or channel already owned by someone else; not fatal, as on stm32 */
 		}
 	}
 
-	return OK;
+	return (int)initialized_channels;
 }
 
 void up_pwm_servo_deinit(uint32_t channel_mask)
@@ -138,10 +149,16 @@ int up_pwm_servo_set_rate(unsigned rate)
 	}
 
 	for (unsigned i = 0; i < MAX_IO_TIMERS; i++) {
-		up_pwm_servo_set_rate_group_update(i, rate);
+		if (io_timers[i].base != 0) {
+			int ret = up_pwm_servo_set_rate_group_update(i, rate);
+
+			if (ret != OK) {
+				return ret;
+			}
+		}
 	}
 
-	return 0;
+	return OK;
 }
 
 uint32_t up_pwm_servo_get_rate_group(unsigned group)
