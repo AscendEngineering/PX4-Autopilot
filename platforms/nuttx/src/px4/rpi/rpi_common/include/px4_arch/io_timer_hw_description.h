@@ -162,34 +162,37 @@ static inline constexpr io_timers_t initIOTimer(Timer::Timer timer)
 #endif
 		break;
 
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+
 	case Timer::Timer8:
 		ret.base = timerBaseRegister(timer);
-#if defined(CONFIG_RP2040_PWM8) || defined(CONFIG_RP23XX_PWM8)
+#if defined(CONFIG_RP23XX_PWM8)
 		nuttx_config_timer_enabled = true;
 #endif
 		break;
 
 	case Timer::Timer9:
 		ret.base = timerBaseRegister(timer);
-#if defined(CONFIG_RP2040_PWM9) || defined(CONFIG_RP23XX_PWM9)
+#if defined(CONFIG_RP23XX_PWM9)
 		nuttx_config_timer_enabled = true;
 #endif
 		break;
 
 	case Timer::Timer10:
 		ret.base = timerBaseRegister(timer);
-#if defined(CONFIG_RP2040_PWM10) || defined(CONFIG_RP23XX_PWM10)
+#if defined(CONFIG_RP23XX_PWM10)
 		nuttx_config_timer_enabled = true;
 #endif
 		break;
 
 	case Timer::Timer11:
 		ret.base = timerBaseRegister(timer);
-#if defined(CONFIG_RP2040_PWM11) || defined(CONFIG_RP23XX_PWM11)
+#if defined(CONFIG_RP23XX_PWM11)
 		nuttx_config_timer_enabled = true;
 #endif
 		break;
 
+#endif
 	}
 
 	// This is not strictly required, but for consistency let's make sure NuttX timers are disabled

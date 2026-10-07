@@ -54,11 +54,13 @@ enum Timer {
 	Timer5,
 	Timer6,
 	Timer7,
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
 	// Slices 8-11 exist on RP2350 only and reach pins on RP2350B (GPIO32-47)
 	Timer8,
 	Timer9,
 	Timer10,
 	Timer11,
+#endif
 };
 enum Channel {
 	ChannelA = 0,
@@ -116,7 +118,8 @@ enum Pin {
 	Pin27,
 	Pin28,
 	Pin29,
-	// RP2350B (QFN-80) only; rejected at compile time on other chips
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+	// RP2350B (QFN-80) only; RP2350A stops at Pin29, which getGPIOPin() checks
 	Pin30,
 	Pin31,
 	Pin32,
@@ -135,6 +138,7 @@ enum Pin {
 	Pin45,
 	Pin46,
 	Pin47,
+#endif
 	Invalid = 0xff,
 };
 
@@ -207,6 +211,7 @@ static inline constexpr uint32_t getGPIOPin(GPIO::Pin pin)
 	case GPIO::Pin28: return 28;
 
 	case GPIO::Pin29: return 29;
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
 
 	case GPIO::Pin30: return 30;
 
@@ -243,6 +248,7 @@ static inline constexpr uint32_t getGPIOPin(GPIO::Pin pin)
 	case GPIO::Pin46: return 46;
 
 	case GPIO::Pin47: return 47;
+#endif
 
 	case GPIO::Invalid: break;
 	}

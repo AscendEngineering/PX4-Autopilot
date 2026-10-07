@@ -112,28 +112,36 @@
  */
 #define REG(_reg)	(*(volatile uint32_t *)(HRT_TIMER_BASE + _reg))
 
-// Offsets come from the chip's px4_arch/micro_hal.h rather than literals, because
-// RP2350 is not laid out like RP2040 here: it inserts LOCKED (0x34) and SOURCE
-// (0x38) before the interrupt registers, shifting INTR/INTE/INTF/INTS up by 8
-// bytes. Using the RP2040 offsets on RP2350 would write the timer-lock bit
-// instead of the raw interrupt register, which cannot be undone without a reset.
-#define rTIMEHW		REG(RPI_TIMER_TIMEHW_OFFSET)		// Write to bits 63:32 of time, always write timelw before timehw
-#define rTIMELW		REG(RPI_TIMER_TIMELW_OFFSET)		// Write to bits 31:0 of time, not copied to time until timehw is written
-#define rTIMEHR		REG(RPI_TIMER_TIMEHR_OFFSET)		// Read from bits 63:32 of time, always read timelr before timehr
-#define rTIMELR		REG(RPI_TIMER_TIMELR_OFFSET)		// Read from bits 31:0 of time
-#define rALARM0		REG(RPI_TIMER_ALARM0_OFFSET)		// Arm alarm 0, and configure the time it will fire
-#define rALARM1		REG(RPI_TIMER_ALARM1_OFFSET)		// Arm alarm 1, and configure the time it will fire
-#define rALARM2		REG(RPI_TIMER_ALARM2_OFFSET)		// Arm alarm 2, and configure the time it will fire
-#define rALARM3		REG(RPI_TIMER_ALARM3_OFFSET)		// Arm alarm 3, and configure the time it will fire
-#define rARMED		REG(RPI_TIMER_ARMED_OFFSET)		// Indicates the armed/disarmed status of each alarm
-#define rTIMERAWH	REG(RPI_TIMER_TIMERAWH_OFFSET)	// Raw read from bits 63:32 of time
-#define rTIMERAWL	REG(RPI_TIMER_TIMERAWL_OFFSET)	// Raw read from bits 31:0 of time
-#define rDBGPAUSE	REG(RPI_TIMER_DBGPAUSE_OFFSET)	// Set bits high to enable pause when the corresponding debug ports are active
-#define rPAUSE		REG(RPI_TIMER_PAUSE_OFFSET)		// Set high to pause the timer
-#define rINTR		REG(RPI_TIMER_INTR_OFFSET)		// Raw Interrupts
-#define rINTE		REG(RPI_TIMER_INTE_OFFSET)		// Interrupt Enable
-#define rINTF		REG(RPI_TIMER_INTF_OFFSET)		// Interrupt Force
-#define rINTS		REG(RPI_TIMER_INTS_OFFSET)		// Interrupt status after masking & forcing
+// RP2040 datasheet 4.6.5 / RP2350 datasheet 12.8.6: the two chips share this layout up to PAUSE
+#define rTIMEHW		REG(0x00)	// Write to bits 63:32 of time, always write timelw before timehw
+#define rTIMELW		REG(0x04)	// Write to bits 31:0 of time, not copied to time until timehw is written
+#define rTIMEHR		REG(0x08)	// Read from bits 63:32 of time, always read timelr before timehr
+#define rTIMELR		REG(0x0c)	// Read from bits 31:0 of time
+#define rALARM0		REG(0x10)	// Arm alarm 0, and configure the time it will fire
+#define rALARM1		REG(0x14)	// Arm alarm 1, and configure the time it will fire
+#define rALARM2		REG(0x18)	// Arm alarm 2, and configure the time it will fire
+#define rALARM3		REG(0x1c)	// Arm alarm 3, and configure the time it will fire
+#define rARMED		REG(0x20)	// Indicates the armed/disarmed status of each alarm
+#define rTIMERAWH	REG(0x24)	// Raw read from bits 63:32 of time
+#define rTIMERAWL	REG(0x28)	// Raw read from bits 31:0 of time
+#define rDBGPAUSE	REG(0x2c)	// Set bits high to enable pause when the corresponding debug ports are active
+#define rPAUSE		REG(0x30)	// Set high to pause the timer
+
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+// RP2350 inserts LOCKED (0x34) and SOURCE (0x38) here, shifting the interrupt
+// registers up by 8 bytes. Using the RP2040 offsets on RP2350 would set the
+// timer-lock bit instead of the raw interrupt register, which cannot be undone
+// without a reset.
+#define rINTR		REG(0x3c)	// Raw Interrupts
+#define rINTE		REG(0x40)	// Interrupt Enable
+#define rINTF		REG(0x44)	// Interrupt Force
+#define rINTS		REG(0x48)	// Interrupt status after masking & forcing
+#else
+#define rINTR		REG(0x34)	// Raw Interrupts
+#define rINTE		REG(0x38)	// Interrupt Enable
+#define rINTF		REG(0x3c)	// Interrupt Force
+#define rINTS		REG(0x40)	// Interrupt status after masking & forcing
+#endif
 
 /*
  * Specific registers and bits used by HRT sub-functions
@@ -486,7 +494,7 @@ hrt_ppm_isr(int irq, void *context, void *arg)
  */
 hrt_abstime hrt_absolute_time(void)
 {
-	/* Taken from the RP2040 datasheet, 4.6.3 "Reading the time" */
+	/* Same on both chips: RP2040 datasheet 4.6.3 and RP2350 datasheet 12.8.2 "Reading the time" */
 	uint32_t hi = rTIMERAWH;
 	uint32_t lo;
 

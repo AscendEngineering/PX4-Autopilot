@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nuttx/config.h>
 #include <px4_platform/micro_hal.h>
 
 #include <stdint.h>
@@ -59,18 +60,18 @@ __BEGIN_DECLS
 // There are multiple different registers which are required to be configured based on the function selection.
 // However, only five values are required for the most part: Pin number, Pull up/down, direction, set/clear and function
 //
-// The pinset below is defined using a 16-bit value where,
+// The pinset is a 16-bit value. The pin field is five bits on RP2040 and six
+// on RP2350, whose B package has 48 GPIOs; rpi_gpioconfig() rejects pins the
+// running chip does not have.
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
 // bits		Function
-// 0-5		GPIO number. 0-29 is valid on RP2040 and RP2350A, 0-47 on RP2350B.
+// 0-5		GPIO number. 0-29 is valid on RP2350A, 0-47 on RP2350B.
 // 6		Pull up
 // 7		Pull down
 // 8		Direction
 // 9		Set/clear
 // 10-14	GPIO function select
 // 15		Unused
-//
-// The pin field is six bits wide so that one layout covers the 48 GPIOs of
-// RP2350B; rpi_gpioconfig() rejects pins the running chip does not have.
 #define GPIO_PU		(1 << 6)	// Pull-up resistor
 #define GPIO_PD		(1 << 7)	// Pull-down resistor
 #define GPIO_OUT	(1 << 8)	// Output enable
@@ -84,6 +85,36 @@ __BEGIN_DECLS
 #define	GPIO_SET_MASK	0x200		// Output set mask
 #define	GPIO_FUN_MASK	0x7c00		// GPIO function select mask
 #define GPIO_FUN_SHIFT	10		// GPIO function select position
+#else
+// bits		Function
+// 0-4		GPIO number. 0-29 is valid.
+// 5		Pull up
+// 6		Pull down
+// 7		Direction
+// 8		Set/clear
+// 9-13		GPIO function select
+// 14-15	Unused
+#define GPIO_PU		(1 << 5)	// Pull-up resistor
+#define GPIO_PD		(1 << 6)	// Pull-down resistor
+#define GPIO_OUT	(1 << 7)	// Output enable
+#define GPIO_SET	(1 << 8)	// Output set
+#define GPIO_FUN(func)	(func << 9)	// Function select
+
+#define GPIO_NUM_MASK	0x1f		// GPIO pin number mask
+#define	GPIO_PU_MASK	0x20		// Pull-up enable mask
+#define	GPIO_PD_MASK	0x40		// Pull-down enable mask
+#define	GPIO_OUT_MASK	0x80		// Output enable mask
+#define	GPIO_SET_MASK	0x100		// Output set mask
+#define	GPIO_FUN_MASK	0x3e00		// GPIO function select mask
+#define GPIO_FUN_SHIFT	9		// GPIO function select position
+#endif
+
+// PWM slices: RP2350 adds slices 8-11 to the eight on RP2040
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+#  define RPI_PWM_NUM_SLICES	12
+#else
+#  define RPI_PWM_NUM_SLICES	8
+#endif
 
 int rpi_gpioconfig(uint32_t pinset);
 int rpi_setgpioevent(uint32_t pinset, bool risingedge, bool fallingedge, bool event, xcpt_t func, void *arg);

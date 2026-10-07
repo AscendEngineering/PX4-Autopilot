@@ -7,6 +7,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+#include <hardware/rp23xx_memorymap.h>
+#include <hardware/rp23xx_otp_data.h>
+#endif
+
 #define CPU_UUID_BYTE_FORMAT_ORDER          {3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8}
 #define SWAP_UINT32(x) (((x) >> 24) | (((x) & 0x00ff0000) >> 8) | (((x) & 0x0000ff00) << 8) | ((x) << 24))
 
@@ -39,15 +44,18 @@ void board_get_uuid(uuid_byte_t uuid_bytes)
 
 __EXPORT void board_get_uuid32(uuid_uint32_t uuid_words)
 {
-#if defined(RPI_UNIQUE_ID_WORD)
-	// 64-bit chip id from the chip's micro_hal.h. PX4 expects a 96-bit UUID
-	// (STM32 convention); the third word is zero.
-	uuid_words[0] = RPI_UNIQUE_ID_WORD(0);
-	uuid_words[1] = RPI_UNIQUE_ID_WORD(1);
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+	// RP2350 carries a 64-bit random per-device identifier in OTP rows
+	// CHIPID0..3 (datasheet 13.10). Rows are 16 bits; through
+	// RP23XX_OTP_DATA_BASE a 32-bit read returns two neighbouring rows, so two
+	// reads cover the id. PX4 expects a 96-bit UUID (STM32 convention); the
+	// third word is zero.
+	uuid_words[0] = getreg32(RP23XX_OTP_DATA_BASE + RP23XX_OTP_DATA_CHIPID0_ROW * sizeof(uint16_t));
+	uuid_words[1] = getreg32(RP23XX_OTP_DATA_BASE + RP23XX_OTP_DATA_CHIPID2_ROW * sizeof(uint16_t));
 	uuid_words[2] = 0;
 #else
-	// This chip has no unique id register (see the chip's micro_hal.h); every
-	// device reports the fixed 12 byte string "PIPICORP2040".
+	// RP2040 has no unique id register; every device reports the fixed 12 byte
+	// string "PIPICORP2040".
 	uuid_words[0] = 'P' << 0 | 'I' << 8 | 'P' << 16 | 'I' << 24;
 	uuid_words[1] = 'C' << 0 | 'O' << 8 | 'R' << 16 | 'P' << 24;
 	uuid_words[2] = '2' << 0 | '0' << 8 | '4' << 16 | '0' << 24;
