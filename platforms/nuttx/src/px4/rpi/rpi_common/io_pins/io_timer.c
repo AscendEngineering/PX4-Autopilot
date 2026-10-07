@@ -73,10 +73,6 @@
 #define BOARD_PWM_FREQ 1000000
 #endif
 
-#if !defined(BOARD_ONESHOT_FREQ)
-#define BOARD_ONESHOT_FREQ 8000000
-#endif
-
 // PWM slices count clk_sys, which the board sets in its NuttX board.h (125MHz on RP2040, 150MHz on RP2350)
 #define TIM_SRC_CLOCK_FREQ BOARD_SYS_FREQ
 
@@ -252,32 +248,6 @@ int io_timer_get_channel_mode(unsigned channel)
 	return -1;
 }
 
-static int reallocate_channel_resources(uint32_t channels, io_timer_channel_mode_t mode,
-					io_timer_channel_mode_t new_mode)
-{
-	/* If caller mode is not based on current setting adjust it */
-
-	if ((channels & channel_allocations[IOTimerChanMode_NotUsed]) == channels) {
-		mode = IOTimerChanMode_NotUsed;
-	}
-
-	/* Remove old set of channels from original */
-
-	channel_allocations[mode] &= ~channels;
-
-	/* Will this change ?*/
-
-	uint32_t before = channel_allocations[new_mode] & channels;
-
-	/* add in the new set */
-
-	channel_allocations[new_mode] |= channels;
-
-	/* Indicate a mode change */
-
-	return before ^ channels;
-}
-
 static inline int allocate_channel_resource(unsigned channel, io_timer_channel_mode_t mode)
 {
 	int rv = io_timer_is_channel_free(channel);
@@ -354,20 +324,6 @@ static inline uint32_t freq2div(uint32_t freq)
 	return (uint32_t)(((uint64_t)TIM_SRC_CLOCK_FREQ << RPI_PWM_DIV_INT_SHIFT) / freq);
 }
 
-static inline void io_timer_set_oneshot_mode(unsigned timer)
-{
-	/* Ideally, we would want per channel One pulse mode in HW
-	 * Alas OPE stops the Timer not the channel
-	 * todo:We can do this in an ISR later
-	 * But since we do not have that
-	 * We try to get the longest rate we can.
-	 *  On 16 bit timers this is 8.1 Ms.
-	 */
-
-	rTOP(timer) = 0xffff;
-	rDIV(timer) = freq2div(BOARD_ONESHOT_FREQ);
-}
-
 static inline void io_timer_set_PWM_mode(unsigned timer)
 {
 	rDIV(timer) = freq2div(BOARD_PWM_FREQ);
@@ -375,7 +331,7 @@ static inline void io_timer_set_PWM_mode(unsigned timer)
 
 void io_timer_trigger(void)
 {
-	// Nothing to do: CC and TOP are double buffered and take effect on the next wrap.
+	// OneShot is not supported; rate zero and OneShot channel allocation are rejected.
 }
 
 int io_timer_init_timer(unsigned timer)
@@ -421,7 +377,11 @@ int io_timer_set_rate(unsigned timer, unsigned rate)
 		return -EINVAL;
 	}
 
-	if (rate != 0 && (rate > BOARD_PWM_FREQ || BOARD_PWM_FREQ / rate > UINT16_MAX + 1u)) {
+	if (rate == 0) {
+		return -ENOTSUP;
+	}
+
+	if (rate > BOARD_PWM_FREQ || BOARD_PWM_FREQ / rate > UINT16_MAX + 1u) {
 		return -ERANGE;
 	}
 
@@ -429,28 +389,9 @@ int io_timer_set_rate(unsigned timer, unsigned rate)
 	uint32_t channels = get_timer_channels(timer);
 	int rv = -EBUSY;
 
-	/* Change only a timer that is owned by pwm or one shot */
-
 	if ((channels & (channel_allocations[IOTimerChanMode_PWMOut] |
-			 channel_allocations[IOTimerChanMode_OneShot] |
 			 channel_allocations[IOTimerChanMode_NotUsed])) == channels) {
-
-		if (rate == 0) {
-			/* Request to use OneShot: all these channels were PWM or OneShot, now they are OneShot */
-			if (reallocate_channel_resources(channels, IOTimerChanMode_PWMOut, IOTimerChanMode_OneShot)) {
-				io_timer_set_oneshot_mode(timer);
-			}
-
-		} else {
-			/* Request to use PWM: all these channels were PWM or OneShot, now they are PWM */
-			if (reallocate_channel_resources(channels, IOTimerChanMode_OneShot, IOTimerChanMode_PWMOut)) {
-				io_timer_set_PWM_mode(timer);
-			}
-
-			timer_set_rate(timer, rate);
-		}
-
-		rv = OK;
+		rv = timer_set_rate(timer, rate);
 	}
 
 	px4_leave_critical_section(flags);
@@ -466,10 +407,12 @@ int io_timer_channel_init(unsigned channel, io_timer_channel_mode_t mode,
 	/* figure out the GPIO config first */
 	switch (mode) {
 
-	case IOTimerChanMode_OneShot:
 	case IOTimerChanMode_PWMOut:
-	case IOTimerChanMode_Trigger:
 		break;
+
+	case IOTimerChanMode_OneShot:
+	case IOTimerChanMode_Trigger:
+		return -ENOTSUP;
 
 	default:
 		return -EINVAL;
@@ -496,7 +439,11 @@ int io_timer_channel_init(unsigned channel, io_timer_channel_mode_t mode,
 
 int io_timer_set_enable(bool state, io_timer_channel_mode_t mode, io_timer_channel_allocation_t masks)
 {
-	if (mode != IOTimerChanMode_PWMOut && mode != IOTimerChanMode_OneShot && mode != IOTimerChanMode_Trigger) {
+	if (mode == IOTimerChanMode_OneShot) {
+		return -ENOTSUP;
+	}
+
+	if (mode != IOTimerChanMode_PWMOut) {
 		return -EINVAL;
 	}
 
