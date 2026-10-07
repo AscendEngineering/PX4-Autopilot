@@ -37,24 +37,21 @@
 #include <drivers/drv_hrt.h>
 #include <px4_arch/adc.h>
 
-// #include <rp2040_adc.h> Nuttx doesn't have this file in arch yet.
-#include <rp2040_gpio.h>
 
 /*
  * Register accessors.
- * For now, no reason not to just use ADC1.
  */
 #define REG(base, _reg) (*(volatile uint32_t *)((base) + (_reg)))
 
-#define rCS(base)	REG((base), 0x00)	// ADC Control and Status
-#define rRESULT(base)	REG((base), 0x04)	// Result of most recent ADC conversion
-#define rFCS(base)	REG((base), 0x08)	// FIFO control and status
-#define rFIFO(base)	REG((base), 0x0c)	// Conversion result FIFO
-#define rDIV(base)	REG((base), 0x10)	// Clock divider
-#define rINTR(base)	REG((base), 0x14)	// Raw Interrupts
-#define rINTE(base)	REG((base), 0x18)	// Interrupt Enable
-#define rINTF(base)	REG((base), 0x1c)	// Interrupt Force
-#define rINTS(base)	REG((base), 0x20)	// Interrupt status after masking & forcing
+#define rCS(base)	REG((base), RPI_ADC_CS_OFFSET)	// ADC Control and Status
+#define rRESULT(base)	REG((base), RPI_ADC_RESULT_OFFSET)	// Result of most recent ADC conversion
+#define rDIV(base)	REG((base), RPI_ADC_DIV_OFFSET)	// Clock divider
+
+/*
+ * Conversion timeouts. One conversion takes 96 ADC clocks at 48MHz, i.e. 2us.
+ */
+#define ADC_INIT_CONVERSION_TIMEOUT_US		500
+#define ADC_SAMPLE_CONVERSION_TIMEOUT_US	50
 
 int px4_arch_adc_init(uint32_t base_address)
 {
@@ -94,25 +91,23 @@ int px4_arch_adc_init(uint32_t base_address)
 	// requires about 100 clocks.) Also enable the temp
 	// sensor channel.
 
-	// Divide incoming 48MHz clock
-	// (Trigger adc once per n+1 cycles)
-	// So, n >= 96. Because, 1 sample = 96 clocks
-	rDIV(base_address) = 0 | (0 << 8); // 8-bit fraction value |  16-bit int value => n = int + frac/256
+	// Run the ADC at the full 48MHz clock: a divider of 0 means back-to-back conversions
+	rDIV(base_address) = 0;
 
 	// Enable temperature sensor and enable ADC
-	rCS(base_address) = 1 | (1 << 1);
+	rCS(base_address) = RPI_ADC_CS_EN | RPI_ADC_CS_TS_EN;
 	px4_usleep(10);
 
 	// Select temperature channel and kick off a sample and wait for it to complete
-	rCS(base_address) &= ~(0b111 << 12);	// Clear AINSEL
-	rCS(base_address) |= PX4_ADC_INTERNAL_TEMP_SENSOR_CHANNEL << 12;	// Choose temperature channel
+	rCS(base_address) &= ~RPI_ADC_CS_AINSEL_MASK;
+	rCS(base_address) |= PX4_ADC_INTERNAL_TEMP_SENSOR_CHANNEL << RPI_ADC_CS_AINSEL_SHIFT;
 	hrt_abstime now = hrt_absolute_time();
-	rCS(base_address) |= 1 << 2;	// Start a single conversion
+	rCS(base_address) |= RPI_ADC_CS_START_ONCE;
 
-	while (!(rCS(base_address) & (1 << 8))) {	// Check if the sample is ready
+	while (!(rCS(base_address) & RPI_ADC_CS_READY)) {
 
-		/* don't wait for more than 500us, since that means something broke - should reset here if we see this */
-		if ((hrt_absolute_time() - now) > 500) {
+		/* don't wait longer than this, since that means something broke - should reset here if we see this */
+		if ((hrt_absolute_time() - now) > ADC_INIT_CONVERSION_TIMEOUT_US) {
 			return -1;
 		}
 	}
@@ -134,17 +129,17 @@ uint32_t px4_arch_adc_sample(uint32_t base_address, unsigned channel)
 	irqstate_t flags = px4_enter_critical_section();
 
 	/* run a single conversion right now - should take about 96 cycles (a few microseconds) max */
-	rCS(base_address) &= ~(0b111 << 12);	// Clear AINSEL
-	rCS(base_address) |= channel << 12;	// Choose temperature channel
-	rCS(base_address) |= 1 << 2;	// Start a single conversion
+	rCS(base_address) &= ~RPI_ADC_CS_AINSEL_MASK;
+	rCS(base_address) |= (channel << RPI_ADC_CS_AINSEL_SHIFT) & RPI_ADC_CS_AINSEL_MASK;
+	rCS(base_address) |= RPI_ADC_CS_START_ONCE;
 
 	/* wait for the conversion to complete */
 	const hrt_abstime now = hrt_absolute_time();
 
-	while (!(rCS(base_address) & (1 << 8))) {	// Check if the sample is ready
+	while (!(rCS(base_address) & RPI_ADC_CS_READY)) {
 
-		/* don't wait for more than 50us, since that means something broke - should reset here if we see this */
-		if ((hrt_absolute_time() - now) > 50) {
+		/* don't wait longer than this, since that means something broke - should reset here if we see this */
+		if ((hrt_absolute_time() - now) > ADC_SAMPLE_CONVERSION_TIMEOUT_US) {
 			px4_leave_critical_section(flags);
 			return UINT32_MAX;
 		}

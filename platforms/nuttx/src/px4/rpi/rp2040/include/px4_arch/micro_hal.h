@@ -55,12 +55,14 @@ __BEGIN_DECLS
 #include <rp2040_spi.h>
 #include <rp2040_i2c.h>
 #include <hardware/rp2040_memorymap.h>
+#include <hardware/rp2040_adc.h>
 #include <hardware/rp2040_pwm.h>
 
 #define RPI_CHIP_NAME			"RP2040"
 
 /* Memory map */
 #define RPI_FLASH_BASE			RP2040_FLASH_BASE
+#define RPI_ADC_BASE			RP2040_ADC_BASE
 #define RPI_PWM_BASE			RP2040_PWM_BASE
 
 /* GPIO */
@@ -96,6 +98,17 @@ __BEGIN_DECLS
 #if defined(CONFIG_RP2040_SPI1)
 #  define RPI_SPI1_ENABLED		1
 #endif
+
+/* ADC */
+#define RPI_ADC_CS_OFFSET		RP2040_ADC_CS_OFFSET
+#define RPI_ADC_RESULT_OFFSET		RP2040_ADC_RESULT_OFFSET
+#define RPI_ADC_DIV_OFFSET		RP2040_ADC_DIV_OFFSET
+#define RPI_ADC_CS_EN			RP2040_ADC_CS_EN
+#define RPI_ADC_CS_TS_EN		RP2040_ADC_CS_TS_ENA
+#define RPI_ADC_CS_START_ONCE		RP2040_ADC_CS_START_ONCE
+#define RPI_ADC_CS_READY		RP2040_ADC_CS_READY
+#define RPI_ADC_CS_AINSEL_SHIFT		RP2040_ADC_CS_AINSEL_SHIFT
+#define RPI_ADC_CS_AINSEL_MASK		RP2040_ADC_CS_AINSEL_MASK
 
 /* PWM */
 #define RPI_PWM_NUM_SLICES		8
