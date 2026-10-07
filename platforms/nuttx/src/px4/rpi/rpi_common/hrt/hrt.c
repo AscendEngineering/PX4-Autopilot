@@ -36,12 +36,12 @@
  *
  * High-resolution timer callouts and timekeeping.
  *
- * RP2040's internal 64 bit timer can be used for this purpose.
+ * The RP2040/RP2350 internal 64 bit timer can be used for this purpose.
  *
  * Note that really, this could use systick too, but that's
  * monopolised by NuttX and stealing it would just be awkward.
  *
- * We don't use the NuttX RP2040 driver per se; rather, we
+ * We don't use the NuttX timer driver per se; rather, we
  * claim the timer and then drive it directly.
  */
 
@@ -63,18 +63,16 @@
 #include <drivers/drv_hrt.h>
 
 
-// #include "rp2040_gpio.h"
-
 #ifdef CONFIG_DEBUG_HRT
 #  define hrtinfo _info
 #else
 #  define hrtinfo(x...)
 #endif
 
-// RP2040 has a dedicated 64-bit timer which updates at 1MHz. This timer can be used here as hrt.
+// RP2040 and RP2350 have a dedicated 64-bit timer which updates at 1MHz. This timer can be used here as hrt.
 // The advantage is that this timer will not overflow as it can run for thousands of years.
 // This timer is activated when the clk_ref is configured for watchdog and TICK is enabled.
-// Fortunately, nuttx by default does this for us in rp2040_clock.c file. Thus, no init required.
+// Fortunately, nuttx by default does this for us in the chip's clock setup. Thus, no init required.
 // Four individual interrupts can be configured which are triggered when the lower 32-bits of the timer
 // matches with the value in ALARMx register. This allows for the interrupt to fire at ~72 min in future.
 // Take a look at src/drivers/drv_hrt.h to find all the necessary functions required to be implemented.
@@ -83,9 +81,9 @@
 
 /* HRT configuration */
 #if   HRT_TIMER == 1
-# define HRT_TIMER_BASE		RP2040_TIMER_BASE
+# define HRT_TIMER_BASE		RPI_TIMER_BASE
 #else
-# error HRT_TIMER must have a value of 1 because there is only one timer in RP2040
+# error HRT_TIMER must have a value of 1; only the first timer block is claimed here
 #endif
 
 /**
@@ -114,41 +112,46 @@
  */
 #define REG(_reg)	(*(volatile uint32_t *)(HRT_TIMER_BASE + _reg))
 
-#define rTIMEHW		REG(0x0)	// Write to bits 63:32 of time always write timelw before timehw
-#define rTIMELW		REG(0x4)	// Write to bits 31:0 of time writes do not get copied to time until timehw is written
-#define rTIMEHR		REG(0x8)	// Read from bits 63:32 of time always read timelr before timehr
-#define rTIMELR		REG(0xc)	// Read from bits 31:0 of time
-#define rALARM0		REG(0x10)	// Arm alarm 0, and configure the time it will fire
-#define rALARM1		REG(0x14)	// Arm alarm 1, and configure the time it will fire
-#define rALARM2		REG(0x18)	// Arm alarm 2, and configure the time it will fire
-#define rALARM3		REG(0x1c)	// Arm alarm 3, and configure the time it will fire
-#define rARMED		REG(0x20)	// Indicates the armed/disarmed status of each alarm
-#define rTIMERAWH	REG(0x24)	// Raw read from bits 63:32 of time
-#define rTIMERAWL	REG(0x28)	// Raw read from bits 31:0 of time
-#define rDBGPAUSE	REG(0x2c)	// Set bits high to enable pause when the corresponding debug ports are active
-#define rPAUSE		REG(0x30)	// Set high to pause the timer
-#define rINTR		REG(0x34)	// Raw Interrupts
-#define rINTE		REG(0x38)	// Interrupt Enable
-#define rINTF		REG(0x3c)	// Interrupt Force
-#define rINTS		REG(0x40)	// Interrupt status after masking & forcing
+// Offsets come from the chip's px4_arch/micro_hal.h rather than literals, because
+// RP2350 is not laid out like RP2040 here: it inserts LOCKED (0x34) and SOURCE
+// (0x38) before the interrupt registers, shifting INTR/INTE/INTF/INTS up by 8
+// bytes. Using the RP2040 offsets on RP2350 would write the timer-lock bit
+// instead of the raw interrupt register, which cannot be undone without a reset.
+#define rTIMEHW		REG(RPI_TIMER_TIMEHW_OFFSET)		// Write to bits 63:32 of time, always write timelw before timehw
+#define rTIMELW		REG(RPI_TIMER_TIMELW_OFFSET)		// Write to bits 31:0 of time, not copied to time until timehw is written
+#define rTIMEHR		REG(RPI_TIMER_TIMEHR_OFFSET)		// Read from bits 63:32 of time, always read timelr before timehr
+#define rTIMELR		REG(RPI_TIMER_TIMELR_OFFSET)		// Read from bits 31:0 of time
+#define rALARM0		REG(RPI_TIMER_ALARM0_OFFSET)		// Arm alarm 0, and configure the time it will fire
+#define rALARM1		REG(RPI_TIMER_ALARM1_OFFSET)		// Arm alarm 1, and configure the time it will fire
+#define rALARM2		REG(RPI_TIMER_ALARM2_OFFSET)		// Arm alarm 2, and configure the time it will fire
+#define rALARM3		REG(RPI_TIMER_ALARM3_OFFSET)		// Arm alarm 3, and configure the time it will fire
+#define rARMED		REG(RPI_TIMER_ARMED_OFFSET)		// Indicates the armed/disarmed status of each alarm
+#define rTIMERAWH	REG(RPI_TIMER_TIMERAWH_OFFSET)	// Raw read from bits 63:32 of time
+#define rTIMERAWL	REG(RPI_TIMER_TIMERAWL_OFFSET)	// Raw read from bits 31:0 of time
+#define rDBGPAUSE	REG(RPI_TIMER_DBGPAUSE_OFFSET)	// Set bits high to enable pause when the corresponding debug ports are active
+#define rPAUSE		REG(RPI_TIMER_PAUSE_OFFSET)		// Set high to pause the timer
+#define rINTR		REG(RPI_TIMER_INTR_OFFSET)		// Raw Interrupts
+#define rINTE		REG(RPI_TIMER_INTE_OFFSET)		// Interrupt Enable
+#define rINTF		REG(RPI_TIMER_INTF_OFFSET)		// Interrupt Force
+#define rINTS		REG(RPI_TIMER_INTS_OFFSET)		// Interrupt status after masking & forcing
 
 /*
  * Specific registers and bits used by HRT sub-functions
  */
 #if HRT_TIMER_CHANNEL == 1
-# define HRT_TIMER_VECTOR	RP2040_TIMER_IRQ_0	// Timer alarm interrupt vector //
+# define HRT_TIMER_VECTOR	RPI_TIMER_IRQ_0	// Timer alarm interrupt vector //
 # define HRT_ALARM_VALUE	rALARM0			// Alarm register for HRT (similar to compare register for other MCUs) //
 # define HRT_ALARM_ENABLE	(1 << 0)		// Bit-0 for alarm 0 //
 #elif HRT_TIMER_CHANNEL == 2
-# define HRT_TIMER_VECTOR	RP2040_TIMER_IRQ_1	// Timer alarm interrupt vector //
+# define HRT_TIMER_VECTOR	RPI_TIMER_IRQ_1	// Timer alarm interrupt vector //
 # define HRT_ALARM_VALUE	rALARM1			// Alarm register for HRT (similar to compare register for other MCUs) //
 # define HRT_ALARM_ENABLE	(1 << 1)		// Bit-1 for alarm 1 //
 #elif HRT_TIMER_CHANNEL == 3
-# define HRT_TIMER_VECTOR	RP2040_TIMER_IRQ_2	// Timer alarm interrupt vector //
+# define HRT_TIMER_VECTOR	RPI_TIMER_IRQ_2	// Timer alarm interrupt vector //
 # define HRT_ALARM_VALUE	rALARM2			// Alarm register for HRT (similar to compare register for other MCUs) //
 # define HRT_ALARM_ENABLE	(1 << 2)		// Bit-2 for alarm 2 //
 #elif HRT_TIMER_CHANNEL == 4
-# define HRT_TIMER_VECTOR	RP2040_TIMER_IRQ_3	// Timer alarm interrupt vector //
+# define HRT_TIMER_VECTOR	RPI_TIMER_IRQ_3	// Timer alarm interrupt vector //
 # define HRT_ALARM_VALUE	rALARM3			// Alarm register for HRT (similar to compare register for other MCUs) //
 # define HRT_ALARM_ENABLE	(1 << 3)		// Bit-3 for alarm 3 //
 #else
@@ -457,6 +460,7 @@ hrt_tim_isr(int irq, void *context, void *arg)
 	return OK;
 }
 
+#ifdef HRT_PPM_CHANNEL
 /**
  * Handle the compare interrupt by calling the callout dispatcher
  * and then re-scheduling the next deadline.
@@ -474,6 +478,7 @@ hrt_ppm_isr(int irq, void *context, void *arg)
 	hrt_ppm_decode(counter);
 	return OK;
 }
+#endif /* HRT_PPM_CHANNEL */
 
 /**
  * Fetch a never-wrapping absolute time value in microseconds from
@@ -481,7 +486,7 @@ hrt_ppm_isr(int irq, void *context, void *arg)
  */
 hrt_abstime hrt_absolute_time(void)
 {
-	/* Taken from rp2040 datasheet pg. 558 */
+	/* Taken from the RP2040 datasheet, 4.6.3 "Reading the time" */
 	uint32_t hi = rTIMERAWH;
 	uint32_t lo;
 
