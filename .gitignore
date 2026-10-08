@@ -124,3 +124,7 @@ _emscripten_sdk/
 # Claude Code local settings and worktrees
 .claude/settings.local.json
 /.claude/worktrees/
+
+# Local RP2350 reference and design documents
+/docs/RP-008373-DS-2-rp2350-datasheet.pdf
+/docs/superpowers/
