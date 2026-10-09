@@ -48,7 +48,12 @@
 #define MHZ                     1000000
 
 #define BOARD_XOSC_FREQ         (12 * MHZ)
-#define BOARD_XOSC_STARTUPDELAY 64
+/* Multiplier on the ~1 ms crystal start-up count, as in NuttX's own Pico 2
+ * board. rp23xx_xosc.c scales it by 6 and asserts the result is below 8192
+ * (STARTUP register width); the RP2040 pico board's 64 was milliseconds for
+ * a different formula and trips that assert before the FPU is enabled,
+ * which locks the core with no way to see why. */
+#define BOARD_XOSC_STARTUPDELAY 1
 #define BOARD_PLL_SYS_FREQ      (150 * MHZ)
 #define BOARD_PLL_USB_FREQ      (48 * MHZ)
 
