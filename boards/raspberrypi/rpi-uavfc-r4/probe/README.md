@@ -262,3 +262,50 @@ assert after it reboots the board (`RESET_ON_ASSERT=2`):
 4. NuttX objects live in the submodule tree and are not rebuilt when
    `board.h` or the generated `config.h` change. `rm -rf build/<target>` is
    not enough; use `make clean` first.
+
+### Phase 3, 2026-10-09: PX4 bootloader protocol on the Pico 2
+
+The image starts `bootloader_main`. The application probe was rebuilt with
+`PROBE_CPU_HZ=150000000` because the NuttX bootloader hands off with
+clk_sys at 150 MHz, and then with `APP_BLINK_TICKS=1000` (0.5 Hz) so the
+eye can tell one upload from the next. All uploads ran with
+`Tools/px4_uploader.py --debug`; the uploader finds the board on its own
+through `/dev/ttyACM*`, `--port` only pins the device.
+
+| item | measured |
+|------|----------|
+| hand-off delay, J-Link reset / cold replug (host appear-to-gone, short by the enumeration time) | 4.62 s / 4.90 s |
+| SysTick after hand-off | CLKSOURCE processor, reload 149999 |
+| erased application sector | resident 20 s and counting, no timeout |
+| upload of the 1152 B probe, blank flash | 3.4 s total: erase 1.18 s, program 13 ms, GET_CRC send-to-reply 0.98 s |
+| REBOOT | direct jump, device gone within 0.2 s, no re-enumeration, SCRATCH0 untouched |
+| upload of the 3.9 MB image, blank flash | 52 s total: program 44.7 s (about 89 kB/s, non-windowed), CRC pass |
+| erase of a fully written region (64 KB blocks; spec 3.2 says sectors) | 6.8 s from CHIP_ERASE to complete, limit 30 s |
+| interrupted upload (killed 35 s into programming), power cycle | resident within 2 s, no timeout; page 0 still 0xff, later pages match the image |
+| wrong board id (7301) | refused after identify, before erase; flash intact; board stays resident until power cycle |
+| gdb client attached through erase and program | CFSR 0 after the upload |
+| BOOTSEL install of `extras/raspberrypi_rpi-uavfc-r4_bootloader.uf2` | enumerates 1.7 s after the copy, resident 4.46 s, hands off |
+
+What it took:
+
+1. The first upload lost every reply after GET_CRC. The CRC word arrived,
+   the INSYNC behind it never did, and from then on the bootloader received
+   but never transmitted. Over SWD the bulk IN buffer control read
+   `0x2002`: length 2, FULL and AVAILABLE both clear. The fork's
+   `rp23xx_usbdev.c` arms a buffer with AVAILABLE and FULL in one write;
+   the RP2350 needs AVAILABLE set in a second write after the other fields
+   settle. Upstream apache/nuttx d89019aa78, cfeca506f8 and a85b28bc2c fix
+   this and two related arming bugs; they are `nuttx-patches/0003` to
+   `0005` and commits on the submodule branch `rp2350-backports`.
+2. GET_CRC over the 3.9 MB region takes 0.98 s on the chip (about 4 MB/s
+   through the flash cache and XIP). The uploader sleeps 0.5 s and then
+   allows 0.5 s, so the margin is about 20 ms. It passed every time, but a
+   slower QSPI on the flight controller would fail by timeout. Phase 4
+   either speeds the bootloader's CRC loop or gives the uploader a longer
+   GET_CRC read timeout.
+3. After an upload is refused or interrupted the bootloader stays resident
+   with no timeout, because identify cancels it. A power cycle brings the
+   application back. User-facing docs should say so.
+4. The J-Link GDB server loses the target across a power cycle. Restart it
+   (`pkill -x JLinkGDBServerC`, start again) before the first SWD read after
+   a replug, or reads fail with "Cannot access memory".
