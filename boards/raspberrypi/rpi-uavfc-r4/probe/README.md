@@ -1,0 +1,197 @@
+# RP2350 bare-metal probe (phase 1)
+
+Standalone bench tool for `rpi-uavfc-r4`. Not part of the PX4 build. It
+answers the hardware questions before any NuttX image exists: does the ROM
+accept the image, is the flash and SRAM map right, do the ROM flash calls
+work with XIP down, does a jump to the application address work.
+
+This probe is development scaffolding on the bootloader feature branch. The
+pull request that delivers the board carries only the production bootloader;
+the probe is not part of it. What survives into production is listed under
+"What carries forward".
+
+Spec: `docs/superpowers/specs/2026-10-08-rp2350-bootloader-phases-design.md`
+section 1 (local, not in git).
+
+## Build
+
+```
+make            # build/probe_bl.{elf,bin,uf2}  at 0x10000000
+                # build/probe_app.{elf,bin,uf2} at 0x10020000
+make check      # IMAGE_DEF and vector layout on both .bin, UF2 round trip
+```
+
+Needs `arm-none-eabi-gcc` and Python 3. `PROBE_CPU_HZ` (default 12 MHz) is
+the assumed processor clock for SysTick; no PLL is configured, so blink
+rates and the 5 s delay are approximate until calibrated (below).
+
+`BOARD` selects the LED pins. The default is the flight controller: blue on
+GPIO0, green on GPIO1, both active low (schematic U1 pins 77 and 78, LEDs
+pulled to +3V3 through R33 and R34). `make BOARD=pico2` targets a Raspberry
+Pi Pico 2 for desk work: the single onboard LED on GPIO25 takes the "blue"
+role, GPIO16 takes "green" (a bare header pin unless an LED is wired), both
+active high. Changing `BOARD` rebuilds both images without a clean. The
+`.vscode` "probe build" task passes `BOARD=pico2` while development is on
+the Pico 2; drop that argument on the real board.
+
+## Install
+
+1. Hold BOOTSEL, plug in USB. The `RP2350` drive appears.
+2. Copy `build/probe_bl.uf2` to it. The drive ejects and the blue LED
+   (GPIO0) blinks at about 1 Hz.
+3. Later, repeat with `build/probe_app.uf2`. This writes only the sectors at
+   0x10020000 and leaves the bootloader probe intact.
+
+The ROM only ever boots the image at 0x10000000. The bootloader probe is what
+jumps to the application probe.
+
+## Inspect over SWD
+
+```
+openocd -f openocd.cfg      # edit the adapter line first
+> halt
+> mdw 0x20081000 32
+```
+
+With a SEGGER J-Link, `.vscode/launch.json` has cortex-debug configurations
+that build, flash and run each image (`probe_bl`, `probe_app`). In the
+Debug Console type GDB commands bare, without the `-exec` prefix used by
+cppdbg:
+
+```
+x/27xw 0x20081000       # status block as words
+p/x status              # same, by field name
+```
+
+For scripted reads, run the server once and drive it with `gdb-multiarch
+-batch`:
+
+```
+JLinkGDBServerCLExe -nogui -if swd -speed 4000 -port 2331 -device RP2350_M33_0
+gdb-multiarch -batch -ex 'target extended-remote :2331' -ex 'monitor halt' \
+    -ex 'x/27xw 0x20081000' -ex 'monitor go'
+```
+
+J-Link `monitor reset` is a core reset. SIO, GPIO and CLOCKS state survive
+it, so after a BOOTSEL session the chip keeps running from PLL_USB at 48 MHz
+and every probe timing is four times fast. Power cycle before trusting any
+clock or blink measurement. The same applies to the launch configurations,
+which reset through J-Link after flashing.
+
+Status block layout (word index, all little-endian):
+
+| idx | field | expect (bootloader probe) |
+|-----|-------|---------------------------|
+| 0 | magic | 0x50524f42 "PROB" (app: 0x41505050 "APPP") |
+| 1 | step | 0x1c (app: 0x1a) |
+| 2 | chip_id | SYSINFO CHIP_ID, low bit set |
+| 3-7 | image_def | ffffded3 10210142 000001ff 00000000 ab123579 |
+| 8 | app_first_word | 0xffffffff with no app, 0x2007fff8 with app |
+| 9 | scratch0 | WATCHDOG SCRATCH0 |
+| 10-15 | rom_fn | all non-zero, inside ROM (below 0x8000) |
+| 16-17 | device_id | 64-bit device ID |
+| 18 | sram_test | 0x0f |
+| 19 | flash_test | 1 (2 erase readback failed, 3 program readback failed) |
+| 20 | erase_cycles | processor cycles for one 4 KB sector erase |
+| 21 | program_cycles | processor cycles for one 256 B page |
+| 22 | jump_state | 1 rejected (no app), 2 accepted |
+| 23 | vtor | 0x10000000 (app: 0x10020000) |
+| 24 | systick_irqs | increasing, 1 per nominal ms |
+| 25 | xip_setup_ptr | boot RAM address 0x400e00xx |
+| 26 | fault | 0, else 0xdead0000 \| exception number |
+
+`xip_setup_ptr` and `fault` are additions beyond spec 1.4; the earlier
+offsets match the spec. Each image clears the entire block on startup, so
+the app's flash-test, timing and jump fields are zero (not run).
+
+Flash durations use TIMER1 with `SOURCE=CLK_SYS`, so they count processor
+cycles even while flash operations mask interrupts. TIMER0 is left to the
+ROM. The 32-bit elapsed counts allow operations shorter than one counter
+wrap (over 28 seconds at 150 MHz). On the bench, check that an erase taking
+tens of milliseconds reports the corresponding cycle count, rather than
+one SysTick period. SysTick is used only for the blink and startup delay;
+its ISR count does not include every millisecond spent with interrupts masked.
+
+LED patterns without SWD: blue 1 Hz = bootloader probe running; green on =
+flash test passed; blue 4 Hz = application probe running; both solid = fault.
+
+## Clock calibration
+
+`systick_irqs` counts nominal milliseconds at `PROBE_CPU_HZ`. Read it twice
+over SWD one wall-clock minute apart. Actual processor frequency is
+`PROBE_CPU_HZ * delta / 60000`. Rebuild with that value for exact timing.
+Use `make PROBE_CPU_HZ=<frequency>`; changing the value rebuilds both images
+without requiring a clean. Sample after the flash test, while one image
+remains running, and exclude time spent halted by the debugger.
+
+## Exit criteria
+
+Spec section 1.5. Items 1 and 6 are covered by `make check`; 2 to 5 are
+bench steps using the table above.
+
+## What carries forward
+
+`probe.ld` memory regions and IMAGE_DEF block, `flash.c`, the jump
+validation and hand-off sequence in `probe.c`, and `Tools/uf2conv.py`.
+`start.c`, the rest of `probe.c` and the Makefile are probe only.
+
+## Bench results, 2026-10-09
+
+Hardware: Raspberry Pi Pico 2 (RP2350A, 4 MB flash), J-Link EDU Mini over
+SWD, both images built with `BOARD=pico2` and flashed through cortex-debug.
+The flight controller has not been on the bench yet; its LED pins were
+checked against the schematic only.
+
+Status block of the bootloader probe after one full run, before the app
+was installed:
+
+| field | value | note |
+|-------|-------|------|
+| magic, step | PROB, 0x1c | all three steps reached |
+| chip_id | 0x20004927 | RP2350, part 0x0004, revision 2 |
+| image_def | ded3 0142 01ff 0000 3579 | read back through XIP, matches |
+| rom_fn | 0xc1d 0xd65 0xd0d 0xcd1 0x3711 0x9c1 | all resolved, all in ROM |
+| device_id | 0x0c8874e5_79699781 | |
+| sram_test | 0x0f | all four boundary words pass |
+| flash_test | 1 | sector 1007 erase, program and readback pass |
+| erase_cycles | 1,854,949 | one 4 KB sector |
+| program_cycles | 55,011 | one 256 B page, including XIP exit and re-entry |
+| jump_state | 1 | rejected: app region erased, MSP read 0xffffffff |
+| xip_setup_ptr | 0x400e0000 | ROM's XIP re-entry copy in BOOTRAM |
+| fault | 0 | |
+
+After installing the app probe and power cycling, the block reads APPP,
+step 0x1a, `vtor` 0x10020000, `app_first_word` 0x2007fff8 and a rising
+`systick_irqs`. The hand-off works from a cold boot with no debugger
+attached. The bootloader probe's own results are cleared by the app, as
+designed; to read them, run the bootloader configuration and
+`break jump_tail`.
+
+Processor clock, measured as `systick_irqs` against the host clock:
+
+| condition | clk_sys source | tick rate | clk_sys |
+|-----------|----------------|-----------|---------|
+| cold power-up, flash boot | ROSC, direct | 992 /s | 11.9 MHz |
+| after BOOTSEL, then J-Link reset | PLL_USB via aux | 3,998 /s | 48.0 MHz |
+
+The cold-boot figure confirms the ROM leaves flash boot on the ring
+oscillator near 12 MHz with XOSC off and both PLLs powered down, so the
+12 MHz default is within one percent on this chip. ROSC drifts with
+temperature and voltage, and the second row shows the bootloader can
+inherit a completely different clock from the previous reset path. The
+production bootloader must bring up XOSC and PLL_SYS itself before anything
+timing-dependent. At the cycle counts above, a sector erase is about 155 ms
+and a page program about 4.6 ms at 11.9 MHz.
+
+Open observations:
+
+- The cortex-debug `runToEntryPoint` breakpoint at the app's `main` did
+  not fire after the bootloader's jump, although the app demonstrably ran.
+  Breakpoints set after the jump have not been tried yet. Harmless for the
+  probe, worth understanding before debugging the production app from
+  reset.
+- Malformed app vectors (bad MSP, even or out-of-range reset vector) have
+  not been exercised on hardware; only the erased case has.
+- While the core sleeps in `wfi`, J-Link occasionally reports `pc` as
+  0xdeadbeee on halt. The status block and tick counter are unaffected.
+
