@@ -34,98 +34,54 @@
 
 /**
  * @file board_reset.cpp
- * Implementation of RP2040/RP2350 based Board RESET API
+ *
+ * Reset paths for RP2040/RP2350. The PX4 bootloader reads WATCHDOG
+ * SCRATCH0 at start, which survives a SYSRESETREQ soft reset and not a
+ * power-on; 0xb007b007 asks it to stay resident. The bootloader zeroes the
+ * register as soon as it reads it, so a crash or watchdog reset never lands
+ * there. REBOOT_TO_ISP hands the chip to the ROM's USB drive.
  */
 
 #include <px4_platform_common/px4_config.h>
 #include <px4_platform_common/shutdown.h>
-#include <systemlib/px4_macros.h>
+#include <px4_arch/rpi_rom.h>
 #include <errno.h>
-
 #include <nuttx/board.h>
+#include "arm_internal.h"
 
-// Functions in here are modified so that board_reset() function resembles
-// the one available in nuttx's boards/raspberrypi-pico folder.
+#if defined(CONFIG_BOARDCTL_RESET)
 
-#ifdef CONFIG_BOARDCTL_RESET
+static constexpr uint32_t BOOT_TO_BOOTLOADER_MAGIC = 0xb007b007u;
 
-/****************************************************************************
- * Name: board_configure_reset
- *
- * Description:
- *   Configures the device that maintains the state shared by the
- *   application and boot loader. This is usually an RTC.
- *
- * Input Parameters:
- *   mode  - The type of reset. See reset_mode_e
- *
- * Returned Value:
- *   0 for Success
- *   1 if invalid argument
- *
- ****************************************************************************/
+int board_configure_reset(reset_mode_e mode, uint32_t arg)
+{
+	(void)arg;
 
-// static const uint32_t modes[] = {
-// 	/*                                      to  tb   */
-// 	/* BOARD_RESET_MODE_CLEAR                5   y   */  0,
-// 	/* BOARD_RESET_MODE_BOOT_TO_BL           0   n   */  0xb007b007,
-// 	/* BOARD_RESET_MODE_BOOT_TO_VALID_APP    0   y   */  0xb0070002,
-// 	/* BOARD_RESET_MODE_CAN_BL               10  n   */  0xb0080000,
-// 	/* BOARD_RESET_MODE_RTC_BOOT_FWOK        0   n   */  0xb0093a26
-// };
+	switch (mode) {
+	case BOARD_RESET_MODE_CLEAR:
+		putreg32(0, RPI_BOOT_SIGNATURE_REG);
+		return OK;
 
-// int board_configure_reset(reset_mode_e mode, uint32_t arg)
-// {
-// 	int rv = -1;
+	case BOARD_RESET_MODE_BOOT_TO_BL:
+		putreg32(BOOT_TO_BOOTLOADER_MAGIC, RPI_BOOT_SIGNATURE_REG);
+		return OK;
 
-// 	if (mode < arraySize(modes)) {
-
-// 		stm32_pwr_enablebkp(true);
-
-// 		arg = mode == BOARD_RESET_MODE_CAN_BL ? arg & ~0xff : 0;
-
-// 		// Check if we can to use the new register definition
-
-// #ifndef STM32_RTC_BK0R
-// 		*(uint32_t *)STM32_BKP_BASE = modes[mode] | arg;
-// #else
-// 		*(uint32_t *)STM32_RTC_BK0R = modes[mode] | arg;
-// #endif
-// 		stm32_pwr_enablebkp(false);
-// 		rv = OK;
-// 	}
-
-// 	return rv;
-// }
-
-/****************************************************************************
- * Name: board_reset
- *
- * Description:
- *   Reset board.  Support for this function is required by board-level
- *   logic if CONFIG_BOARDCTL_RESET is selected.
- *
- * Input Parameters:
- *   status - Status information provided with the reset event.  This
- *            meaning of this status information is board-specific.  If not
- *            used by a board, the value zero may be provided in calls to
- *            board_reset().
- *
- * Returned Value:
- *   If this function returns, then it was not possible to power-off the
- *   board due to some constraints.  The return value int this case is a
- *   board-specific reason for the failure to shutdown.
- *
- ****************************************************************************/
+	default:
+		return -EINVAL;
+	}
+}
 
 int board_reset(int status)
 {
 	if (status == REBOOT_TO_BOOTLOADER) {
-		// board_configure_reset(BOARD_RESET_MODE_BOOT_TO_BL, 0);
+		board_configure_reset(BOARD_RESET_MODE_BOOT_TO_BL, 0);
+
+	} else if (status == REBOOT_TO_ISP) {
+		rpi_rom_reboot_bootsel();	/* returns only on failure; fall through to a plain reset */
 	}
 
 #if defined(BOARD_HAS_ON_RESET)
-	// board_on_reset(status);
+	board_on_reset(status);
 #endif
 
 	up_systemreset();
@@ -133,27 +89,3 @@ int board_reset(int status)
 }
 
 #endif /* CONFIG_BOARDCTL_RESET */
-
-#if defined(SUPPORT_ALT_CAN_BOOTLOADER)
-/****************************************************************************
- * Name: board_booted_by_px4
- *
- * Description:
- *   Determines if the the boot loader was PX4
- *
- * Input Parameters:
- *   none
- *
- * Returned Value:
- *   true if booted byt a PX4 bootloader.
- *
- ****************************************************************************/
-bool board_booted_by_px4(void)
-{
-	uint32_t *vectors = (uint32_t *) STM32_FLASH_BASE;
-
-	/* Nuttx uses common vector */
-
-	return (vectors[2] == vectors[3]) && (vectors[4] == vectors[5]);
-}
-#endif
