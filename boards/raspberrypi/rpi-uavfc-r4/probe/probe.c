@@ -14,7 +14,10 @@ volatile struct status_block status __attribute__((section(".status")));
 
 /* SysTick: 1 ms nominal tick on the processor clock (CLKSOURCE=1). */
 #define SYSTICK_RELOAD   (PROBE_CPU_HZ / 1000u - 1u)
-#define BLINK_TICKS      (PROBE_ROLE_APP ? 125u : 500u)   /* 4 Hz : 1 Hz */
+#ifndef APP_BLINK_TICKS
+#define APP_BLINK_TICKS  125u                              /* app LED: 4 Hz by default */
+#endif
+#define BLINK_TICKS      (PROBE_ROLE_APP ? APP_BLINK_TICKS : 500u)   /* app : bootloader 1 Hz */
 #define JUMP_DELAY_TICKS 5000u
 
 static volatile uint32_t ticks;

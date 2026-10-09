@@ -14,6 +14,9 @@ SIZE    := $(CROSS)size
 PYTHON  ?= python3
 
 PROBE_CPU_HZ ?= 12000000
+# Application LED half-period in ms ticks: 125 is 4 Hz, 1000 is 0.5 Hz. Change it between
+# uploads so the eye can tell which image is running.
+APP_BLINK_TICKS ?= 125
 # BOARD=uavfc (default): LEDs on GPIO0/1 active low. BOARD=pico2: GPIO25 active high.
 BOARD ?= uavfc
 ifeq ($(BOARD),pico2)
@@ -31,7 +34,7 @@ CFLAGS := -mcpu=cortex-m33 -mthumb -mfloat-abi=soft \
           -fno-tree-loop-distribute-patterns \
           -ffunction-sections -fdata-sections \
           -Wall -Wextra -Werror -Wundef \
-          -DPROBE_CPU_HZ=$(PROBE_CPU_HZ)u $(BOARD_FLAGS)
+          -DPROBE_CPU_HZ=$(PROBE_CPU_HZ)u -DAPP_BLINK_TICKS=$(APP_BLINK_TICKS)u $(BOARD_FLAGS)
 
 LDFLAGS := -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -nostartfiles -nostdlib \
            -Wl,--gc-sections
