@@ -131,3 +131,6 @@ _emscripten_sdk/
 
 # RP2350 bare-metal bench probe (phase 1 scaffolding, kept on the bench machine only)
 /boards/raspberrypi/rpi-uavfc-r4/probe/
+
+# Personal Claude Code instructions (CLAUDE.md itself is tracked and shared)
+CLAUDE.local.md
