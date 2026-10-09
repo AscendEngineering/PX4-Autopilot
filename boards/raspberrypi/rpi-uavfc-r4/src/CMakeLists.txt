@@ -34,16 +34,16 @@ if("${PX4_BOARD_LABEL}" STREQUAL  "bootloader")
 	add_compile_definitions(BOOTLOADER)
 	add_library(drivers_board
 		bootloader_main.c
-		init.c
-		usb.c
+		status_main.c	# phase 2 diagnostic entry point, removed in phase 3
 		timer_config.cpp
+		usb.c
 	)
 	target_link_libraries(drivers_board
 		PRIVATE
-			nuttx_arch # sdio
-			nuttx_drivers # sdio
-			px4_layer #gpio
-			arch_io_pins # iotimer
+			nuttx_arch
+			nuttx_drivers
+			px4_layer
+			arch_io_pins
 			bootloader
 	)
 	target_include_directories(drivers_board PRIVATE ${PX4_SOURCE_DIR}/platforms/nuttx/src/bootloader/common)
