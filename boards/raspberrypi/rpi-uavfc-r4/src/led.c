@@ -31,30 +31,66 @@
  *
  ****************************************************************************/
 
+
 /**
- * @file usb.c
+ * @file led.c
  *
- * USB device hooks. The RP2350 USB controller senses VBUS itself
- * (board_config.h BOARD_ADC_USB_CONNECTED); no pin to configure.
+ * Two active-low LEDs: blue GPIO0 (activity, overload), green GPIO1.
  */
 
 #include <px4_platform_common/px4_config.h>
-
-#include <sys/types.h>
-#include <stdint.h>
 #include <stdbool.h>
-#include <debug.h>
-
-#include <nuttx/usb/usbdev.h>
-#include <nuttx/usb/usbdev_trace.h>
-
 #include "board_config.h"
+#include <drivers/drv_board_led.h>
 
-__EXPORT void rp23xx_usbinitialize(void)
+__BEGIN_DECLS
+extern void led_init(void);
+extern void led_on(int led);
+extern void led_off(int led);
+extern void led_toggle(int led);
+__END_DECLS
+
+static uint32_t led_pin(int led)
 {
+	switch (led) {
+	case LED_BLUE: return GPIO_LED_BLUE;
+
+	case LED_GREEN: return GPIO_LED_GREEN;
+
+	default: return 0;
+	}
 }
 
-__EXPORT void rp23xx_usbsuspend(FAR struct usbdev_s *dev, bool resume)
+__EXPORT void led_init(void)
 {
-	uinfo("resume: %d\n", resume);
+	px4_arch_configgpio(GPIO_LED_BLUE);
+	px4_arch_configgpio(GPIO_LED_GREEN);
+}
+
+static void set_led(int led, bool on)
+{
+	uint32_t pin = led_pin(led);
+
+	if (pin != 0) {
+		px4_arch_gpiowrite(pin, !on);	/* active low */
+	}
+}
+
+__EXPORT void led_on(int led)
+{
+	set_led(led, true);
+}
+
+__EXPORT void led_off(int led)
+{
+	set_led(led, false);
+}
+
+__EXPORT void led_toggle(int led)
+{
+	uint32_t pin = led_pin(led);
+
+	if (pin != 0) {
+		px4_arch_gpiowrite(pin, !px4_arch_gpioread(pin));
+	}
 }

@@ -31,101 +31,74 @@
  *
  ****************************************************************************/
 
+#pragma once
+
 /**
  * @file board_config.h
  *
- * board internal definitions
+ * RPI-UAVFC-R4 (RP2350B) firmware configuration. Scope of this phase: boots
+ * NSH over USB, keeps parameters in flash, reboots to the PX4 bootloader.
+ * The flash map is the bootloader's (src/hw_config.h).
  */
-
-#pragma once
-
-/****************************************************************************************************
- * Included Files
- ****************************************************************************************************/
 
 #include <px4_platform_common/px4_config.h>
 #include <nuttx/compiler.h>
 #include <stdint.h>
+#include <hardware/rp23xx_usbctrl_regs.h>
 
-//TODO: verify LEDs
-/* LEDs */
-// LED1 - GPIO 25 - Green
-#define GPIO_LED1       PX4_MAKE_GPIO_OUTPUT_CLEAR(25) // Take a look at rpi_common micro_hal.h
-#define GPIO_LED_BLUE   GPIO_LED1
+/* LEDs: schematic U1 pin 77 GPIO0 BF_BLUE_LEDn, pin 78 GPIO1 BF_GREEN_LEDn,
+ * pulled to +3V3: active low, so an output set high is off. */
+#define GPIO_LED_BLUE		PX4_MAKE_GPIO_OUTPUT_SET(0)
+#define GPIO_LED_GREEN		PX4_MAKE_GPIO_OUTPUT_SET(1)
+#define BOARD_OVERLOAD_LED	LED_BLUE
 
-#define BOARD_OVERLOAD_LED     LED_BLUE
+/* board_reset() calls board_on_reset() (init.c): PWM pins low before the reset */
+#define BOARD_HAS_ON_RESET	1
 
-/*
- * ADC channels
- *
- * These are the channel numbers of the ADCs of the microcontroller that can be used by the Px4 Firmware in the adc driver
- */
-#define ADC_CHANNELS (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3)	// Change this later based on the adc channels actually used
+/* No VBUS sense GPIO is wired. The USB controller reports VBUS itself
+ * (SIE_STATUS bit 0). A plain volatile read keeps this header free of
+ * arm_internal.h, which not every includer has. */
+static inline int board_usb_vbus_present(void)
+{
+	return (*(volatile uint32_t *)RP23XX_USBCTRL_REGS_SIE_STATUS & RP23XX_USBCTRL_REGS_SIE_STATUS_VBUS_DETECTED) != 0;
+}
+#define BOARD_ADC_USB_CONNECTED	board_usb_vbus_present()
 
-#define ADC_BATTERY_VOLTAGE_CHANNEL  1			// Corresponding GPIO 27. Used in init.c for disabling GPIO_IE
-#define ADC_BATTERY_CURRENT_CHANNEL  2			// Corresponding GPIO 28. Used in init.c for disabling GPIO_IE
-#define ADC_RC_RSSI_CHANNEL          0
+/* Flash-based parameters in the 64 KB reservation at the top of the 4 MB
+ * part (hw_config.h APP_RESERVATION_SIZE): two 32 KB pages, numbered by
+ * their first 4 kB sector (1008 and 1016), served by
+ * platforms/nuttx/src/px4/rpi/rpi_common/flash/rpi_progmem.c. */
+#define FLASH_BASED_PARAMS
+#define BOARD_USE_EXTERNAL_FLASH
+#define BOARD_PARAMS_FLASH_ADDRESS	0x103f0000u
+#define BOARD_PARAMS_FLASH_SIZE		(64 * 1024)
+#define BOARD_PARAMS_FLASH_PAGE_SIZE	(32 * 1024)
 
 /* High-resolution timer */
-#define HRT_TIMER 1
-#define HRT_TIMER_CHANNEL 1
-#define HRT_PPM_CHANNEL 1	// Number really doesn't matter for this board
-#define GPIO_PPM_IN		(16 | GPIO_FUN(RP23XX_GPIO_FUNC_SIO))
-#define RC_SERIAL_PORT               "/dev/ttyS3"
-#define BOARD_SUPPORTS_RC_SERIAL_PORT_OUTPUT
+#define HRT_TIMER		1
+#define HRT_TIMER_CHANNEL	1
 
-/* This board provides a DMA pool and APIs */			// Needs to be figured out
-#define BOARD_DMA_ALLOC_POOL_SIZE 2048
+/* PWM: four outputs on GPIO18 to 21 (src/timer_config.cpp) */
+#define DIRECT_PWM_OUTPUT_CHANNELS	4
 
+#define BOARD_DMA_ALLOC_POOL_SIZE	2048
 #define BOARD_ENABLE_CONSOLE_BUFFER
-#define BOARD_CONSOLE_BUFFER_SIZE (1024*3)
+#define BOARD_CONSOLE_BUFFER_SIZE	(1024 * 3)
 
-/* USB
- *
- *  VBUS detection is on 29  ADC_DPM0 and PTE8
- */
-#define GPIO_USB_VBUS_VALID     (24 | GPIO_FUN(RP23XX_GPIO_FUNC_SIO))    // Used in usb.c
-
-/* PWM
- *
- * Alternatively CH3/CH4 could be assigned to UART6_TX/RX
- */
-#define DIRECT_PWM_OUTPUT_CHANNELS      4
-
-/*
- * By Providing BOARD_ADC_USB_CONNECTED (using the px4_arch abstraction)
- * this board support the ADC system_power interface, and therefore
- * provides the true logic GPIO BOARD_ADC_xxxx macros.
- */
-
-#define BOARD_ADC_USB_CONNECTED (px4_arch_gpioread(GPIO_USB_VBUS_VALID))
+/* I2C1 external bus is src/i2c.cpp bus 2; pins in nuttx-config/include/board.h */
 
 __BEGIN_DECLS
 
 #ifndef __ASSEMBLY__
 
-/****************************************************************************************************
- * Name: rpi_spiinitialize
- *
- * Description:
- *   Called to configure SPI chip select GPIO pins for the PX4FMU board.
- *
- ****************************************************************************************************/
-
 extern void rpi_spiinitialize(void);
-
-
-/****************************************************************************************************
- * Name: rp23xx_usbinitialize
- *
- * Description:
- *   Called to configure USB IO.
- *
- ****************************************************************************************************/
-
 extern void rp23xx_usbinitialize(void);
-
 extern void board_peripheral_reset(int ms);
+
+/* rpi_progmem.c, for src/lib/parameters/flashparams/flashfs.c */
+ssize_t up_progmem_ext_getpage(size_t addr);
+ssize_t up_progmem_ext_eraseblock(size_t block);
+ssize_t up_progmem_ext_write(size_t addr, const void *buf, size_t count);
 
 #include <px4_platform_common/board_common.h>
 
