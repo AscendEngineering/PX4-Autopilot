@@ -375,6 +375,59 @@ class BootloaderTest(unittest.TestCase):
             self.assertEqual(run(exe, "boot_vbus").strip(), "bootloader timeout=5000 scratch=0 jumped=0 cinit=1")
             self.assertEqual(run(exe, "boot_signature").strip(), "bootloader timeout=0 scratch=0 jumped=0 cinit=1")
 
+    def test_bootloader_image_layout(self):
+        """Check the binary and production code placement in the linked ELF."""
+        import os
+        import struct
+        bin_path = ROOT / "boards/raspberrypi/rpi-uavfc-r4/extras/raspberrypi_rpi-uavfc-r4_bootloader.bin"
+        elf_path = ROOT / "build/raspberrypi_rpi-uavfc-r4_bootloader/raspberrypi_rpi-uavfc-r4_bootloader.elf"
+        required = os.environ.get("PX4_REQUIRE_BOOTLOADER_BUILD") == "1"
+        if not required and not bin_path.exists() and not elf_path.exists():
+            self.skipTest("bootloader binary and ELF not built")
+        self.assertTrue(bin_path.is_file(), f"missing build artefact: {bin_path}")
+        self.assertTrue(elf_path.is_file(), f"missing build artefact: {elf_path}")
+        data = bin_path.read_bytes()
+        image_def = (0xFFFFDED3, 0x10210142, 0x000001FF, 0x00000000, 0xAB123579)
+        vectors = 16 + 52                      # NR_IRQS on rp23xx
+        self.assertLessEqual(len(data), 128 * 1024, "bootloader image over its 128 KB reservation")
+        self.assertEqual(struct.unpack_from("<5I", data, vectors * 4), image_def, "IMAGE_DEF not right after the vector table")
+        # the ROM scans the first 4 KB: exactly one block start marker there, at that offset
+        first_4k = data[:4096]
+        marker = struct.pack("<I", image_def[0])
+        self.assertEqual([i for i in range(0, 4096 - 3, 4) if first_4k[i:i + 4] == marker], [vectors * 4])
+        msp, pc = struct.unpack_from("<2I", data, 0)
+        self.assertTrue(0x20000000 < msp <= 0x20080000 and msp % 8 == 0, f"initial MSP {msp:#x}")
+        self.assertTrue(pc & 1 and 0x10000000 <= (pc & ~1) < 0x10000000 + len(data), f"reset vector {pc:#x}")
+
+        nm = subprocess.check_output(["arm-none-eabi-nm", "--defined-only", str(elf_path)], text=True)
+        symbols = {}
+        for line in nm.splitlines():
+            fields = line.split()
+            if len(fields) == 3:
+                symbols[fields[2]] = int(fields[0], 16)
+        for name in ("bootloader_main", "_sdata", "_edata", "_eronly", "_ebss"):
+            self.assertIn(name, symbols, f"required symbol discarded or missing: {name}")
+        self.assertTrue(0x10000000 <= symbols["bootloader_main"] < 0x10000000 + len(data))
+        self.assertEqual(symbols["_ebss"] % 8, 0)
+        self.assertEqual(msp, symbols["_ebss"] + 768)
+        flash_ops = [address for name, address in symbols.items()
+                     if name == "flash_op" or name.startswith("flash_op.")]
+        self.assertTrue(flash_ops, "production flash_op was discarded")
+        self.assertTrue(0x20000000 <= symbols["_sdata"] < symbols["_edata"] <= 0x20080000)
+        for address in flash_ops:
+            self.assertTrue(symbols["_sdata"] <= address < symbols["_edata"],
+                            f"flash_op {address:#x} is outside the SRAM data copy")
+
+        sections = subprocess.check_output(["arm-none-eabi-objdump", "-h", str(elf_path)], text=True)
+        data_sections = [line.split() for line in sections.splitlines()
+                         if len(line.split()) >= 5 and line.split()[1] == ".data"]
+        self.assertEqual(len(data_sections), 1)
+        _, _, size_hex, vma_hex, lma_hex, *_ = data_sections[0]
+        size, vma, lma = (int(value, 16) for value in (size_hex, vma_hex, lma_hex))
+        self.assertEqual((vma, vma + size), (symbols["_sdata"], symbols["_edata"]))
+        self.assertEqual(lma, symbols["_eronly"], "NuttX would copy .data from the wrong address")
+        self.assertTrue(0x10000000 <= lma < lma + size <= 0x10000000 + len(data))
+
 
 if __name__ == "__main__":
     unittest.main()
