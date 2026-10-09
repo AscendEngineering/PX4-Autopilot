@@ -135,6 +135,10 @@ bench steps using the table above.
 validation and hand-off sequence in `probe.c`, and `Tools/uf2conv.py`.
 `start.c`, the rest of `probe.c` and the Makefile are probe only.
 
+The phase 2 NuttX image (`make raspberrypi_rpi-uavfc-r4_bootloader`, UF2 and
+`.bin` in `../extras/`) prints this same status block over CDC ACM
+(`/dev/ttyACM0`) instead of leaving it in SRAM; see "Phase 2" below.
+
 ## Bench results, 2026-10-09
 
 Hardware: Raspberry Pi Pico 2 (RP2350A, 4 MB flash), J-Link EDU Mini over
@@ -216,3 +220,42 @@ first and retest before suspecting the hand-off.
 J-Link reports register reads as 0xdeadbeef while the core is running,
 which GDB shows as `0xdeadbeee in ?? ()` when connecting to a running
 target. It is a placeholder, not a program counter; halt and read again.
+
+### Phase 2, 2026-10-09: NuttX bootloader image on the Pico 2
+
+Installed through the BOOTSEL drive (UF2) and through J-Link; identical
+behaviour. Cold power-up, read from `/dev/ttyACM0`:
+
+| field | value | phase 1 |
+|-------|-------|---------|
+| USB | `3185:0040 RPI PX4 BL RPI-UAVFC-R4`, enumerates within 1 s, again after replug | n/a |
+| chip_id | 0x20004927, package QFN60 (Pico 2) | same |
+| image_def | ffffded3 10210142 000001ff 00000000 ab123579 at 0x10000110 | same words |
+| app_first | 0x2007fff8 (the application probe is still in flash) | same |
+| scratch0 | 0 | same |
+| rom_fn | 0c1d 0d65 0d0d 0cd1 3711 09c1 | same |
+| device_id | 0x79699781 0x0c8874e5 | same |
+| vtor | 0x10000000 | same |
+| clk_sys | 150000 kHz by FC0, clk_ref 12001 kHz, XOSC stable, PLL_SYS locked, clk_sys on aux | 11.9 MHz ROSC: NuttX now programs the PLL |
+| SysTick | reload 149999, ctrl 0x10007; ticks advance 1001/s | n/a |
+| heap | 516312 total, 496328 free | n/a |
+| SWD while running | pc in `up_idle`, VTOR 0x10000000, CFSR 0, HFSR 0 | n/a |
+| LED | GPIO25 1 Hz (package-selected) | GPIO25 |
+| image | 48051 B text, 0 data, 6712 B bss; `.data` LMA = `_eronly`, `flash_op` in SRAM, `bootloader_main` retained | 128 KB reservation |
+
+What it took to get here, all found with SWD because an assert before the
+FPU is enabled on this chip ends in lockup (NOCP, PC 0xEFFFFFFE) and an
+assert after it reboots the board (`RESET_ON_ASSERT=2`):
+
+1. `BOARD_XOSC_STARTUPDELAY` 64 (copied from the RP2040 pico) is a
+   multiplier on this port and tripped `ASSERT(startup_delay < 8192)` in
+   `rp23xx_xosc_init`. Now 1, as NuttX's own Pico 2 board.
+2. PX4's NuttX fork: `exception_direct` (armv8-m) clobbers `r0`, the IRQ
+   number, in its FPU inline asm, so every interrupt dispatched as 0x40000
+   and panicked. Upstream has the `"r0"` clobber; backported locally.
+3. PX4's NuttX fork: `usbdev_register` (rp23xx) writes SIE_CTRL with
+   `putreg32` after the class bind, erasing `PULLUP_EN`; the device never
+   attached. Upstream uses `setbits_reg32`; backported locally.
+4. NuttX objects live in the submodule tree and are not rebuilt when
+   `board.h` or the generated `config.h` change. `rm -rf build/<target>` is
+   not enough; use `make clean` first.
