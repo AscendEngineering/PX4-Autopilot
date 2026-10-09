@@ -45,4 +45,5 @@ target_link_libraries(arch_bootloader
 	PRIVATE
 		bootloader_lib
 		nuttx_arch
+		arch_flash
 )

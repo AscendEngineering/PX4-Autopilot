@@ -62,6 +62,7 @@
 #include <hardware/rp23xx_resets.h>
 #include <hardware/rp23xx_otp_data.h>
 #include <rp23xx_gpio.h>
+#include <px4_arch/rpi_rom.h>
 
 /* Identity (section 12.15 SYSINFO, section 13.10 OTP) */
 
@@ -76,17 +77,11 @@
 
 /* Flash (section 2.2.2 XIP, section 5.4.8 ROM flash API) */
 
-#define BL_FLASH_BASE			RP23XX_FLASH_BASE	/* XIP window, cached */
-#define BL_FLASH_SECTOR_SIZE		4096u			/* 20h sector erase */
-#define BL_FLASH_BLOCK_SIZE		65536u			/* D8h block erase */
-#define BL_FLASH_PAGE_SIZE		256u			/* flash_range_program unit */
-#define BL_FLASH_SECTOR_ERASE_CMD	0x20u
-#define BL_FLASH_BLOCK_ERASE_CMD	0xd8u
 
 /* Boot-to-bootloader handshake (section 12.9 WATCHDOG). SCRATCH0 survives a
  * SYSRESETREQ soft reset and is cleared by power-on or brown-out. SCRATCH4-7
  * belong to the ROM's watchdog boot vector and are not used. */
-#define BL_BOOT_SIGNATURE_REG		RP23XX_WATCHDOG_SCRATCH(0)
+#define BL_BOOT_SIGNATURE_REG		RPI_BOOT_SIGNATURE_REG
 
 /* Peripheral reset for the hand-off (section 7.5 RESETS, atomic SET alias) */
 #define BL_RESETS_SET			(RP23XX_RESETS_RESET | RP23XX_ATOMIC_SET_REG_OFFSET)
@@ -97,13 +92,7 @@
 
 /* Boot ROM table (section 5.4.1). The lookup function pointer is a 16-bit
  * word at 0x16; the 'M','u',0x02 magic at 0x10 confirms an RP2350 ROM. */
-#define BL_BOOTRAM_BASE			RP23XX_BOOTRAM_BASE
-#define BL_ROM_MAGIC_ADDR		0x00000010u
-#define BL_ROM_TABLE_LOOKUP_PTR		0x00000016u
-#define BL_ROM_RT_FLAG_FUNC_ARM_SEC	0x0004u
-#define BL_ROM_RT_FLAG_DATA		0x0040u
 
-typedef void *(*bl_rom_table_lookup_fn)(uint32_t code, uint32_t mask);
 
 /* GPIO (section 9). Pins are GPIO numbers, not PX4 pinsets; the bootloader
  * does not link the px4 io_pins layer. */
@@ -123,22 +112,6 @@ static inline void bl_gpio_output(uint32_t pin, int level)
 
 #if defined(__ARM_ARCH)
 
-static inline bool bl_rom_present(void)
-{
-	const volatile uint8_t *m = (const volatile uint8_t *)BL_ROM_MAGIC_ADDR;
-	return m[0] == 'M' && m[1] == 'u' && m[2] == 0x02;
-}
-
-static inline bl_rom_table_lookup_fn bl_rom_table_lookup(void)
-{
-	return (bl_rom_table_lookup_fn)(uintptr_t) * (const volatile uint16_t *)BL_ROM_TABLE_LOOKUP_PTR;
-}
-
-/* Run the SRAM copy of the saved XIP setup function (Thumb). */
-static inline void bl_xip_restore(const uint32_t *copy)
-{
-	((void (*)(void))((uintptr_t)copy | 1u))();
-}
 
 static inline uint32_t bl_irq_save(void)
 {
@@ -159,9 +132,6 @@ static inline void bl_barrier(void)
 
 #else /* host test build */
 
-bool bl_rom_present(void);
-bl_rom_table_lookup_fn bl_rom_table_lookup(void);
-void bl_xip_restore(const uint32_t *copy);
 static inline uint32_t bl_irq_save(void) { return 0; }
 static inline void bl_irq_restore(uint32_t primask) { (void)primask; }
 static inline void bl_barrier(void) {}

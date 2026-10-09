@@ -53,11 +53,13 @@ TEST_C = r'''
 #include "hw_config.h"
 #include "bl.h"
 #include "bl_chip.h"
+#include <px4_arch/rpi_rom.h>
+#include <px4_arch/rpi_flash.h>
 #include <lib/systick.h>
 #include <lib/flash_cache.h>
 #include <nvic.h>
 
-#define XIP ((volatile uint8_t *)(uintptr_t)BL_FLASH_BASE)
+#define XIP ((volatile uint8_t *)(uintptr_t)RPI_FLASH_BASE)
 
 _Static_assert(ARCH_SN_MAX_LENGTH >= 12, "GET_SN must accept uploader offsets 0, 4 and 8");
 
@@ -106,26 +108,29 @@ static void fake_program(uint32_t addr, const uint8_t *data, size_t count)
 	assert(addr % 256 == 0 && count % 256 == 0);
 	for (size_t i = 0; i < count; i++) XIP[addr + i] &= data[i];   /* NOR: only clears bits */
 }
-static void *fake_lookup(uint32_t code, uint32_t mask)
+/* ROM host hooks (px4_arch/rpi_rom.h) and the flash library's XIP restore hook */
+static bool rom_present = true;
+bool rpi_rom_present(void) { return rom_present; }
+void *rpi_rom_func(uint32_t code)
 {
 	switch (code) {
-	case 'I' | 'F' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_connect : NULL;
-	case 'E' | 'X' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_exit_xip : NULL;
-	case 'R' | 'E' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_erase : NULL;
-	case 'R' | 'P' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_program : NULL;
-	case 'F' | 'C' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_flush : NULL;
-	case 'X' | 'F' << 8: return mask == BL_ROM_RT_FLAG_DATA ? (void *)&xip_setup_ptr_holder : NULL;
+	case 'I' | 'F' << 8: return (void *)fake_connect;
+	case 'E' | 'X' << 8: return (void *)fake_exit_xip;
+	case 'R' | 'E' << 8: return (void *)fake_erase;
+	case 'R' | 'P' << 8: return (void *)fake_program;
+	case 'F' | 'C' << 8: return (void *)fake_flush;
 	}
 	return NULL;
 }
-static bool rom_present = true;
-bool bl_rom_present(void) { return rom_present; }
-bl_rom_table_lookup_fn bl_rom_table_lookup(void) { return fake_lookup; }
-void bl_xip_restore(const uint32_t *copy)
+void *rpi_rom_data(uint32_t code)
+{
+	return code == ('X' | 'F' << 8) ? (void *)&xip_setup_ptr_holder : NULL;
+}
+void rpi_flash_xip_restore(const uint32_t *copy)
 {
 	log_call('R');
 	restore_ok = memcmp(copy, xip_image, sizeof(xip_image)) == 0;
-	assert((uintptr_t)copy < BL_FLASH_BASE || (uintptr_t)copy >= BL_FLASH_BASE + BOARD_FLASH_SIZE); /* copy is not in flash */
+	assert((uintptr_t)copy < RPI_FLASH_BASE || (uintptr_t)copy >= RPI_FLASH_BASE + BOARD_FLASH_SIZE); /* copy is not in flash */
 }
 
 /* common bootloader fakes */
@@ -209,9 +214,9 @@ static void test_flash(void)
 	assert(arch_flash_write(APP_LOAD_ADDRESS + 4, page, 256) == 0);
 	assert(arch_flash_write(APP_LOAD_ADDRESS, page, 100) == 0);
 	assert(arch_flash_write(APP_LOAD_ADDRESS - 256, page, 256) == 0);
-	assert(arch_flash_write(BL_FLASH_BASE + BOARD_FLASH_SIZE - 128, page, 256) == 0);
+	assert(arch_flash_write(RPI_FLASH_BASE + BOARD_FLASH_SIZE - 128, page, 256) == 0);
 	assert(ncalls == 0);
-	assert(arch_flash_write(BL_FLASH_BASE + BOARD_FLASH_SIZE - 256, page, 256) == 256 && XIP[BOARD_FLASH_SIZE - 1] == 0);
+	assert(arch_flash_write(RPI_FLASH_BASE + BOARD_FLASH_SIZE - 256, page, 256) == 256 && XIP[BOARD_FLASH_SIZE - 1] == 0);
 	reset_log();
 
 	/* no usable ROM: nothing is touched */
@@ -281,17 +286,17 @@ static void test_systick_leds(void)
 
 int main(int argc, char **argv)
 {
-	map(BL_FLASH_BASE, BOARD_FLASH_SIZE);
+	map(RPI_FLASH_BASE, BOARD_FLASH_SIZE);
 	map(RP23XX_SYSINFO_BASE, 4096);
 	map(BL_RESETS_SET, 4096);
 	map(RP23XX_WATCHDOG_BASE, 4096);
-	map(BL_BOOTRAM_BASE, 4096);
+	map(RPI_BOOTRAM_BASE, 4096);
 	map(RP23XX_OTP_DATA_BASE, 4096);
 	map(0xe000e000u, 4096);
 
 	for (unsigned i = 0; i < 64; i++) xip_image[i] = 0xb5000000u + i;
-	memcpy((void *)(uintptr_t)BL_BOOTRAM_BASE, xip_image, sizeof(xip_image));
-	xip_setup_ptr_holder = BL_BOOTRAM_BASE;
+	memcpy((void *)(uintptr_t)RPI_BOOTRAM_BASE, xip_image, sizeof(xip_image));
+	xip_setup_ptr_holder = RPI_BOOTRAM_BASE;
 
 	const char *scenario = argc > 1 ? argv[1] : "";
 	if (strcmp(scenario, "units") == 0) {
@@ -317,6 +322,7 @@ int main(int argc, char **argv)
 '''
 
 SOURCES = (RPI_COMMON / "flash.c", RPI_COMMON / "main.c", RPI_COMMON / "systick.c",
+           ROOT / "platforms/nuttx/src/px4/rpi/rpi_common/flash/rpi_flash.c",
            BOOTLOADER / "common/lib/flash_cache.c")
 
 
@@ -327,6 +333,7 @@ def build(temp, extra_flags=()):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     includes = [temp, BOARD, BOOTLOADER / "common", RPI_COMMON.parent / "rp2350/include",
+                ROOT / "platforms/nuttx/src/px4/rpi/rp2350/include",
                 NUTTX_ARCH / "rp23xx", NUTTX_ARCH / "armv8-m"]
     # The firmware build force-includes nuttx/config.h, which flash_cache.h needs to pick the
     # page size; NuttX's <string.h> also brings in the fixed-width types bl.h relies on.
