@@ -57,11 +57,11 @@ __BEGIN_DECLS
 #include <hardware/rp23xx_memorymap.h>
 #include <hardware/rp23xx_adc.h>
 #include <hardware/rp23xx_pwm.h>
+#include "rpi_rom.h"
 
 #define RPI_CHIP_NAME			"RP2350"
 
 /* Memory map */
-#define RPI_FLASH_BASE			RP23XX_FLASH_BASE
 #define RPI_ADC_BASE			RP23XX_ADC_BASE
 #define RPI_PWM_BASE			RP23XX_PWM_BASE
 #define RPI_SYSINFO_BASE		RP23XX_SYSINFO_BASE

@@ -122,6 +122,47 @@ TEST_CPP = r'''
 #include <cerrno>
 #include <cstring>
 #include <sys/mman.h>
+#include <cstdio>
+#include <cstdlib>
+#include <px4_arch/rpi_rom.h>
+
+static void map_fixed(uintptr_t base, size_t len)
+{
+	void *want = (void *)(base & ~(uintptr_t)4095);
+	void *got = mmap(want, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+	if (got != want) { perror("mmap"); exit(2); }
+}
+
+/* ROM host hooks: Task 2 replaces rpi_rom_func with a fake table */
+static uintptr_t xip_setup_holder;
+extern "C" bool rpi_rom_present(void) { return true; }
+extern "C" void *rpi_rom_func(uint32_t code) { (void)code; return nullptr; }
+extern "C" void *rpi_rom_data(uint32_t code)
+{
+	return code == RPI_ROM_CODE('X', 'F') ? (void *)&xip_setup_holder : nullptr;
+}
+
+static void test_rom_header()
+{
+	static_assert(RPI_ROM_FUNC_FLASH_RANGE_ERASE == ('R' | ('E' << 8)), "ROM code packing");
+	static_assert(RPI_XIP_SETUP_BYTES == 256, "XIP setup routine is 256 bytes on both chips");
+	assert(RPI_FLASH_BASE == 0x10000000u);
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+	map_fixed(RPI_BOOTRAM_BASE, 4096);
+	xip_setup_holder = RPI_BOOTRAM_BASE + 64;
+	assert(rpi_rom_xip_setup() == (const uint32_t *)(RPI_BOOTRAM_BASE + 64));   /* 'X','F' points at a pointer */
+	xip_setup_holder = 0;
+	assert(rpi_rom_xip_setup() == (const uint32_t *)RPI_BOOTRAM_BASE);          /* documented fallback */
+	assert(RPI_BOOT_SIGNATURE_REG == RP23XX_WATCHDOG_BASE + 0x0c);              /* SCRATCH0 */
+#else
+	assert(rpi_rom_xip_setup() == (const uint32_t *)RPI_FLASH_BASE);            /* boot2 */
+	assert(RPI_BOOT_SIGNATURE_REG == RP2040_WATCHDOG_BASE + 0x0c);
+#endif
+	/* the handshake register is WATCHDOG SCRATCH0 on both chips: it survives SYSRESETREQ and not power-on */
+	assert((RPI_BOOT_SIGNATURE_REG & 0xfff) == 0x00c);
+	assert(rpi_rom_reboot_bootsel() == -1);                                     /* no 'R','B' / 'U','B' entry in the fake */
+	puts("rom header ok");
+}
 
 constexpr auto absent = initSPIDevice(1, {});
 constexpr auto cs0 = initSPIDevice(1, {GPIO::Pin0});
@@ -197,6 +238,7 @@ static void map_page(uintptr_t base) {
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0) != MAP_FAILED);
 }
 int main() {
+    test_rom_header();
     map_page(RPI_PWM_BASE);
     const unsigned a = LAST_A, b = LAST_B, pin_a = timer_io_channels[a].gpio_out & GPIO_NUM_MASK,
                    pin_b = timer_io_channels[b].gpio_out & GPIO_NUM_MASK;

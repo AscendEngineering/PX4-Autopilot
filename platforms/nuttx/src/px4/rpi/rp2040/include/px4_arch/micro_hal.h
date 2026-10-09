@@ -57,11 +57,11 @@ __BEGIN_DECLS
 #include <hardware/rp2040_memorymap.h>
 #include <hardware/rp2040_adc.h>
 #include <hardware/rp2040_pwm.h>
+#include "rpi_rom.h"
 
 #define RPI_CHIP_NAME			"RP2040"
 
 /* Memory map */
-#define RPI_FLASH_BASE			RP2040_FLASH_BASE
 #define RPI_ADC_BASE			RP2040_ADC_BASE
 #define RPI_PWM_BASE			RP2040_PWM_BASE
 #define RPI_SYSINFO_BASE		RP2040_SYSINFO_BASE
