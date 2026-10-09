@@ -55,7 +55,7 @@
 #include "board_config.h"
 
 /************************************************************************************
- * Name: rp2040_usbinitialize
+ * Name: rp23xx_usbinitialize
  *
  * Description:
  *   Called to setup USB-related GPIO pins for the omnibusf4sd board.
@@ -68,7 +68,7 @@ __EXPORT void rp23xx_usbinitialize(void)
 }
 
 /************************************************************************************
- * Name:  stm32_usbsuspend
+ * Name:  rp23xx_usbsuspend
  *
  * Description:
  *   Board logic must provide the stm32_usbsuspend logic if the USBDEV driver is

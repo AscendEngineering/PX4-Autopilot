@@ -50,15 +50,12 @@ if("${PX4_BOARD_LABEL}" STREQUAL  "bootloader")
 
 else()
 	add_library(drivers_board
-		can.c
+		# can.c
 		i2c.cpp
 		init.c
-		led.c
-		mtd.cpp
-		sdio.c
+		# led.c
+		# sdio.c
 		spi.cpp
-		spix_sync.c
-		spix_sync.h
 		timer_config.cpp
 		usb.c
 	)
