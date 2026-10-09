@@ -4,6 +4,42 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "probe build",
+            "type": "shell",
+            "command": "make",
+            "args": ["BOARD=pico2"],
+            "options": {
+                "cwd": "${workspaceFolder}/boards/raspberrypi/rpi-uavfc-r4/probe"
+            },
+            "problemMatcher": {
+                "base": "$gcc",
+                "fileLocation": ["relative", "${workspaceFolder}/boards/raspberrypi/rpi-uavfc-r4/probe"]
+            },
+            "presentation": {
+                "echo": true,
+                "showReuseMessage": false,
+                "clear": true,
+                "panel": "shared",
+                "group": "build"
+            }
+        },
+        {
+            "label": "probe check",
+            "type": "shell",
+            "command": "make check",
+            "options": {
+                "cwd": "${workspaceFolder}/boards/raspberrypi/rpi-uavfc-r4/probe"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "showReuseMessage": false,
+                "clear": true,
+                "panel": "shared",
+                "group": "build"
+            }
+        },
+        {
             "label": "build",
             "type": "shell",
             "command": "/bin/bash",
