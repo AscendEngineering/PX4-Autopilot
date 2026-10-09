@@ -14,3 +14,12 @@ git -C platforms/nuttx/NuttX/nuttx apply ../../../../boards/raspberrypi/rpi-uavf
 `platforms/nuttx/src/bootloader/rpi/rpi_common/tests/test_bootloader.py`
 fails with that command when the patches are missing. The permanent fix is
 a commit on a NuttX fork and a submodule bump; then this directory goes.
+
+## Where the fixes live
+
+The same two changes are commits on the local submodule branch `rp2350-backports`
+(in `platforms/nuttx/NuttX/nuttx`). To land them: open a pull request against
+PX4/NuttX, or push the branch to an Ascend fork and point `.gitmodules` at it on
+this branch; then bump the submodule pointer and delete this directory. Until
+then CI, which checks out the pristine submodule, fails
+`test_nuttx_submodule_patches_applied` by design.
