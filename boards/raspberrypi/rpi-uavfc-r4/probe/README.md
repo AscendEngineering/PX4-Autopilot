@@ -298,11 +298,11 @@ What it took:
    this and two related arming bugs; they are `nuttx-patches/0003` to
    `0005` and commits on the submodule branch `rp2350-backports`.
 2. GET_CRC over the 3.9 MB region takes 0.98 s on the chip (about 4 MB/s
-   through the flash cache and XIP). The uploader sleeps 0.5 s and then
-   allows 0.5 s, so the margin is about 20 ms. It passed every time, but a
-   slower QSPI on the flight controller would fail by timeout. Phase 4
-   either speeds the bootloader's CRC loop or gives the uploader a longer
-   GET_CRC read timeout.
+   through the flash cache and XIP). The uploader slept 0.5 s and then
+   allowed 0.5 s, a margin of about 20 ms. `Tools/px4_uploader.py` now
+   waits one second plus one second per megabyte of flash for that reply
+   (`Tools/test_px4_uploader.py`); a slower QSPI on the flight controller
+   no longer fails by timeout.
 3. After an upload is refused or interrupted the bootloader stays resident
    with no timeout, because identify cancels it. A power cycle brings the
    application back. User-facing docs should say so.
