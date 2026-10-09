@@ -133,13 +133,111 @@ static void map_fixed(uintptr_t base, size_t len)
 	if (got != want) { perror("mmap"); exit(2); }
 }
 
-/* ROM host hooks: Task 2 replaces rpi_rom_func with a fake table */
+#include <px4_arch/rpi_flash.h>
+
+#define XIP ((volatile uint8_t *)(uintptr_t)RPI_FLASH_BASE)
+#define XIP_SIZE (4u * 1024u * 1024u)
+
+/* ROM fakes: record the call sequence and act on the XIP window */
+static char calls[64];
+static unsigned ncalls;
+static uint32_t last_erase_addr, last_erase_count, last_erase_block;
+static uint8_t last_erase_cmd;
+static uint32_t last_prog_addr, last_prog_count;
+static uint32_t xip_image[64];
 static uintptr_t xip_setup_holder;
-extern "C" bool rpi_rom_present(void) { return true; }
-extern "C" void *rpi_rom_func(uint32_t code) { (void)code; return nullptr; }
+static int restore_ok;
+static bool rom_present = true;
+static bool rom_missing_erase = false;
+
+static void log_call(char c) { if (ncalls < sizeof(calls) - 1) { calls[ncalls] = c; calls[ncalls + 1] = 0; } ncalls++; }
+static void reset_log() { ncalls = 0; calls[0] = 0; restore_ok = 0; }
+extern "C" void fake_connect(void) { log_call('C'); }
+extern "C" void fake_exit_xip(void) { log_call('X'); }
+extern "C" void fake_flush(void) { log_call('F'); }
+extern "C" void fake_erase(uint32_t addr, size_t count, uint32_t block, uint8_t cmd)
+{
+	log_call('E'); last_erase_addr = addr; last_erase_count = count; last_erase_block = block; last_erase_cmd = cmd;
+	assert(addr % 4096 == 0 && count % 4096 == 0);
+	memset((void *)(XIP + addr), 0xff, count);
+}
+extern "C" void fake_program(uint32_t addr, const uint8_t *data, size_t count)
+{
+	log_call('P'); last_prog_addr = addr; last_prog_count = count;
+	assert(addr % 256 == 0 && count % 256 == 0);
+	for (size_t i = 0; i < count; i++) { XIP[addr + i] &= data[i]; }   /* NOR: only clears bits */
+}
+
+extern "C" bool rpi_rom_present(void) { return rom_present; }
+extern "C" void *rpi_rom_func(uint32_t code)
+{
+	if (!rom_present) { return nullptr; }
+	if (code == RPI_ROM_FUNC_CONNECT_INTERNAL_FLASH) { return (void *)fake_connect; }
+	if (code == RPI_ROM_FUNC_FLASH_EXIT_XIP) { return (void *)fake_exit_xip; }
+	if (code == RPI_ROM_FUNC_FLASH_RANGE_ERASE) { return rom_missing_erase ? nullptr : (void *)fake_erase; }
+	if (code == RPI_ROM_FUNC_FLASH_RANGE_PROGRAM) { return (void *)fake_program; }
+	if (code == RPI_ROM_FUNC_FLASH_FLUSH_CACHE) { return (void *)fake_flush; }
+	return nullptr;
+}
 extern "C" void *rpi_rom_data(uint32_t code)
 {
 	return code == RPI_ROM_CODE('X', 'F') ? (void *)&xip_setup_holder : nullptr;
+}
+extern "C" void rpi_flash_xip_restore(const uint32_t *copy)
+{
+	log_call('R');
+	restore_ok = memcmp(copy, xip_image, sizeof(xip_image)) == 0;
+	assert((uintptr_t)copy < RPI_FLASH_BASE || (uintptr_t)copy >= RPI_FLASH_BASE + XIP_SIZE);   /* the copy is not in flash */
+}
+
+static void flash_fixture()
+{
+	map_fixed(RPI_FLASH_BASE, XIP_SIZE);
+	memset((void *)XIP, 0xff, XIP_SIZE);   /* an anonymous mapping reads as zero; erased NOR reads as ones */
+	for (unsigned i = 0; i < 64; i++) { xip_image[i] = 0xb5000000u + i; }
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+	memcpy((void *)(uintptr_t)RPI_BOOTRAM_BASE, xip_image, sizeof(xip_image));   /* boot RAM mapped by test_rom_header */
+	xip_setup_holder = RPI_BOOTRAM_BASE;
+#else
+	memcpy((void *)(uintptr_t)RPI_FLASH_BASE, xip_image, sizeof(xip_image));     /* boot2 at the start of flash */
+#endif
+}
+
+static void test_flash_library()
+{
+	flash_fixture();
+	assert(rpi_flash_init());
+
+	/* argument checks never reach the ROM */
+	uint8_t page[256]; memset(page, 0, sizeof(page));
+	assert(rpi_flash_erase(100, 4096) == 0 && rpi_flash_erase(4096, 100) == 0 && rpi_flash_erase(4096, 0) == 0);
+	assert(rpi_flash_program(4, page, 256) == 0 && rpi_flash_program(0, page, 100) == 0 && rpi_flash_program(0, page, 0) == 0);
+	assert(ncalls == 0);
+
+	/* an aligned 64 kB run is one block erase; the ragged ends are sector erases; blank parts cost nothing */
+	memset((void *)(XIP + 0x10000), 0xa5, 0x30000);
+	assert(rpi_flash_erase(0x0f000, 0x12000) == 0x12000);             /* 0x0f000..0x21000: 1 sector + 1 block + 1 sector */
+	assert(strcmp(calls, "CXEFRCXEFR") == 0 && restore_ok);            /* the sector at 0x0f000 was blank already: 2 ops */
+	assert(last_erase_addr == 0x20000 && last_erase_count == 4096 && last_erase_block == 4096 && last_erase_cmd == 0x20);
+	assert(XIP[0x10000] == 0xff && XIP[0x20fff] == 0xff && XIP[0x21000] == 0xa5);
+	assert(rpi_flash_is_blank(0x0f000, 0x12000) && !rpi_flash_is_blank(0x21000, 4096));
+	reset_log();
+	assert(rpi_flash_erase(0x0f000, 0x12000) == 0x12000 && ncalls == 0);   /* already blank */
+
+	/* program: whole pages, NOR semantics, XIP restored from the copy */
+	for (unsigned i = 0; i < 256; i++) { page[i] = (uint8_t)i; }
+	assert(rpi_flash_program(0x20100, page, 256) == 256);
+	assert(strcmp(calls, "CXPFR") == 0 && restore_ok && last_prog_addr == 0x20100 && last_prog_count == 256);
+	assert(XIP[0x20100] == 0 && XIP[0x201ff] == 0xff);
+	reset_log();
+
+	/* a ROM without the erase entry: init fails, nothing is called */
+	rom_missing_erase = true;
+	assert(!rpi_flash_init_fresh());
+	assert(rpi_flash_erase(0x20000, 4096) == 0 && rpi_flash_program(0x20000, page, 256) == 0 && ncalls == 0);
+	rom_missing_erase = false;
+	assert(rpi_flash_init_fresh());
+	puts("flash library ok");
 }
 
 static void test_rom_header()
@@ -239,6 +337,7 @@ static void map_page(uintptr_t base) {
 }
 int main() {
     test_rom_header();
+    test_flash_library();
     map_page(RPI_PWM_BASE);
     const unsigned a = LAST_A, b = LAST_B, pin_a = timer_io_channels[a].gpio_out & GPIO_NUM_MASK,
                    pin_b = timer_io_channels[b].gpio_out & GPIO_NUM_MASK;
@@ -314,7 +413,8 @@ int main() {
 '''
 
 SOURCES = ("io_pins/io_timer.c", "io_pins/pwm_servo.c", "io_pins/rpi_pinset.c",
-           "version/board_identity.c", "version/board_mcu_version.c")
+           "version/board_identity.c", "version/board_mcu_version.c",
+           "flash/rpi_flash.c")
 
 
 class PlatformTest(unittest.TestCase):
