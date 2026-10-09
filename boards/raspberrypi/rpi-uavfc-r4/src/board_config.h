@@ -55,6 +55,10 @@
 /* board_reset() calls board_on_reset() (init.c): PWM pins low before the reset */
 #define BOARD_HAS_ON_RESET	1
 
+/* reboot -i: the ROM's USB BOOTSEL drive is the first-stage bootloader
+ * (board_reset.cpp REBOOT_TO_ISP through the ROM reboot call) */
+#define BOARD_HAS_ISP_BOOTLOADER	1
+
 /* No VBUS sense GPIO is wired. The USB controller reports VBUS itself
  * (SIE_STATUS bit 0). A plain volatile read keeps this header free of
  * arm_internal.h, which not every includer has. */
