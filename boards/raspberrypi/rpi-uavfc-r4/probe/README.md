@@ -279,8 +279,8 @@ through `/dev/ttyACM*`, `--port` only pins the device.
 | erased application sector | resident 20 s and counting, no timeout |
 | upload of the 1152 B probe, blank flash | 3.4 s total: erase 1.18 s, program 13 ms, GET_CRC send-to-reply 0.98 s |
 | REBOOT | direct jump, device gone within 0.2 s, no re-enumeration, SCRATCH0 untouched |
-| upload of the 3.9 MB image, blank flash | 52 s total: program 44.7 s (about 89 kB/s, non-windowed), CRC pass |
-| erase of a fully written region (64 KB blocks; spec 3.2 says sectors) | 6.8 s from CHIP_ERASE to complete, limit 30 s |
+| upload of the 3.9 MB image over a dirty region | 52 s total: erase 6.8 s, program 44.7 s (about 89 kB/s, non-windowed), CRC pass |
+| erase of a fully written region (64 KB blocks; spec 3.2 says sectors), two samples | 6.8 s from CHIP_ERASE to complete, limit 30 s |
 | interrupted upload (killed 35 s into programming), power cycle | resident within 2 s, no timeout; page 0 still 0xff, later pages match the image |
 | wrong board id (7301) | refused after identify, before erase; flash intact; board stays resident until power cycle |
 | gdb client attached through erase and program | CFSR 0 after the upload |
@@ -306,6 +306,18 @@ What it took:
 3. After an upload is refused or interrupted the bootloader stays resident
    with no timeout, because identify cancels it. A power cycle brings the
    application back. User-facing docs should say so.
-4. The J-Link GDB server loses the target across a power cycle. Restart it
+4. Once in eight identifies, the first after a replug, the host received
+   part of the GET_VERSION string a second time where INSYNC was due
+   (`t7_interrupt.log`: the 23-byte version, then `v1.18.` again). The
+   uploader recovered through its reboot fallback 1.1 s later and the
+   upload succeeded. A payload accepted twice by the host means the device
+   sent it twice with alternating data PIDs, which is the family of bug the
+   0003 to 0005 backports address, so it is not closed. Reproduce with
+   `usbmon` before the application console is built on this driver.
+5. Block erase measured 92 ms per 64 KB block. The W25Q32 data sheet's
+   worst case is 2 s per block, which would be 122 s for the 61 blocks
+   against the uploader's 30 s erase timeout. Check the real board's flash
+   part and its worst-case figures in phase 4.
+6. The J-Link GDB server loses the target across a power cycle. Restart it
    (`pkill -x JLinkGDBServerC`, start again) before the first SWD read after
    a replug, or reads fail with "Cannot access memory".
