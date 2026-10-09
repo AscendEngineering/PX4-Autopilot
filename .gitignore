@@ -128,3 +128,6 @@ _emscripten_sdk/
 # Local RP2350 reference and design documents
 /docs/RP-008373-DS-2-rp2350-datasheet.pdf
 /docs/superpowers/
+
+# RP2350 bare-metal bench probe (phase 1 scaffolding, kept on the bench machine only)
+/boards/raspberrypi/rpi-uavfc-r4/probe/
