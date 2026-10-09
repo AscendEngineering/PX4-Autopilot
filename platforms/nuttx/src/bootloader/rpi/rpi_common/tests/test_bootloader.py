@@ -376,14 +376,22 @@ class BootloaderTest(unittest.TestCase):
             self.assertEqual(run(exe, "boot_signature").strip(), "bootloader timeout=0 scratch=0 jumped=0 cinit=1")
 
     def test_nuttx_submodule_patches_applied(self):
-        """The two upstream NuttX backports in boards/.../nuttx-patches must be present in the submodule."""
+        """The upstream NuttX backports in boards/.../nuttx-patches must be present in the submodule."""
         nuttx = ROOT / "platforms/nuttx/NuttX/nuttx"
         patches = ROOT / "boards/raspberrypi/rpi-uavfc-r4/nuttx-patches"
         expected = {
-            "arch/arm/src/armv8-m/arm_doirq.c": ': "r0"',
-            "arch/arm/src/rp23xx/rp23xx_usbdev.c": "setbits_reg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF",
+            "arch/arm/src/armv8-m/arm_doirq.c": [': "r0"'],
+            "arch/arm/src/rp23xx/rp23xx_usbdev.c": [
+                "setbits_reg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF",
+                # AVAILABLE is set in a second write after the rest of the buffer control word settles;
+                # a single write let the controller consume the buffer with FULL clear and TX wedged
+                "putreg32(value & ~RP23XX_USBCTRL_DPSRAM_EP_BUFF_CTRL_AVAIL",
+                # a request is armed once; double arming toggles the data PID twice and the host drops the packet
+                "privreq->armed = true;",
+            ],
         }
-        missing = [f for f, needle in expected.items() if needle not in (nuttx / f).read_text()]
+        missing = [f for f, needles in expected.items()
+                   if any(needle not in (nuttx / f).read_text() for needle in needles)]
         self.assertFalse(missing, "NuttX submodule lacks the rpi-uavfc-r4 backports in " + ", ".join(missing)
                          + f"; apply them with: git -C {nuttx} apply {patches}/*.patch")
 
