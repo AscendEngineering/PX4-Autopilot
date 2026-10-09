@@ -526,6 +526,16 @@ CONFIG:
       buildType: MinSizeRel
       settings:
         CONFIG: raspberrypi_pico_default
+    rpi-uavfc-r4_default:
+      short: rpi-uavfc-r4
+      buildType: MinSizeRel
+      settings:
+        CONFIG: rpi-uavfc-r4_default
+    rpi-uavfc-r4_bootloader:
+      short: rpi-uavfc-r4_bootloader
+      buildType: MinSizeRel
+      settings:
+        CONFIG: rpi-uavfc-r4_bootloader
     zeroone_x6_default:
       short: zeroone_x6
       buildType: MinSizeRel
