@@ -189,3 +189,40 @@ What it took:
 6. The J-Link GDB server loses the target across a power cycle. Restart it
    (`pkill -x JLinkGDBServerC`, start again) before the first SWD read after
    a replug, or reads fail with "Cannot access memory".
+
+### Phase 4a, 2026-10-09: firmware image on the Pico 2
+
+The bootloader from the shared flash library (commit 087cb23346) went in
+through J-Link (`load` of the ELF). The firmware is
+`raspberrypi_rpi-uavfc-r4_default`: 228 KB, NSH over USB, parameters in the
+64 KB flash reservation, no flight modules yet. Every upload ran
+`Tools/px4_uploader.py --debug`. Items are the end-state design's 8.3 list.
+
+| item | measured |
+|------|----------|
+| 2 upload into a blank app region, then NSH | identify to reboot ack 4.8 s: erase 1.22 s, program 229208 B in 2.54 s (90 kB/s), GET_CRC 0.98 s; `PX4 RPI-UAVFC-R4` on `/dev/ttyACM0` within 1 s of the jump; `ver all` reports MCU RP2350 rev. 2 and a PX4GUID from the OTP id |
+| 3 power cycle | not run: needs hands at the bench |
+| 4 `reboot -b` | `PX4 BL RPI-UAVFC-R4` within 1 s, resident 23 s and counting; an upload through it: erase 1.50 s (written region, 64 KB blocks), CRC pass, app boots |
+| 5 `reboot -i` | `RP2350 Boot` (2e8a:000f, volume RP2350) within 1 s; back with a J-Link reset |
+| 6 a parameter persists | CBRK_BUZZER 881: saved, back after `reboot`, back after an upload (the erase stops at sector 1008), 0 after `param reset_all`, `param save`, `reboot` |
+| 7 wrong board id (7301) | refused after identify ("Board mismatch"), no erase, bootloader stays resident; app and parameter intact after a reset |
+| 9 SWD attached | gdb attached and running through a whole upload: CRC pass, CFSR 0, HFSR 0 |
+
+What it took:
+
+1. `reboot -i` was rejected by the `reboot` command until
+   `BOARD_HAS_ISP_BOOTLOADER` was defined in `src/board_config.h`.
+2. SYS_AUTOSTART cannot carry the persistence check on this image: rcS
+   resets it to 0 when no airframe file matches
+   (`+ SYS_AUTOSTART: curr: 4001 -> new: 0`). The flash write itself had
+   worked (`parameters loaded from storage`), which is how this was found.
+3. The USB console's transmit side died once, right after a `dmesg`. The
+   device kept receiving (a later `param save` ran and persisted) but sent
+   nothing until a reset. Over SWD: no fault (CFSR 0), PRIMASK 0, HRT and
+   USB interrupts enabled, core in `up_idle`. Same family as the phase 3
+   hand-off note on `rp23xx_usbdev.c`; reproduce with `usbmon` in 4b before
+   MAVLink depends on this port.
+4. J-Link: after `monitor reset` the core stays halted; `monitor go` (or
+   `continue`) releases it. The bootloader's 5 s window is caught by
+   starting the uploader before the reset. A J-Link reset is the hands-free
+   way back from the BOOTSEL drive and from a resident bootloader.
