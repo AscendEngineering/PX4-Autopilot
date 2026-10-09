@@ -31,10 +31,15 @@
 #
 ############################################################################
 
+# Shared by every rpi chip; the chip directory that add_subdirectory()s this
+# file provides include/bl_chip.h with the chip's addresses and ROM entry.
 px4_add_library(arch_bootloader
+	flash.c
 	main.c
 	systick.c
 )
+
+target_include_directories(arch_bootloader PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../${PX4_CHIP}/include)
 
 target_link_libraries(arch_bootloader
 	PRIVATE

@@ -46,10 +46,11 @@
  * *writes to the first 8 words of flash at APP_LOAD_ADDRESS
  * are buffered until the "first word" is written with the real value (not 0xffffffff)
  *
- * On a imxrt the ROM API supports 256 byte writes.
+ * On a imxrt the ROM API supports 256 byte writes, and on RP2350 the ROM
+ * flash_range_program() unit is a 256 byte page.
  */
 
-#if defined(CONFIG_ARCH_CHIP_IMXRT)
+#if defined(CONFIG_ARCH_CHIP_IMXRT) || defined(CONFIG_ARCH_CHIP_RP23XX)
 #define FC_NUMBER_WORDS  64                                  // Number of words per page
 #else
 #define FC_NUMBER_WORDS  8                                  // Number of words per cache line.

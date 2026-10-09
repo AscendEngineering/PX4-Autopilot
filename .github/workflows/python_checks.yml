@@ -61,3 +61,4 @@ jobs:
       run: |
         git submodule update --init --depth 1 platforms/nuttx/NuttX/nuttx
         python3 -m unittest -v platforms/nuttx/src/px4/rpi/rpi_common/tests/test_platform.py
+        python3 -m unittest -v platforms/nuttx/src/bootloader/rpi/rpi_common/tests/test_bootloader.py

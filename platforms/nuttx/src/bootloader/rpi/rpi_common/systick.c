@@ -31,31 +31,47 @@
  *
  ****************************************************************************/
 
-#include "arm_internal.h"
-#include "lib/systick.h"
+/**
+ * @file systick.c
+ *
+ * SysTick for the PX4 bootloader on RP2040/RP2350.
+ *
+ * CLKSOURCE=1 counts the processor clock (clk_sys). CLKSOURCE=0 counts the
+ * external reference, which on these chips is the 1 MHz tick from the TICKS
+ * block (RP2350 datasheet 3.7.4 and 8.5), not HCLK/8 as on STM32, so there
+ * is no divisor to compensate for. The common bootloader always selects the
+ * processor clock and asks for board_info.systick_mhz * 1000 cycles per
+ * tick; the reload register holds one less than the period.
+ */
+
+#include <stdint.h>
+
+#include <nuttx/config.h>
+#include <arm_internal.h>
 #include <nvic.h>
-//TODO: verify
+
+#include "lib/systick.h"
+
 uint8_t systick_get_countflag(void)
 {
 	return (getreg32(NVIC_SYSTICK_CTRL) & NVIC_SYSTICK_CTRL_COUNTFLAG) ? 1 : 0;
 }
 
-// See 2.2.3 SysTick external clock is not HCLK/8
-uint32_t g_divisor = 1;
-void systick_set_reload(uint32_t value)
+void systick_set_reload(uint32_t cycles)
 {
-	putreg32((((value * g_divisor) << NVIC_SYSTICK_RELOAD_SHIFT) & NVIC_SYSTICK_RELOAD_MASK), NVIC_SYSTICK_RELOAD);
-}
+	uint32_t reload = cycles ? cycles - 1 : 0;
 
+	putreg32(reload & NVIC_SYSTICK_RELOAD_MASK, NVIC_SYSTICK_RELOAD);
+}
 
 void systick_set_clocksource(uint8_t clocksource)
 {
-	g_divisor = (clocksource == CLKSOURCE_EXTERNAL) ? 8 : 1;
 	modifyreg32(NVIC_SYSTICK_CTRL, NVIC_SYSTICK_CTRL_CLKSOURCE, clocksource & NVIC_SYSTICK_CTRL_CLKSOURCE);
 }
 
 void systick_counter_enable(void)
 {
+	putreg32(0, NVIC_SYSTICK_CURRENT);
 	modifyreg32(NVIC_SYSTICK_CTRL, 0, NVIC_SYSTICK_CTRL_ENABLE);
 }
 
