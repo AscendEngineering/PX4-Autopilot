@@ -183,15 +183,36 @@ production bootloader must bring up XOSC and PLL_SYS itself before anything
 timing-dependent. At the cycle counts above, a sector erase is about 155 ms
 and a page program about 4.6 ms at 11.9 MHz.
 
-Open observations:
+Malformed app vectors, each written to 0x10020000 with the rest of the app
+image intact, then reset and read after 8 s:
 
-- The cortex-debug `runToEntryPoint` breakpoint at the app's `main` did
-  not fire after the bootloader's jump, although the app demonstrably ran.
-  Breakpoints set after the jump have not been tried yet. Harmless for the
-  probe, worth understanding before debugging the production app from
-  reset.
-- Malformed app vectors (bad MSP, even or out-of-range reset vector) have
-  not been exercised on hardware; only the erased case has.
-- While the core sleeps in `wfi`, J-Link occasionally reports `pc` as
-  0xdeadbeee on halt. The status block and tick counter are unaffected.
+| first two words | jump_state | bootloader after 8 s |
+|-----------------|------------|----------------------|
+| MSP 0x2007fff4 (4-byte aligned only) | 1 rejected | resident, ticking |
+| MSP 0x20000100 (below reserved stack) | 1 rejected | resident, ticking |
+| MSP 0x20080000 (above SRAM top) | 1 rejected | resident, ticking |
+| reset 0x10020168 (Thumb bit clear) | 1 rejected | resident, ticking |
+| reset 0x10000165 (inside bootloader) | 1 rejected | resident, ticking |
+| reset 0x103f0001 (at end of app region) | 1 rejected | resident, ticking |
+| erased 0xffffffff | 1 rejected | resident, ticking |
+| good image | 2 accepted | app running, APPP |
 
+Every rejected case reached step 0x1c with `flash_test` 1 first, and
+`systick_irqs` kept advancing afterwards, so the bootloader fell through to
+its idle loop rather than faulting.
+
+Debugger breakpoints across the jump. In one cortex-debug session, with the
+chip still on the ROM USB bootloader's 48 MHz clock (see above), the
+`runToEntryPoint` breakpoint at the app's `main` never fired although the
+app ran. It could not be reproduced at the cold-boot clock: a hardware
+breakpoint at the app's `main` set from inside the bootloader, the exact
+`monitor reset`, `tbreak main`, `continue` sequence, and the same sequence
+preceded by a flash download all stopped at `main` about 5.1 s after the
+reset with the bootloader's final state (step 0x1c, jump 2) still in the
+status block. Treated as a bench artifact of the leftover clock state, not
+investigated further. If it recurs on a production image, power cycle
+first and retest before suspecting the hand-off.
+
+J-Link reports register reads as 0xdeadbeef while the core is running,
+which GDB shows as `0xdeadbeee in ?? ()` when connecting to a running
+target. It is a placeholder, not a program counter; halt and read again.
