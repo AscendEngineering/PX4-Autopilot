@@ -113,7 +113,8 @@ static void *rom_lookup(uint32_t code, uint32_t mask)
  * boot RAM base, where the ROM keeps it. */
 static const uint32_t *rom_xip_setup(void)
 {
-	uintptr_t p = (uintptr_t)rom_lookup(ROM_DATA_SAVED_XIP_SETUP_FUNC_PTR, BL_ROM_RT_FLAG_DATA);
+	void *entry = rom_lookup(ROM_DATA_SAVED_XIP_SETUP_FUNC_PTR, BL_ROM_RT_FLAG_DATA);
+	uintptr_t p = (uintptr_t)entry;
 	const uintptr_t bootram_end = BL_BOOTRAM_BASE + 256u;
 
 	if (p >= BL_BOOTRAM_BASE && p < bootram_end) {
