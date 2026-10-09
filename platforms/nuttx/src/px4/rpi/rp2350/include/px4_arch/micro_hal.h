@@ -85,6 +85,13 @@ __BEGIN_DECLS
 
 /* SPI and I2C. The spiNselect/status names are what NuttX's SPI driver
  * calls; rpi_common/spi/spi.cpp defines them through these aliases. */
+#if !defined(CONFIG_RP23XX_SPI0) && !defined(CONFIG_RP23XX_SPI1)
+/* rp23xx_spi.h declares the bus initializer only when a bus is enabled.
+ * px4_layer (px4_mtd.cpp) references it unconditionally; a build with no
+ * SPI bus, such as the bootloader, needs the prototype to compile and never
+ * links the object that calls it. */
+struct spi_dev_s *rp23xx_spibus_initialize(int port);
+#endif
 #define rpi_spibus_initialize		rp23xx_spibus_initialize
 #define rpi_i2cbus_initialize		rp23xx_i2cbus_initialize
 #define rpi_i2cbus_uninitialize		rp23xx_i2cbus_uninitialize
