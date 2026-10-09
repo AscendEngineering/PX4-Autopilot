@@ -94,8 +94,6 @@ SECTIONS
 	} > flash
 	__exidx_end = ABSOLUTE(.);
 
-	_eronly = ABSOLUTE(.);
-
 	/* .ramfunc rides along with .data: rp23xx_start.c copies _eronly to
 	 * _sdata.._edata before anything runs, which is how the ROM flash
 	 * wrapper in bootloader/rpi/rpi_common/flash.c ends up in SRAM. */
@@ -108,6 +106,12 @@ SECTIONS
 		. = ALIGN(4);
 		_edata = ABSOLUTE(.);
 	} > sram AT > flash
+
+	/* Where rp23xx_start.c copies .data from. Taken from the section's load
+	 * address rather than from '.' before it: ld aligns the LMA to the
+	 * section's alignment, and an 8-byte aligned initialised object would
+	 * otherwise leave _eronly 4 bytes short of the real image. */
+	_eronly = LOADADDR(.data);
 
 	.bss : {
 		_sbss = ABSOLUTE(.);
@@ -134,4 +138,5 @@ SECTIONS
 
 ASSERT(_image_def_end - _image_def_start == 20, "IMAGE_DEF block must be five words")
 ASSERT(_image_def_end - ORIGIN(flash) <= 4096, "IMAGE_DEF block must end inside the first 4 KB")
+ASSERT(_eronly == LOADADDR(.data), "_eronly must be the .data load address")
 ASSERT(LOADADDR(.data) + SIZEOF(.data) <= ORIGIN(flash) + LENGTH(flash), "bootloader image overflows its 128 KB reservation")
