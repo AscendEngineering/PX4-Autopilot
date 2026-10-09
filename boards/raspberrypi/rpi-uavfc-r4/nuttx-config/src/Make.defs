@@ -1,0 +1,7 @@
+############################################################################
+# boards/raspberrypi/rpi-uavfc-r4/nuttx-config/src/Make.defs
+#
+# NuttX's rp23xx board-common Makefile includes board/Make.defs from the
+# board's src directory. PX4 builds all board code through CMake
+# (src/CMakeLists.txt), so nothing is listed here.
+############################################################################
