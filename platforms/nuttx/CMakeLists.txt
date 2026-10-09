@@ -524,7 +524,22 @@ if("${PX4_BOARD_LABEL}" STREQUAL "bootloader")
 		COMMAND ${CMAKE_OBJCOPY} -O binary ${PX4_BINARY_DIR_REL}/${FW_NAME} ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin
 		DEPENDS px4
 	)
-	add_custom_target(px4_bootloader_keep ALL DEPENDS ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin)
+	set(bootloader_keep_outputs ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin)
+
+	# RP2350: the ROM's BOOTSEL drive takes UF2, so ship the bootloader in
+	# that form as well, at the XIP base where the ROM boots from.
+	if(CONFIG_ARCH_CHIP_RP23XX)
+		add_custom_command(OUTPUT ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.uf2
+			COMMAND ${PYTHON_EXECUTABLE} ${PX4_SOURCE_DIR}/Tools/uf2conv.py
+				${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin
+				--base 0x10000000
+				-o ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.uf2
+			DEPENDS ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin ${PX4_SOURCE_DIR}/Tools/uf2conv.py
+		)
+		list(APPEND bootloader_keep_outputs ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.uf2)
+	endif()
+
+	add_custom_target(px4_bootloader_keep ALL DEPENDS ${bootloader_keep_outputs})
 endif()
 
 # print weak symbols
