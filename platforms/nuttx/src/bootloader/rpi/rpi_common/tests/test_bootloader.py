@@ -430,6 +430,10 @@ class BootloaderTest(unittest.TestCase):
         for name in ("bootloader_main", "_sdata", "_edata", "_eronly", "_ebss"):
             self.assertIn(name, symbols, f"required symbol discarded or missing: {name}")
         self.assertTrue(0x10000000 <= symbols["bootloader_main"] < 0x10000000 + len(data))
+        # The production image starts the real bootloader; the phase 2 diagnostic must be gone
+        self.assertFalse("status_main" in symbols, "phase 2 status_main is still linked")
+        dot_config = (elf_path.parent / "NuttX/nuttx/.config").read_text()
+        self.assertIn('CONFIG_INIT_ENTRYPOINT="bootloader_main"', dot_config)
         self.assertEqual(symbols["_ebss"] % 8, 0)
         self.assertEqual(msp, symbols["_ebss"] + idle_stack)
         flash_ops = [address for name, address in symbols.items()

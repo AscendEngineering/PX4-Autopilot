@@ -34,7 +34,6 @@ if("${PX4_BOARD_LABEL}" STREQUAL  "bootloader")
 	add_compile_definitions(BOOTLOADER)
 	add_library(drivers_board
 		bootloader_main.c
-		status_main.c	# phase 2 diagnostic entry point, removed in phase 3
 		timer_config.cpp
 		usb.c
 	)
