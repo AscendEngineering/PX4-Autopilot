@@ -90,6 +90,11 @@ void {c['fn']}_gpio_disable_irq(uint32_t);
 #define ERROR -1
 #define PX4_SOC_ARCH_ID_UNUSED 0
 #define PX4_GUID_BYTE_LENGTH 18
+#define FLASH_BASED_PARAMS 1
+#define BOARD_USE_EXTERNAL_FLASH 1
+#define BOARD_PARAMS_FLASH_ADDRESS 0x103f0000u
+#define BOARD_PARAMS_FLASH_SIZE (64 * 1024)
+#define BOARD_PARAMS_FLASH_PAGE_SIZE (32 * 1024)
 __BEGIN_DECLS
 typedef unsigned irqstate_t;
 typedef int (*xcpt_t)(int, void *, void *);
@@ -262,6 +267,50 @@ static void test_rom_header()
 	puts("rom header ok");
 }
 
+extern "C" ssize_t up_progmem_ext_getpage(size_t addr);
+extern "C" ssize_t up_progmem_ext_eraseblock(size_t block);
+extern "C" ssize_t up_progmem_ext_write(size_t addr, const void *buf, size_t count);
+
+static void test_progmem_shim()
+{
+	const size_t params = 0x103f0000u;
+	const size_t page_bytes = 32 * 1024;
+
+	/* page numbers: 4 kB sector index of the page's first byte */
+	assert(up_progmem_ext_getpage(params) == 1008);
+	assert(up_progmem_ext_getpage(params + page_bytes - 1) == 1008);
+	assert(up_progmem_ext_getpage(params + page_bytes) == 1016);
+	assert(up_progmem_ext_getpage(params + 2 * page_bytes - 1) == 1016);
+	assert(up_progmem_ext_getpage(params - 1) < 0 && up_progmem_ext_getpage(params + 2 * page_bytes) < 0);
+
+	/* erase one page: 32 kB, aligned, as eight sector erases or none when blank */
+	memset((void *)(XIP + 0x3f0000), 0x11, 2 * page_bytes);
+	reset_log();
+	assert(up_progmem_ext_eraseblock(1016) == (ssize_t)page_bytes);
+	assert(ncalls == 5 * 8 && last_erase_addr == 0x3ff000 && last_erase_cmd == 0x20);   /* not block aligned: 8 sector erases */
+	assert(XIP[0x3f8000] == 0xff && XIP[0x3fffff] == 0xff && XIP[0x3f7fff] == 0x11);   /* page 1008 untouched */
+	assert(up_progmem_ext_eraseblock(1009) < 0 && up_progmem_ext_eraseblock(1024) < 0);  /* not a page start, outside */
+	reset_log();
+
+	/* write across a 256-byte boundary, starting mid-page: neighbours keep their value */
+	uint8_t buf[200];   /* 16 bytes in the page at 0x3f8100, 184 in the page at 0x3f8200 */
+	for (unsigned i = 0; i < sizeof(buf); i++) { buf[i] = (uint8_t)(0x80 + i); }
+	assert(up_progmem_ext_write(params + page_bytes + 0x1f0, buf, sizeof(buf)) == (ssize_t)sizeof(buf));
+	assert(strcmp(calls, "CXPFRCXPFR") == 0 && last_prog_addr == 0x3f8200 && last_prog_count == 256);
+	assert(XIP[0x3f81ef] == 0xff && memcmp((const void *)(XIP + 0x3f81f0), buf, sizeof(buf)) == 0 && XIP[0x3f82b8] == 0xff);
+	reset_log();
+
+	/* a second write into the same page only clears bits: the earlier bytes survive */
+	uint8_t zero[4] = {0, 0, 0, 0};
+	assert(up_progmem_ext_write(params + page_bytes + 0x200, zero, 4) == 4);
+	assert(XIP[0x3f8200] == 0 && XIP[0x3f8204] == buf[0x14] && strcmp(calls, "CXPFR") == 0);
+	reset_log();
+
+	assert(up_progmem_ext_write(params - 4, buf, 8) < 0 && up_progmem_ext_write(params + 2 * page_bytes - 4, buf, 8) < 0);
+	assert(ncalls == 0);
+	puts("progmem shim ok");
+}
+
 constexpr auto absent = initSPIDevice(1, {});
 constexpr auto cs0 = initSPIDevice(1, {GPIO::Pin0});
 constexpr auto device = initSPIDevice(1, {GPIO::Pin2}, {GPIO::Pin0});
@@ -338,6 +387,7 @@ static void map_page(uintptr_t base) {
 int main() {
     test_rom_header();
     test_flash_library();
+    test_progmem_shim();
     map_page(RPI_PWM_BASE);
     const unsigned a = LAST_A, b = LAST_B, pin_a = timer_io_channels[a].gpio_out & GPIO_NUM_MASK,
                    pin_b = timer_io_channels[b].gpio_out & GPIO_NUM_MASK;
@@ -414,7 +464,7 @@ int main() {
 
 SOURCES = ("io_pins/io_timer.c", "io_pins/pwm_servo.c", "io_pins/rpi_pinset.c",
            "version/board_identity.c", "version/board_mcu_version.c",
-           "flash/rpi_flash.c")
+           "flash/rpi_flash.c", "flash/rpi_progmem.c")
 
 
 class PlatformTest(unittest.TestCase):
