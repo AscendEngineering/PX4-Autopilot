@@ -352,6 +352,36 @@ def run(exe, scenario):
     return result.stdout
 
 
+PATCHES = ROOT / "boards/raspberrypi/rpi-uavfc-r4/nuttx-patches"
+
+# One marker per patch so a partially applied series is reported, not just a pristine tree.
+BACKPORT_MARKERS = {
+    "arch/arm/src/armv8-m/arm_doirq.c": [
+        ': "r0"',                                                   # 0001 exception_direct clobber
+    ],
+    "arch/arm/src/rp23xx/rp23xx_usbdev.c": [
+        "setbits_reg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF",   # 0002 keep PULLUP_EN
+        "privreq->armed = true;",                                   # 0003 arm a request once
+        "rp23xx_epwrite(ep0, response, 2);",                        # 0004 GET_STATUS data stage
+        "UP_DMB();",                                                # 0005 BUFF_STATUS clear before AVAIL
+        "putreg32(value & ~RP23XX_USBCTRL_DPSRAM_EP_BUFF_CTRL_AVAIL",  # 0005 two-step AVAIL write
+    ],
+    "arch/arm/Kconfig": [
+        "select ARCH_USBDEV_STALLQUEUE if USBDEV",                  # 0004 (hand-added hunk)
+    ],
+}
+
+
+def missing_backports(nuttx):
+    """Files under the NuttX tree `nuttx` that lack at least one backport marker."""
+    missing = []
+    for rel, needles in BACKPORT_MARKERS.items():
+        text = (nuttx / rel).read_text(errors="replace")
+        if any(needle not in text for needle in needles):
+            missing.append(rel)
+    return missing
+
+
 class BootloaderTest(unittest.TestCase):
     def test_units(self):
         with tempfile.TemporaryDirectory(prefix="rpi-bl-test-") as temp:
@@ -378,22 +408,30 @@ class BootloaderTest(unittest.TestCase):
     def test_nuttx_submodule_patches_applied(self):
         """The upstream NuttX backports in boards/.../nuttx-patches must be present in the submodule."""
         nuttx = ROOT / "platforms/nuttx/NuttX/nuttx"
-        patches = ROOT / "boards/raspberrypi/rpi-uavfc-r4/nuttx-patches"
-        expected = {
-            "arch/arm/src/armv8-m/arm_doirq.c": [': "r0"'],
-            "arch/arm/src/rp23xx/rp23xx_usbdev.c": [
-                "setbits_reg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF",
-                # AVAILABLE is set in a second write after the rest of the buffer control word settles;
-                # a single write let the controller consume the buffer with FULL clear and TX wedged
-                "putreg32(value & ~RP23XX_USBCTRL_DPSRAM_EP_BUFF_CTRL_AVAIL",
-                # a request is armed once; double arming toggles the data PID twice and the host drops the packet
-                "privreq->armed = true;",
-            ],
-        }
-        missing = [f for f, needles in expected.items()
-                   if any(needle not in (nuttx / f).read_text() for needle in needles)]
+        missing = missing_backports(nuttx)
         self.assertFalse(missing, "NuttX submodule lacks the rpi-uavfc-r4 backports in " + ", ".join(missing)
-                         + f"; apply them with: git -C {nuttx} apply {patches}/*.patch")
+                         + f"; from the pristine submodule pin run: git -C {nuttx} apply {PATCHES}/*.patch")
+
+    def test_backport_guard_detects_partial_series(self):
+        """A tree with only patches 0001 to 0003 applied must still be reported as incomplete."""
+        nuttx = ROOT / "platforms/nuttx/NuttX/nuttx"
+        pin = subprocess.check_output(["git", "ls-tree", "HEAD", "platforms/nuttx/NuttX/nuttx"],
+                                      cwd=ROOT, text=True).split()[2]
+        with tempfile.TemporaryDirectory(prefix="rpi-bl-backports-") as temp:
+            tree = pathlib.Path(temp)
+            for rel in BACKPORT_MARKERS:
+                target = tree / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(subprocess.check_output(["git", "show", f"{pin}:{rel}"], cwd=nuttx))
+            self.assertEqual(sorted(missing_backports(tree)), sorted(BACKPORT_MARKERS), "pristine tree")
+            for patch in sorted(PATCHES.glob("000[123]-*.patch")):
+                subprocess.check_call(["git", "apply", str(patch)], cwd=tree)
+            partial = missing_backports(tree)
+            self.assertIn("arch/arm/src/rp23xx/rp23xx_usbdev.c", partial, "0004/0005 missing must be detected")
+            self.assertIn("arch/arm/Kconfig", partial, "0004 Kconfig select missing must be detected")
+            for patch in sorted(PATCHES.glob("000[45]-*.patch")):
+                subprocess.check_call(["git", "apply", str(patch)], cwd=tree)
+            self.assertEqual(missing_backports(tree), [], "full series")
 
     def test_bootloader_image_layout(self):
         """Check the binary and production code placement in the linked ELF."""
