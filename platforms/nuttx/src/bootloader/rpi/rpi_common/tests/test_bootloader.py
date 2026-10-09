@@ -507,6 +507,62 @@ class BootloaderTest(unittest.TestCase):
         self.assertEqual(lma, symbols["_eronly"], "NuttX would copy .data from the wrong address")
         self.assertTrue(0x10000000 <= lma < lma + size <= 0x10000000 + len(data))
 
+    def test_application_image_layout(self):
+        """The firmware image sits in the application window with its ROM flash wrapper in SRAM."""
+        import os
+        import struct
+        elf_path = ROOT / "build/raspberrypi_rpi-uavfc-r4_default/raspberrypi_rpi-uavfc-r4_default.elf"
+        uf2_path = elf_path.with_suffix(".uf2")
+        required = os.environ.get("PX4_REQUIRE_BOOTLOADER_BUILD") == "1"
+        if not elf_path.exists():
+            if required:
+                self.fail(f"missing build artefact: {elf_path}")
+            self.skipTest("application ELF not built")
+        app_base = 0x10020000
+        app_end = 0x10000000 + 4 * 1024 * 1024 - 64 * 1024     # params reservation starts here
+        with tempfile.TemporaryDirectory(prefix="rp2350-app-layout-") as temp:
+            derived = pathlib.Path(temp) / "app.bin"
+            subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", str(elf_path), str(derived)], check=True)
+            data = derived.read_bytes()
+        self.assertLessEqual(app_base + len(data), app_end, "application overflows into the params reservation")
+        vectors = 16 + 52
+        image_def = (0xFFFFDED3, 0x10210142, 0x000001FF, 0x00000000, 0xAB123579)
+        self.assertEqual(struct.unpack_from("<5I", data, vectors * 4), image_def, "IMAGE_DEF not right after the vector table")
+        msp, pc = struct.unpack_from("<2I", data, 0)
+        self.assertTrue(0x20000000 < msp <= 0x20080000 and msp % 8 == 0, f"initial MSP {msp:#x}")
+        self.assertTrue(pc & 1 and app_base <= (pc & ~1) < app_base + len(data), f"reset vector {pc:#x}")
+
+        nm = subprocess.check_output(["arm-none-eabi-nm", "--defined-only", str(elf_path)], text=True)
+        symbols = {}
+        for line in nm.splitlines():
+            fields = line.split()
+            if len(fields) == 3:
+                symbols[fields[2]] = int(fields[0], 16)
+        for name in ("up_progmem_ext_write", "rpi_flash_program", "board_reset", "_sdata", "_edata", "_eronly"):
+            self.assertIn(name, symbols, f"required symbol missing: {name}")
+        flash_ops = [a for n, a in symbols.items() if n == "flash_op" or n.startswith("flash_op.")]
+        self.assertTrue(flash_ops, "flash_op was discarded")
+        for address in flash_ops:
+            self.assertTrue(symbols["_sdata"] <= address < symbols["_edata"], f"flash_op {address:#x} is not in the SRAM data copy")
+        self.assertTrue(app_base <= symbols["rpi_flash_program"] < app_end)
+
+        sections = subprocess.check_output(["arm-none-eabi-objdump", "-h", str(elf_path)], text=True)
+        data_sections = [l.split() for l in sections.splitlines() if len(l.split()) >= 5 and l.split()[1] == ".data"]
+        self.assertEqual(len(data_sections), 1)
+        _, _, size_hex, vma_hex, lma_hex, *_ = data_sections[0]
+        size, vma, lma = (int(v, 16) for v in (size_hex, vma_hex, lma_hex))
+        self.assertEqual(lma, symbols["_eronly"], "NuttX would copy .data from the wrong address")
+        self.assertTrue(app_base <= lma < lma + size <= app_base + len(data))
+
+        self.assertTrue(uf2_path.exists(), f"missing {uf2_path}")
+        uf2 = uf2_path.read_bytes()
+        self.assertEqual(len(uf2) % 512, 0)
+        magic0, magic1, flags, target_addr, payload, block_no, num_blocks, family = struct.unpack_from("<8I", uf2, 0)
+        self.assertEqual((magic0, magic1), (0x0A324655, 0x9E5D5157))
+        self.assertEqual(target_addr, app_base, "application UF2 must load at APP_LOAD_ADDRESS")
+        self.assertEqual(family, 0xE48BFF59, "family must be rp2350-arm-s")
+        self.assertEqual(num_blocks, len(uf2) // 512)
+
 
 if __name__ == "__main__":
     unittest.main()

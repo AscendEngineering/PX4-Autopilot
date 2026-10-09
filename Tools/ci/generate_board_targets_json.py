@@ -331,8 +331,8 @@ if (args.group):
                     chip_label = 'special'
                 elif chip == 'stm32f1':
                     chip_label = 'io'
-                elif chip == 'rp2040':
-                    chip_label = 'special'  # rp2040 goes into special group
+                elif chip in ('rp2040', 'rp23xx'):
+                    chip_label = 'special'  # Raspberry Pi chips go into the special group
                 else:
                     chip_label = chip
 
@@ -349,8 +349,8 @@ if (args.group):
                             man_targets[man_key] = []
                         man_targets[man_key].extend(targets)
 
-                # Merge rp2040 targets into a flat list for the special group
-                if chip in ('special', 'rp2040'):
+                # Merge Raspberry Pi targets into a flat list for the special group
+                if chip in ('special', 'rp2040', 'rp23xx'):
                     all_targets = []
                     for m in sorted(man_targets.keys()):
                         all_targets.extend(man_targets[m])
@@ -425,11 +425,11 @@ if (args.group):
                         })
                         chunk_counter += 1
 
-            # Now handle special + rp2040 targets
+            # Now handle special + Raspberry Pi targets
             SPLIT_LIMIT = CHIP_SPLIT_LIMITS.get('special', DEFAULT_SPLIT_LIMIT)
             special_targets = []
             for (c, m), targets in chip_man_buckets.items():
-                if c in ('special', 'rp2040'):
+                if c in ('special', 'rp2040', 'rp23xx'):
                     special_targets.extend(targets)
             if special_targets:
                 chunk_counter = 0

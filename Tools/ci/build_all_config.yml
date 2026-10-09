@@ -44,6 +44,7 @@ grouping:
     kinetis: 14
     s32k: 17
     rp2040: 10
+    rp23xx: 10
     special: 10
     native: 17
   default_split_limit: 12
@@ -73,6 +74,7 @@ seeders:
   kinetis: "nxp_fmuk66-v3_default"
   s32k: "nxp_mr-canhubk3_default"
   rp2040: "raspberrypi_pico_default"
+  rp23xx: "raspberrypi_rpi-uavfc-r4_default"
   special: "px4_fmu-v6x_default"
   native: "px4_sitl_default"
   voxl2: "modalai_voxl2_default"

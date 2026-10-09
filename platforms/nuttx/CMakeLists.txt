@@ -542,6 +542,20 @@ if("${PX4_BOARD_LABEL}" STREQUAL "bootloader")
 	add_custom_target(px4_bootloader_keep ALL DEPENDS ${bootloader_keep_outputs})
 endif()
 
+# RP2350 application UF2: the no-bootloader recovery path (drop it on the
+# ROM's BOOTSEL drive). Loads at APP_LOAD_ADDRESS from the board's
+# src/hw_config.h; the layout test in test_bootloader.py checks the address.
+if(CONFIG_ARCH_CHIP_RP23XX AND NOT ("${PX4_BOARD_LABEL}" MATCHES "^bootloader"))
+	add_custom_command(OUTPUT ${PX4_BINARY_DIR}/${PX4_CONFIG}.uf2
+		COMMAND ${PYTHON_EXECUTABLE} ${PX4_SOURCE_DIR}/Tools/uf2conv.py
+			${PX4_BINARY_DIR}/${PX4_CONFIG}.bin
+			--base 0x10020000
+			-o ${PX4_BINARY_DIR}/${PX4_CONFIG}.uf2
+		DEPENDS ${PX4_BINARY_OUTPUT} ${PX4_SOURCE_DIR}/Tools/uf2conv.py
+	)
+	add_custom_target(px4_uf2 ALL DEPENDS ${PX4_BINARY_DIR}/${PX4_CONFIG}.uf2)
+endif()
+
 # print weak symbols
 add_custom_target(weak_symbols
 	COMMAND ${CMAKE_NM} $<TARGET_FILE:px4> | ${GREP} " w " | cat
