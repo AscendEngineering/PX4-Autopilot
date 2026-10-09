@@ -106,7 +106,7 @@
  * I2C internal
  *
  * I2C0SCL: GPIO25
- * I2C0SDA: GPIO24 
+ * I2C0SDA: GPIO24
  *
  */
 /*

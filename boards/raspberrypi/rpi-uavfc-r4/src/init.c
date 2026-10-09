@@ -265,11 +265,11 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 		syslog(LOG_ERR, "[boot] DMA alloc FAILED\n");
 	}
 
-/* #if defined(SERIAL_HAVE_RXDMA) */
-/* 	// set up the serial DMA polling at 1ms intervals for received bytes that have not triggered a DMA event. */
-/* 	static struct hrt_call serial_dma_call; */
-/* 	hrt_call_every(&serial_dma_call, 1000, 1000, (hrt_callout)stm32_serial_dma_poll, NULL); */
-/* #endif */
+	/* #if defined(SERIAL_HAVE_RXDMA) */
+	/* 	// set up the serial DMA polling at 1ms intervals for received bytes that have not triggered a DMA event. */
+	/* 	static struct hrt_call serial_dma_call; */
+	/* 	hrt_call_every(&serial_dma_call, 1000, 1000, (hrt_callout)stm32_serial_dma_poll, NULL); */
+	/* #endif */
 
 	/* initial LED state */
 	drv_led_start();
@@ -286,15 +286,15 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 	VDD_3V3_SD_CARD_EN(true);
 	usleep(500 * 1000);
 //TODO:
-/* #ifdef CONFIG_MMCSD */
-/* 	int ret = stm32_sdio_initialize(); */
-/**/
-/* 	if (ret != OK) { */
-/* 		led_on(LED_RED); */
-/* 		return ret; */
-/* 	} */
-/**/
-/* #endif /* CONFIG_MMCSD */ */
-/**/
+	/* #ifdef CONFIG_MMCSD */
+	/* 	int ret = stm32_sdio_initialize(); */
+	/**/
+	/* 	if (ret != OK) { */
+	/* 		led_on(LED_RED); */
+	/* 		return ret; */
+	/* 	} */
+	/**/
+	/* #endif /* CONFIG_MMCSD */ * /
+	/**/
 	return OK;
 }
