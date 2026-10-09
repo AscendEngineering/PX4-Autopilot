@@ -18,34 +18,7 @@ RPI_COMMON = HERE.parent
 BOOTLOADER = RPI_COMMON.parents[1]          # platforms/nuttx/src/bootloader
 ROOT = next(p for p in HERE.parents if (p / "Tools").is_dir())
 NUTTX_ARCH = ROOT / "platforms/nuttx/NuttX/nuttx/arch/arm/src"
-
-# Values the board's hw_config.h is expected to carry (design spec 3.1, 4.4)
-HW_CONFIG = """
-#pragma once
-#define USB0_DEV 0x01
-#define BOARD_TYPE 7300
-#define BOOTLOADER_RESERVATION_SIZE (128 * 1024)
-#define APP_LOAD_ADDRESS 0x10020000
-#define APP_RESERVATION_SIZE (64 * 1024)
-#define BOARD_FLASH_SIZE (4 * 1024 * 1024)
-#define BOARD_FLASH_SECTORS 1024
-#define BOARD_FIRST_FLASH_SECTOR_TO_ERASE 32
-#define BOOTLOADER_DELAY 5000
-#define INTERFACE_USB 1
-#define INTERFACE_USB_CONFIG "/dev/ttyACM0"
-#define INTERFACE_USART 0
-#define SERIAL_BREAK_DETECT_DISABLED 1
-#define BOARD_PIN_LED_ACTIVITY 0
-#define BOARD_PIN_LED_BOOTLOADER 1
-#define BOARD_LED_ON 0
-#define BOARD_LED_OFF 1
-#define ARCH_SN_MAX_LENGTH 8
-#define BOOT_DEVICES_SELECTION USB0_DEV
-#define BOOT_DEVICES_FILTER_ONUSB USB0_DEV
-#if defined(TEST_VBUS)
-#define BOARD_VBUS 24
-#endif
-"""
+BOARD = ROOT / "boards/raspberrypi/rpi-uavfc-r4/src"   # the real hw_config.h
 
 STUBS = {
     "nuttx/config.h": "#pragma once\n#define CONFIG_ARCH_CHIP_RP23XX 1\n",
@@ -69,7 +42,6 @@ void rp23xx_gpio_put(uint32_t gpio, int set);
 bool rp23xx_gpio_get(uint32_t gpio);
 void rp23xx_gpio_setdir(uint32_t gpio, int out);
 """,
-    "hw_config.h": HW_CONFIG,
 }
 
 TEST_C = r'''
@@ -86,6 +58,8 @@ TEST_C = r'''
 #include <nvic.h>
 
 #define XIP ((volatile uint8_t *)(uintptr_t)BL_FLASH_BASE)
+
+_Static_assert(ARCH_SN_MAX_LENGTH >= 12, "GET_SN must accept uploader offsets 0, 4 and 8");
 
 /* declared nowhere in bl.h: provided by flash.c and main.c */
 ssize_t arch_flash_write(uintptr_t address, const void *buffer, size_t buflen);
@@ -352,7 +326,7 @@ def build(temp, extra_flags=()):
         path = temp / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
-    includes = [temp, BOOTLOADER / "common", RPI_COMMON.parent / "rp2350/include",
+    includes = [temp, BOARD, BOOTLOADER / "common", RPI_COMMON.parent / "rp2350/include",
                 NUTTX_ARCH / "rp23xx", NUTTX_ARCH / "armv8-m"]
     # The firmware build force-includes nuttx/config.h, which flash_cache.h needs to pick the
     # page size; NuttX's <string.h> also brings in the fixed-width types bl.h relies on.
@@ -394,7 +368,7 @@ class BootloaderTest(unittest.TestCase):
 
     def test_boot_decision_with_vbus(self):
         with tempfile.TemporaryDirectory(prefix="rpi-bl-test-") as temp:
-            exe = build(temp, ["-DTEST_VBUS"])
+            exe = build(temp, ["-DBOARD_VBUS=24"])
             # VBUS absent: try the application first; it is not bootable here, so stay forever
             self.assertEqual(run(exe, "boot").strip(), "bootloader timeout=0 scratch=0xb007b007 jumped=1 cinit=1")
             # VBUS present: wait for an upload with the usual timeout
