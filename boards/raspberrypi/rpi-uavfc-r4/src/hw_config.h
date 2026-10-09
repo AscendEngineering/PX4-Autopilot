@@ -49,7 +49,11 @@
 #define USB0_DEV			0x01
 
 /* Board identity. Provisional until registered; firmware.prototype must
- * carry the same board_id. 7xxx holds 7000-7004 and 7120 today. */
+ * carry the same board_id. 7xxx holds 7000-7004 and 7120 today.
+ * The USB identity in nuttx-config/bootloader/defconfig (VID 0x3185,
+ * PID 0x0040) is provisional too: 0x3185 is the VID the px4 fmu-v6 boards
+ * ship under, and the board-addition rules want the manufacturer's own.
+ * Decide before any board leaves the bench with this bootloader on it. */
 #define BOARD_TYPE			7300
 
 /* Flash map, 4 KB sectors throughout (W25Q32 sector erase) */

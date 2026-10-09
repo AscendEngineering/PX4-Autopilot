@@ -223,8 +223,11 @@ target. It is a placeholder, not a program counter; halt and read again.
 
 ### Phase 2, 2026-10-09: NuttX bootloader image on the Pico 2
 
-Installed through the BOOTSEL drive (UF2) and through J-Link; identical
-behaviour. Cold power-up, read from `/dev/ttyACM0`:
+The final image was installed through J-Link (`load` of the ELF). An earlier
+build of the day went in through the BOOTSEL drive as UF2 and the ROM
+accepted and booted it, so the UF2 path is known to work for this image
+layout, but the final image has not been installed that way yet: phase 3
+bench item. Cold power-up, read from `/dev/ttyACM0`:
 
 | field | value | phase 1 |
 |-------|-------|---------|
@@ -241,7 +244,7 @@ behaviour. Cold power-up, read from `/dev/ttyACM0`:
 | heap | 516312 total, 496328 free | n/a |
 | SWD while running | pc in `up_idle`, VTOR 0x10000000, CFSR 0, HFSR 0 | n/a |
 | LED | GPIO25 1 Hz (package-selected) | GPIO25 |
-| image | 48051 B text, 0 data, 6712 B bss; `.data` LMA = `_eronly`, `flash_op` in SRAM, `bootloader_main` retained | 128 KB reservation |
+| image | 48051 B text per `size`, which counts the 484 B `.data` as text because `flash_op` lives in it; 6712 B bss; `.data` LMA = `_eronly`, `flash_op` in SRAM, `bootloader_main` retained | 128 KB reservation |
 
 What it took to get here, all found with SWD because an assert before the
 FPU is enabled on this chip ends in lockup (NOCP, PC 0xEFFFFFFE) and an
