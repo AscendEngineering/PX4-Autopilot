@@ -510,6 +510,7 @@ class BootloaderTest(unittest.TestCase):
     def test_application_image_layout(self):
         """The firmware image sits in the application window with its ROM flash wrapper in SRAM."""
         import os
+        import re
         import struct
         elf_path = ROOT / "build/raspberrypi_rpi-uavfc-r4_default/raspberrypi_rpi-uavfc-r4_default.elf"
         uf2_path = elf_path.with_suffix(".uf2")
@@ -559,7 +560,11 @@ class BootloaderTest(unittest.TestCase):
         self.assertEqual(len(uf2) % 512, 0)
         magic0, magic1, flags, target_addr, payload, block_no, num_blocks, family = struct.unpack_from("<8I", uf2, 0)
         self.assertEqual((magic0, magic1), (0x0A324655, 0x9E5D5157))
-        self.assertEqual(target_addr, app_base, "application UF2 must load at APP_LOAD_ADDRESS")
+        # The build derives the UF2 base from the board's hw_config.h, not from a constant in platform CMake
+        hw_config = (ROOT / "boards/raspberrypi/rpi-uavfc-r4/src/hw_config.h").read_text()
+        app_load_address = int(re.search(r"^#define APP_LOAD_ADDRESS\s+(0x[0-9a-fA-F]+)", hw_config, re.M).group(1), 16)
+        self.assertEqual(app_load_address, app_base)
+        self.assertEqual(target_addr, app_load_address, "application UF2 must load at the board's APP_LOAD_ADDRESS")
         self.assertEqual(family, 0xE48BFF59, "family must be rp2350-arm-s")
         self.assertEqual(num_blocks, len(uf2) // 512)
 
