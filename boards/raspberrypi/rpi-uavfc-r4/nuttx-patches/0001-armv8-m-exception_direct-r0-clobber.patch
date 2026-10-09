@@ -1,0 +1,21 @@
+From: PX4 Development Team <px4@px4.io>
+Subject: [PATCH 1/2] armv8-m: declare r0 clobbered in exception_direct FPU asm
+
+The inline asm writes r0 before vmsr fpscr; without the clobber the
+compiler keeps the IRQ number in r0 and every interrupt dispatches as
+0x40000 -> irq_unexpected_isr -> PANIC. Backport of upstream apache/nuttx
+master arch/arm/src/armv8-m/arm_doirq.c.
+
+---
+diff --git a/arch/arm/src/armv8-m/arm_doirq.c b/arch/arm/src/armv8-m/arm_doirq.c
+index a86de9f7e7..5f902b1eda 100644
+--- a/arch/arm/src/armv8-m/arm_doirq.c
++++ b/arch/arm/src/armv8-m/arm_doirq.c
+@@ -55,6 +55,7 @@ void exception_direct(void)
+       "vmsr fpscr, r0\n"
+       :
+       : "i" (ARMV8M_FPSCR_LTPSIZE_NONE)
++      : "r0"
+     );
+ #endif
+ 

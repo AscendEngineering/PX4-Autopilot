@@ -375,18 +375,40 @@ class BootloaderTest(unittest.TestCase):
             self.assertEqual(run(exe, "boot_vbus").strip(), "bootloader timeout=5000 scratch=0 jumped=0 cinit=1")
             self.assertEqual(run(exe, "boot_signature").strip(), "bootloader timeout=0 scratch=0 jumped=0 cinit=1")
 
+    def test_nuttx_submodule_patches_applied(self):
+        """The two upstream NuttX backports in boards/.../nuttx-patches must be present in the submodule."""
+        nuttx = ROOT / "platforms/nuttx/NuttX/nuttx"
+        patches = ROOT / "boards/raspberrypi/rpi-uavfc-r4/nuttx-patches"
+        expected = {
+            "arch/arm/src/armv8-m/arm_doirq.c": ': "r0"',
+            "arch/arm/src/rp23xx/rp23xx_usbdev.c": "setbits_reg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF",
+        }
+        missing = [f for f, needle in expected.items() if needle not in (nuttx / f).read_text()]
+        self.assertFalse(missing, "NuttX submodule lacks the rpi-uavfc-r4 backports in " + ", ".join(missing)
+                         + f"; apply them with: git -C {nuttx} apply {patches}/*.patch")
+
     def test_bootloader_image_layout(self):
         """Check the binary and production code placement in the linked ELF."""
         import os
+        import re
         import struct
         bin_path = ROOT / "boards/raspberrypi/rpi-uavfc-r4/extras/raspberrypi_rpi-uavfc-r4_bootloader.bin"
         elf_path = ROOT / "build/raspberrypi_rpi-uavfc-r4_bootloader/raspberrypi_rpi-uavfc-r4_bootloader.elf"
         required = os.environ.get("PX4_REQUIRE_BOOTLOADER_BUILD") == "1"
-        if not required and not bin_path.exists() and not elf_path.exists():
-            self.skipTest("bootloader binary and ELF not built")
-        self.assertTrue(bin_path.is_file(), f"missing build artefact: {bin_path}")
-        self.assertTrue(elf_path.is_file(), f"missing build artefact: {elf_path}")
-        data = bin_path.read_bytes()
+        if not elf_path.exists():
+            if required:
+                self.fail(f"missing build artefact: {elf_path}")
+            self.skipTest("bootloader ELF not built")
+        # The binary under test is always derived from this ELF; a committed extras/.bin
+        # must be byte-identical to it, otherwise the two are out of step.
+        with tempfile.TemporaryDirectory(prefix="rp2350-layout-") as temp:
+            derived = pathlib.Path(temp) / "bootloader.bin"
+            subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", str(elf_path), str(derived)], check=True)
+            data = derived.read_bytes()
+        if bin_path.exists():
+            self.assertEqual(bin_path.read_bytes(), data, f"{bin_path} is not the objcopy of {elf_path}")
+        defconfig = (ROOT / "boards/raspberrypi/rpi-uavfc-r4/nuttx-config/bootloader/defconfig").read_text()
+        idle_stack = int(re.search(r"^CONFIG_IDLETHREAD_STACKSIZE=(\d+)$", defconfig, re.M).group(1))
         image_def = (0xFFFFDED3, 0x10210142, 0x000001FF, 0x00000000, 0xAB123579)
         vectors = 16 + 52                      # NR_IRQS on rp23xx
         self.assertLessEqual(len(data), 128 * 1024, "bootloader image over its 128 KB reservation")
@@ -409,7 +431,7 @@ class BootloaderTest(unittest.TestCase):
             self.assertIn(name, symbols, f"required symbol discarded or missing: {name}")
         self.assertTrue(0x10000000 <= symbols["bootloader_main"] < 0x10000000 + len(data))
         self.assertEqual(symbols["_ebss"] % 8, 0)
-        self.assertEqual(msp, symbols["_ebss"] + 768)
+        self.assertEqual(msp, symbols["_ebss"] + idle_stack)
         flash_ops = [address for name, address in symbols.items()
                      if name == "flash_op" or name.startswith("flash_op.")]
         self.assertTrue(flash_ops, "production flash_op was discarded")

@@ -1,0 +1,23 @@
+From: PX4 Development Team <px4@px4.io>
+Subject: [PATCH 2/2] rp23xx: keep PULLUP_EN when usbdev_register sets EP0_INT_1BUF
+
+putreg32 on SIE_CTRL after CLASS_BIND erased the D+ pull-up the class
+driver had just enabled; the device never attached. Backport of upstream
+apache/nuttx master arch/arm/src/rp23xx/rp23xx_usbdev.c (setbits_reg32).
+
+---
+diff --git a/arch/arm/src/rp23xx/rp23xx_usbdev.c b/arch/arm/src/rp23xx/rp23xx_usbdev.c
+index 5cfb18bb93..963ce10b44 100644
+--- a/arch/arm/src/rp23xx/rp23xx_usbdev.c
++++ b/arch/arm/src/rp23xx/rp23xx_usbdev.c
+@@ -2105,8 +2105,8 @@ int usbdev_register(struct usbdevclass_driver_s *driver)
+ 
+   /* Enable interrupt */
+ 
+-  putreg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF,
+-           RP23XX_USBCTRL_REGS_SIE_CTRL);
++  setbits_reg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF,
++                RP23XX_USBCTRL_REGS_SIE_CTRL);
+   putreg32(RP23XX_USBCTRL_REGS_INTR_BUFF_STATUS |
+            RP23XX_USBCTRL_REGS_INTR_BUS_RESET |
+            RP23XX_USBCTRL_REGS_INTR_SETUP_REQ,
