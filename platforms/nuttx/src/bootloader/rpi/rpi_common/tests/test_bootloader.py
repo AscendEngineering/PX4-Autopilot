@@ -397,6 +397,12 @@ def missing_backports(nuttx):
     return missing
 
 
+def masked_image(data: bytes) -> bytes:
+    """Zero the bootloader's version string so a rebuild at another commit compares equal."""
+    import re
+    return re.sub(rb"PX4BLv[0-9A-Za-z.\-]+g[0-9a-f]{7,12}", lambda m: b"\0" * len(m.group(0)), data)
+
+
 class BootloaderTest(unittest.TestCase):
     def test_units(self):
         with tempfile.TemporaryDirectory(prefix="rpi-bl-test-") as temp:
@@ -449,6 +455,13 @@ class BootloaderTest(unittest.TestCase):
                 subprocess.check_call(["git", "apply", str(patch)], cwd=tree)
             self.assertEqual(missing_backports(tree), [], "full series")
 
+    def test_masked_image_hides_only_the_version_string(self):
+        a = b"xxPX4BLv1.18.0ga739176859yy"
+        b = b"xxPX4BLv1.18.0g0c05c332b4yy"
+        self.assertEqual(masked_image(a), masked_image(b))
+        self.assertEqual(masked_image(b"no version here"), b"no version here")
+        self.assertNotEqual(masked_image(a + b"1"), masked_image(b + b"2"))
+
     def test_bootloader_image_layout(self):
         """Check the binary and production code placement in the linked ELF."""
         import os
@@ -468,7 +481,11 @@ class BootloaderTest(unittest.TestCase):
             subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", str(elf_path), str(derived)], check=True)
             data = derived.read_bytes()
         if bin_path.exists():
-            self.assertEqual(bin_path.read_bytes(), data, f"{bin_path} is not the objcopy of {elf_path}")
+            committed = bin_path.read_bytes()
+            self.assertEqual(len(committed), len(data), "committed extras/.bin has a different size from a fresh build")
+            self.assertEqual(masked_image(committed), masked_image(data),
+                             "committed extras/.bin differs from a fresh build beyond the version string")
+            self.assertNotEqual(masked_image(data), data, "the version string was not found in the image")
         defconfig = (ROOT / "boards/raspberrypi/rpi-uavfc-r4/nuttx-config/bootloader/defconfig").read_text()
         idle_stack = int(re.search(r"^CONFIG_IDLETHREAD_STACKSIZE=(\d+)$", defconfig, re.M).group(1))
         image_def = (0xFFFFDED3, 0x10210142, 0x000001FF, 0x00000000, 0xAB123579)
