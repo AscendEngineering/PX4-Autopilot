@@ -226,3 +226,82 @@ What it took:
    `continue`) releases it. The bootloader's 5 s window is caught by
    starting the uploader before the reset. A J-Link reset is the hands-free
    way back from the BOOTSEL drive and from a resident bootloader.
+
+### Phase 4b, 2026-10-09: flight stack image and the USB console fix
+
+The firmware is `raspberrypi_rpi-uavfc-r4_default` with the multicopter
+module list (1228 KB of the 3904 KB window), the schematic's pin map, and
+MAVLink on USB (`SYS_USB_AUTO` 2); the USB NSH console is gone and every
+shell check below went through the MAVLink shell (SERIAL_CONTROL). The
+bootloader was rebuilt with the same NuttX fixes and installed over J-Link.
+
+| item | measured |
+|------|----------|
+| console stress before the fix (`console_stress.py`, NSH over USB, 6 commands round-robin) | STALL after 13 s (run 1) and 9 s (run 2), both on `top once`; console dead on re-probe, CFSR and HFSR 0, core in `up_idle` |
+| console stress after the CDC ACM class driver backport alone (patches 0006 to 0016) | STALL after 20, 16, 9 and 13 s in four runs: not the cause |
+| console stress after the NVIC priority fix (patches 0017, 0018) | 2 x 9 min OK: 772 commands / 317724 bytes and 771 commands / 317343 bytes, no stall |
+| bootloader identify after the fix, 8 uploads through the resident bootloader with `reboot -b` between runs | 8/8 uploaded in 5 s each, 0 `Attempting reboot on` lines (phase 3: 1 in 8) |
+| firmware size with the FPV module list | text 1228508 B, `image_size` 1228520 of 3997696 |
+| boot on a Pico 2 with no sensors | commander, sensors, navigator, gps, two mavlink instances running; `icm45686` and `dps310` report no device and return within the boot; `pwm_out` 4 channels at 400 Hz; `free` 229 KB of 491 KB |
+| pad functions after boot (SWD, firmware running) | GPIO0/1 SIO (LEDs intact), GPIO18 low (9 V off), GPIO19 high (5 V on), GPIO3 low (sounder off), GPIO44/45 UART, GPIO36/37 UART, GPIO24/25 I2C; `/dev` has `ttyS0`, `ttyS1`, `ttyACM0` |
+| ADC pads GPIO46/47 | not checkable: `PADS_BANK0` for GPIO 32 and up does not exist on the RP2350A (a write reads back 0); real board item |
+| MAVLink over USB (pymavlink) | heartbeat 0.02 s after open, type 2 (quad), `SYS_AUTOSTART` 4001 read, reboot-to-bootloader (param1 = 3) ack 0, firmware gone 2.0 s later, `PX4 BL RPI-UAVFC-R4` 0.3 s after that, upload through it 17 s with no replug, firmware back 1.0 s after the upload's reboot |
+| QGC | not run: QGroundControl is not installed on the bench host; user item |
+| power cycle (item 3) | not run: needs hands. J-Link reset proxy: firmware gone 1.24 s after the reset, bootloader up 0.28 s later, resident 4.88 s (host view), firmware up 0.72 s after it dropped |
+| real board items | blocked: no RPI-UAVFC-R4 on the bench (checklist below) |
+
+What it took:
+
+1. The console stall is an NVIC priority bug, not the USB driver. The
+   fork's `rp23xx_irq.c` wrote the default priority through a macro that
+   takes an IRQ number, twelve times, so only IRQs 0 to 11 got 0x80 and IRQs
+   12 to 51 stayed at 0. `up_irq_save()` raises BASEPRI to 0x80, so no
+   critical section ever masked the USB interrupt (IRQ 14). Found with an
+   event ring in `rp23xx_usbdev.c` read over SWD: the USB completion ran
+   inside the class driver's locked send path, drained the serial ring, and
+   the writing thread then submitted a zero-length request, which
+   `rp23xx_wrrequest` leaves queued and unarmed on any endpoint but EP0.
+   Upstream fixed the init in May 2026 (ed5a661da8, 614cdcd93f); they are
+   patches 0017 and 0018. The eleven `cdcacm.c` commits (0006 to 0016) went
+   in first and did not change the stall; they stay because the file now
+   tracks upstream. The phase 3 duplicated GET_VERSION payload has the same
+   cause and is gone (0 in 8).
+2. On the first flight-stack boot no USB device appeared at all. The board
+   has no VBUS sense pin and the rp23xx driver asserts `VBUS_DETECTED` only
+   through its override when a class driver registers, so 4a's SIE_STATUS
+   read said "no VBUS" and `cdcacm_autostart` never ran `sercon`; the NSH
+   USB console had hidden this by registering first. `BOARD_ADC_USB_CONNECTED`
+   is now `true`.
+3. Every `param set-default` from `rc.board_defaults` and the airframe was
+   gone after boot (`SYS_AUTOSTART` 0, `MAV_TYPE` 0, heartbeat type 0).
+   With no console, NSH's init task runs rcS and exits; its exit runs the one
+   exit function `CONFIG_LIBC_MAX_EXITFUNS=1` allows, which is the static
+   destructor of the parameter library's custom-defaults layer
+   (`runtime_defaults`; `user_config`'s registration is rejected). Seen with
+   a breakpoint on `atexit_register`. The nsh defconfig now has
+   `CONFIG_LIBC_MAX_EXITFUNS=0`, which compiles the registration to a no-op.
+   The Cube boards share the no-console configuration with the limit at 1.
+4. `dataman` with no storage timed out every second; `SYS_DM_BACKEND` 1
+   (RAM) in `rc.board_defaults`.
+5. The rp23xx Kconfig has pin options (`CONFIG_RP23XX_UART0_TX_GPIO`, default
+   GPIO0, the LED) that only `boards/arm/rp23xx/common` applies; this image
+   does not link it, and `init.c` sets the pins itself.
+6. The first host open of the USB console after boot gets no reply; the
+   second does. `console_stress.py` waits for the prompt.
+7. Noise left for the hand-off: four `ERROR [parameters] get: param 65535
+   invalid` lines after ekf2 starts.
+
+#### Real board checklist (not run: no RPI-UAVFC-R4 on the bench)
+
+1. BOOTSEL install of `extras/raspberrypi_rpi-uavfc-r4_bootloader.uf2`; blue LED (GPIO0) pattern per `bl.c`; `lsusb` shows 3185:0040.
+2. `make raspberrypi_rpi-uavfc-r4_default upload`; MAVLink heartbeat on USB; green LED on after boot.
+3. `icm45686 status`: if the driver reports a WHO_AM_I mismatch, read the register by hand (`icm45686 -s -b 1 start` with debug, or a short `spi` probe) and record the value. The ICM-56686 may need its own WHO_AM_I constant in `src/drivers/imu/invensense/icm45686/InvenSense_ICM45686_registers.hpp` (0xE9 is the ICM-45686) or its own driver if the register map differs. Decision point for the user.
+4. `dps310 status`: DPS368 detected at 0x76 on bus 1 (product id 0x11).
+5. `sensors status`, `listener sensor_accel`, `listener sensor_baro`: rates and sane values.
+6. ADC pads: read `PADS_BANK0` for GPIO46/47 over SWD after boot (expect OD set, IE/PUE/PDE/ISO clear); `board_adc`: `listener battery_status` with a known pack voltage; adjust `BAT1_V_DIV` if the reading is off by more than 2 %.
+7. PWM: `pwm_out` has no test command. Assign the motor functions once (`param set PWM_MAIN_FUNC1 101`, `PWM_MAIN_FUNC2 102`, `PWM_MAIN_FUNC3 103`, `PWM_MAIN_FUNC4 104`, then `param save` and `reboot`), then `actuator_test set -m 1 -v 0.1 -t 3` with a scope on M1 (GPIO9): expected a 1100 µs pulse at 400 Hz for 3 s (`PWM_MAIN_MIN` 1000 plus 10 % of the 1000 µs range), 900 µs (`PWM_MAIN_DIS`) otherwise. Repeat `-m 2` to `-m 4` on GPIO8, 7, 6, propellers off.
+8. GPS on the GPS connector: `gps status` with `GPS_1_CONFIG` 201 (`/dev/ttyS1`).
+9. UART0 loopback on the DJI connector: `nshterm /dev/ttyS0` or `mavlink start -d /dev/ttyS0`.
+10. `i2cdetect -b 2` with a device on the external connector.
+11. 9 V rail stays off at boot (meter on the VTX connector); `gpio` write to GPIO18 turns it on.
+12. Commander preflight passes with sensors present; arm on the bench with propellers off.
