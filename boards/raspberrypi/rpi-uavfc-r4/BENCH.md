@@ -270,8 +270,11 @@ What it took:
    has no VBUS sense pin and the rp23xx driver asserts `VBUS_DETECTED` only
    through its override when a class driver registers, so 4a's SIE_STATUS
    read said "no VBUS" and `cdcacm_autostart` never ran `sercon`; the NSH
-   USB console had hidden this by registering first. `BOARD_ADC_USB_CONNECTED`
-   is now `true`.
+   USB console had hidden this by registering first. VBUS is now reported
+   as present (`board_read_VBUS_state`), and `system_power.usb_connected`
+   reads the bus state (SIE_STATUS CONNECTED and not SUSPENDED) so that a
+   battery-powered board can arm and keeps its 5 V rail check. The no-host
+   case is a real-board item.
 3. Every `param set-default` from `rc.board_defaults` and the airframe was
    gone after boot (`SYS_AUTOSTART` 0, `MAV_TYPE` 0, heartbeat type 0).
    With no console, NSH's init task runs rcS and exits; its exit runs the one
@@ -290,6 +293,14 @@ What it took:
    second does. `console_stress.py` waits for the prompt.
 7. Noise left for the hand-off: four `ERROR [parameters] get: param 65535
    invalid` lines after ekf2 starts.
+8. A pipeline in the MAVLink shell (`mavlink status | grep x`) hard-faults
+   and resets the board: bus fault at address 2 in `fdlist_get_by_index`
+   from `fdlist_copy` while NSH spawns the `sh` task for the pipe
+   (`group_setuptaskfiles`). Reproduced twice with the USB watcher; the
+   firmware is back 6 s later through the bootloader. Hand-off item; do not
+   pipe in the MAVLink shell until it is fixed.
+9. Bench logs, SWD dumps and the helper scripts for this phase are kept in
+   `probe/phase4b-evidence/` on the development machine (git-ignored).
 
 #### Real board checklist (not run: no RPI-UAVFC-R4 on the bench)
 
@@ -304,4 +315,4 @@ What it took:
 9. UART0 loopback on the DJI connector: `nshterm /dev/ttyS0` or `mavlink start -d /dev/ttyS0`.
 10. `i2cdetect -b 2` with a device on the external connector.
 11. 9 V rail stays off at boot (meter on the VTX connector); `gpio` write to GPIO18 turns it on.
-12. Commander preflight passes with sensors present; arm on the bench with propellers off.
+12. Commander preflight passes with sensors present; arm on the bench with propellers off, USB unplugged: `listener system_power` must show `usb_connected: False` on battery.

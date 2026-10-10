@@ -88,10 +88,15 @@ __EXPORT void board_on_reset(int status)
 	}
 }
 
-/* For the usb_connected command and board_common.h: 0 when VBUS is present. */
+/* VBUS for cdcacm_autostart and the usb_connected command: 0 = present.
+ * There is no VBUS sense, and the controller's VBUS_DETECTED bit is only
+ * set by the override the rp23xx driver writes when a class driver
+ * registers, so a real read would keep cdcacm_autostart from ever running
+ * sercon. Report VBUS as present; system_power.usb_connected reads the
+ * real bus state through BOARD_ADC_USB_CONNECTED instead. */
 int board_read_VBUS_state(void)
 {
-	return BOARD_ADC_USB_CONNECTED ? 0 : 1;
+	return 0;
 }
 
 /* Called from rp23xx_start.c before the FPU and the serial console exist. */

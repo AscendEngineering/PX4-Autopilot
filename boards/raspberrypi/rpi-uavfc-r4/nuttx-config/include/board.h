@@ -73,8 +73,10 @@
 /* Alternate function pin selections ************************************************/
 
 /* UARTs: hardware UART0 and UART1. The pins are set by the board in
- * rp23xx_boardinitialize(); the NuttX driver has no pin option. UART0's
- * default pins would be the LED pins, so never rely on the default. */
+ * rp23xx_boardinitialize() (src/init.c). NuttX's CONFIG_RP23XX_UART0_TX_GPIO
+ * and friends are applied only by boards/arm/rp23xx/common, which this
+ * image does not link, and their Kconfig ranges stop at GPIO29 (RP2350A):
+ * UART0's default there is GPIO0/1, the LED pins. Never link that code. */
 #define GPIO_UART0_TX		44	/* DVTX_UART0_TX, DJI air unit connector */
 #define GPIO_UART0_RX		45	/* DVTX_UART0_RX */
 #define GPIO_UART1_TX		36	/* GPS_UART1_TX */

@@ -44,6 +44,7 @@
 #include <px4_platform_common/px4_config.h>
 #include <nuttx/compiler.h>
 #include <stdint.h>
+#include <hardware/rp23xx_usbctrl_regs.h>
 
 /* LEDs: schematic U1 pin 77 GPIO0 BF_BLUE_LEDn, pin 78 GPIO1 BF_GREEN_LEDn,
  * pulled to +3V3: active low, so an output set high is off. */
@@ -89,13 +90,21 @@
  * (board_reset.cpp REBOOT_TO_ISP through the ROM reboot call) */
 #define BOARD_HAS_ISP_BOOTLOADER	1
 
-/* No VBUS sense GPIO is wired, and the RP2350 has no VBUS pin of its own:
- * the USB controller's VBUS_DETECTED bit is only ever set by the override
- * that the rp23xx driver writes when a class driver registers. Reading it
- * before sercon therefore says "no VBUS" and cdcacm_autostart never
- * connects. Report VBUS as present: the board is USB powered on the bench
- * and MAVLink over USB is its console. */
-#define BOARD_ADC_USB_CONNECTED	(true)
+/* USB state for system_power.usb_connected (commander's "flying with USB"
+ * check and the 5 V rail check). No VBUS sense GPIO is wired and the
+ * RP2350 has no VBUS pin, so read the USB controller: CONNECTED is set
+ * once a host has reset the bus and clear until then, SUSPENDED is set
+ * when the bus idles with no host. Both read 0 before sercon, which is
+ * why VBUS itself is reported as present in init.c (board_read_VBUS_state)
+ * so that cdcacm_autostart registers the class driver at all. A plain
+ * volatile read keeps this header free of arm_internal.h. */
+static inline bool board_usb_connected(void)
+{
+	const uint32_t sie = *(volatile uint32_t *)RP23XX_USBCTRL_REGS_SIE_STATUS;
+	return (sie & RP23XX_USBCTRL_REGS_SIE_STATUS_CONNECTED) != 0
+	       && (sie & RP23XX_USBCTRL_REGS_SIE_STATUS_SUSPENDED) == 0;
+}
+#define BOARD_ADC_USB_CONNECTED	board_usb_connected()
 
 /* Flash-based parameters in the 64 KB reservation at the top of the 4 MB
  * part (hw_config.h APP_RESERVATION_SIZE): two 32 KB pages, numbered by
