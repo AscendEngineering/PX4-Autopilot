@@ -33,16 +33,18 @@
 
 #include <px4_arch/io_timer_hw_description.h>
 
+/* Motor pads M1 to M4 are GPIO9, 8, 7, 6: PWM slices 4B, 4A, 3B, 3A
+ * (GPIO n is slice (n / 2) % 8, channel A for even n). */
 constexpr io_timers_t io_timers[MAX_IO_TIMERS] = {
-	initIOTimer(Timer::Timer1),
-	initIOTimer(Timer::Timer2),
+	initIOTimer(Timer::Timer3),
+	initIOTimer(Timer::Timer4),
 };
 
 constexpr timer_io_channels_t timer_io_channels[MAX_TIMER_IO_CHANNELS] = {
-	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::ChannelA}, {GPIO::Pin18}),
-	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::ChannelB}, {GPIO::Pin19}),
-	initIOTimerChannel(io_timers, {Timer::Timer2, Timer::ChannelA}, {GPIO::Pin20}),
-	initIOTimerChannel(io_timers, {Timer::Timer2, Timer::ChannelB}, {GPIO::Pin21}),
+	initIOTimerChannel(io_timers, {Timer::Timer4, Timer::ChannelB}, {GPIO::Pin9}),	/* M1 */
+	initIOTimerChannel(io_timers, {Timer::Timer4, Timer::ChannelA}, {GPIO::Pin8}),	/* M2 */
+	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::ChannelB}, {GPIO::Pin7}),	/* M3 */
+	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::ChannelA}, {GPIO::Pin6}),	/* M4 */
 };
 
 constexpr io_timers_channel_mapping_t io_timers_channel_mapping = initIOTimerChannelMapping(io_timers,

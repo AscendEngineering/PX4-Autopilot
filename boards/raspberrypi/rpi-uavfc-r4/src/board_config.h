@@ -36,9 +36,9 @@
 /**
  * @file board_config.h
  *
- * RPI-UAVFC-R4 (RP2350B) firmware configuration. Scope of this phase: boots
- * NSH over USB, keeps parameters in flash, reboots to the PX4 bootloader.
- * The flash map is the bootloader's (src/hw_config.h).
+ * RPI-UAVFC-R4 (RP2350B) firmware configuration: the schematic's pin map,
+ * parameters in flash, reboot to the PX4 bootloader. The flash map is the
+ * bootloader's (src/hw_config.h).
  */
 
 #include <px4_platform_common/px4_config.h>
@@ -51,6 +51,37 @@
 #define GPIO_LED_BLUE		PX4_MAKE_GPIO_OUTPUT_SET(0)
 #define GPIO_LED_GREEN		PX4_MAKE_GPIO_OUTPUT_SET(1)
 #define BOARD_OVERLOAD_LED	LED_BLUE
+
+/* Regulator enables (schematic sheet 2). 5 V feeds the GPS connector: on at
+ * boot. 9 V feeds the analogue VTX: off until a later phase gives it a
+ * parameter, so a bench board never powers a transmitter unasked. */
+#define GPIO_VDD_5V_EN		PX4_MAKE_GPIO_OUTPUT_SET(19)
+#define GPIO_VDD_9V_EN		PX4_MAKE_GPIO_OUTPUT_CLEAR(18)
+#define VDD_5V_EN(on_true)	px4_arch_gpiowrite(GPIO_VDD_5V_EN, (on_true))
+#define VDD_9V_EN(on_true)	px4_arch_gpiowrite(GPIO_VDD_9V_EN, (on_true))
+
+/* Sounder on GPIO3 through Q1, high = on. No tone_alarm backend on this
+ * platform yet; keep it off. */
+#define GPIO_BUZZER_EN		PX4_MAKE_GPIO_OUTPUT_CLEAR(3)
+
+/* ESC telemetry input, with pull-up */
+#define GPIO_ESC_TELEMETRY	PX4_MAKE_GPIO_INPUT(5)
+
+/* ADC: battery voltage and current (RP2350B ADC6 and ADC7) */
+#define ADC_CHANNELS			((1 << 6) | (1 << 7))
+#define ADC_BATTERY_VOLTAGE_CHANNEL	6
+#define ADC_BATTERY_CURRENT_CHANNEL	7
+/* BOARD_NUMBER_BRICKS and BOARD_ADC_BRICK_VALID keep their board_common.h defaults (1 and always valid) */
+
+/* Pins the board owns at boot, in init order */
+#define PX4_GPIO_INIT_LIST {		\
+		GPIO_LED_BLUE,		\
+		GPIO_LED_GREEN,		\
+		GPIO_BUZZER_EN,		\
+		GPIO_VDD_9V_EN,		\
+		GPIO_VDD_5V_EN,		\
+		GPIO_ESC_TELEMETRY,	\
+	}
 
 /* board_reset() calls board_on_reset() (init.c): PWM pins low before the reset */
 #define BOARD_HAS_ON_RESET	1
@@ -82,14 +113,14 @@ static inline int board_usb_vbus_present(void)
 #define HRT_TIMER		1
 #define HRT_TIMER_CHANNEL	1
 
-/* PWM: four outputs on GPIO18 to 21 (src/timer_config.cpp) */
+/* PWM: motor pads M1 to M4 on GPIO9, 8, 7, 6 (src/timer_config.cpp) */
 #define DIRECT_PWM_OUTPUT_CHANNELS	4
 
 #define BOARD_DMA_ALLOC_POOL_SIZE	2048
 #define BOARD_ENABLE_CONSOLE_BUFFER
 #define BOARD_CONSOLE_BUFFER_SIZE	(1024 * 3)
 
-/* I2C1 external bus is src/i2c.cpp bus 2; pins in nuttx-config/include/board.h */
+/* I2C0 (barometer) is src/i2c.cpp bus 1, I2C1 (connector) bus 2; pins in nuttx-config/include/board.h */
 
 __BEGIN_DECLS
 

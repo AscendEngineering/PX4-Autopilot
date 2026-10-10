@@ -71,12 +71,18 @@
 
 
 /* Alternate function pin selections ************************************************/
-//TODO:
-/* UARTs: RP2350 has UART0 and UART1. UART0's default pins are the LED pins,
- * so both stay off in this phase; the USB console is the only port. Pin
- * selection is done by PX4 in init.c when a UART is enabled. */
-/* I2C1 (external): SDA GPIO38, SCL GPIO39 (RP2350B function table, F3).
- * I2C0 (SDA GPIO24, SCL GPIO25) is wired but unused in this phase. */
+
+/* UARTs: hardware UART0 and UART1. The pins are set by the board in
+ * rp23xx_boardinitialize(); the NuttX driver has no pin option. UART0's
+ * default pins would be the LED pins, so never rely on the default. */
+#define GPIO_UART0_TX		44	/* DVTX_UART0_TX, DJI air unit connector */
+#define GPIO_UART0_RX		45	/* DVTX_UART0_RX */
+#define GPIO_UART1_TX		36	/* GPS_UART1_TX */
+#define GPIO_UART1_RX		37	/* GPS_UART1_RX */
+
+/* I2C0 (internal): barometer DPS368, address 0x76. I2C1 (external connector). */
+#define GPIO_I2C0_SDA		24
+#define GPIO_I2C0_SCL		25
 #define GPIO_I2C1_SDA		38
 #define GPIO_I2C1_SCL		39
 
@@ -90,6 +96,9 @@
 #define GPIO_SPI1_MISO	( 28 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
 #define GPIO_SPI1_MOSI	( 31 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
 
+/* ADC (RP2350B: ADC0..7 on GPIO40..47) */
+#define GPIO_ADC_VBAT		46	/* VBAT_SENSE, 22.1k / 2.2k divider: BAT1_V_DIV 11.045 */
+#define GPIO_ADC_CURRENT	47	/* CURRENT_SENSE from the ESC connector */
 
 
 #endif  /* __ARCH_BOARD_BOARD_H */

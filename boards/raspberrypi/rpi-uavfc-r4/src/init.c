@@ -34,8 +34,8 @@
 /**
  * @file init.c
  *
- * RPI-UAVFC-R4 board initialisation: pins, LEDs, SPI pin mux, flash-based
- * parameters. Scoped to "boots NSH over USB"; sensors come with phase 4b.
+ * RPI-UAVFC-R4 board initialisation: the schematic's pin map (UARTs, I2C,
+ * SPI, ADC pads, regulator enables), LEDs and flash-based parameters.
  */
 
 #include "board_config.h"
@@ -50,6 +50,7 @@
 #include <nuttx/board.h>
 #include <arch/board/board.h>
 #include <rp23xx_gpio.h>
+#include <hardware/rp23xx_pads_bank0.h>
 #include "arm_internal.h"
 
 #include <drivers/drv_hrt.h>
@@ -58,6 +59,7 @@
 #include <px4_arch/io_timer.h>
 #include <px4_platform_common/init.h>
 #include <px4_platform/board_dma_alloc.h>
+#include <px4_platform/gpio.h>
 
 #if defined(FLASH_BASED_PARAMS)
 #  include <parameters/flashparams/flashfs.h>
@@ -101,14 +103,45 @@ void rp23xx_boardearlyinitialize(void)
 /* Called from rp23xx_start.c after the clocks; before nx_start(). */
 void rp23xx_boardinitialize(void)
 {
-	/* I2C1 pins: function I2C with pull-ups (board.h) */
+	/* Pins the board owns: LEDs off, sounder off, 9 V off, 5 V on */
+	const uint32_t gpio[] = PX4_GPIO_INIT_LIST;
+	px4_gpio_init(gpio, arraySize(gpio));
+
+	/* UART0 (DJI air unit) and UART1 (GPS): function UART on the schematic
+	 * pins. The NuttX driver uses whichever pins carry the UART function. */
+	rp23xx_gpio_set_function(GPIO_UART0_TX, RP23XX_GPIO_FUNC_UART);
+	rp23xx_gpio_set_function(GPIO_UART0_RX, RP23XX_GPIO_FUNC_UART);
+	rp23xx_gpio_set_pulls(GPIO_UART0_RX, true, false);
+	rp23xx_gpio_set_function(GPIO_UART1_TX, RP23XX_GPIO_FUNC_UART);
+	rp23xx_gpio_set_function(GPIO_UART1_RX, RP23XX_GPIO_FUNC_UART);
+	rp23xx_gpio_set_pulls(GPIO_UART1_RX, true, false);
+
+	/* I2C0 (barometer) and I2C1 (external), with pull-ups */
+	rp23xx_gpio_set_function(GPIO_I2C0_SDA, RP23XX_GPIO_FUNC_I2C);
+	rp23xx_gpio_set_function(GPIO_I2C0_SCL, RP23XX_GPIO_FUNC_I2C);
+	rp23xx_gpio_set_pulls(GPIO_I2C0_SDA, true, false);
+	rp23xx_gpio_set_pulls(GPIO_I2C0_SCL, true, false);
 	rp23xx_gpio_set_function(GPIO_I2C1_SDA, RP23XX_GPIO_FUNC_I2C);
 	rp23xx_gpio_set_function(GPIO_I2C1_SCL, RP23XX_GPIO_FUNC_I2C);
 	rp23xx_gpio_set_pulls(GPIO_I2C1_SDA, true, false);
 	rp23xx_gpio_set_pulls(GPIO_I2C1_SCL, true, false);
 
-	/* SPI0 and SPI1 pins */
+	/* SPI0 (IMU) and SPI1 (SD) pins */
 	rpi_spiinitialize();
+
+	/* ADC pads for VBAT and current: analogue, so no digital input, no
+	 * output, no pulls, and the reset isolation latch released. The PX4 ADC
+	 * backend (rpi_common/adc) assumes the board has done this, as the Pico
+	 * board does for GPIO26 to 29. */
+	const uint32_t adc_pins[] = { GPIO_ADC_VBAT, GPIO_ADC_CURRENT };
+
+	for (unsigned i = 0; i < arraySize(adc_pins); i++) {
+		rp23xx_gpio_set_function(adc_pins[i], RP23XX_GPIO_FUNC_NULL);
+		modbits_reg32(RP23XX_PADS_BANK0_GPIO_OD,
+			      RP23XX_PADS_BANK0_GPIO_IE | RP23XX_PADS_BANK0_GPIO_PUE | RP23XX_PADS_BANK0_GPIO_PDE |
+			      RP23XX_PADS_BANK0_GPIO_ISO | RP23XX_PADS_BANK0_GPIO_OD,
+			      RP23XX_PADS_BANK0_GPIO(adc_pins[i]));
+	}
 
 	rp23xx_usbinitialize();
 }
