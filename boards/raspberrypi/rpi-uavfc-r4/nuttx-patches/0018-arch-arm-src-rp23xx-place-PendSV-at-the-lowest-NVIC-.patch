@@ -1,0 +1,62 @@
+From: Daniel Fanache <dan@rts.ro>
+Date: Mon, 11 May 2026 12:22:24 +0100
+Subject: [PATCH] arch/arm/src/rp23xx: place PendSV at the lowest NVIC priority
+
+PendSV is the deferred half of the Cortex-M context-switch path: a
+higher-priority ISR that wakes a task sets PendSV pending and returns,
+and PendSV then performs the register save/restore. This pattern is
+only safe when PendSV runs at the lowest priority - otherwise a
+peripheral ISR can preempt the context switch mid-update and corrupt
+thread state.
+
+The previous write of DEFPRIORITY32 to NVIC_SYSH12_15_PRIORITY in
+up_irqinitialize() leaves PendSV at NVIC_SYSH_PRIORITY_DEFAULT (0x80),
+the same priority as peripheral IRQs. Read-modify-write the SHPR3 to
+lower only the PendSV byte to NVIC_SYSH_PRIORITY_MIN.
+
+This is the canonical ARM Cortex-M priority arrangement and it matches
+e.g. this reference:
+https://nuttx.apache.org/docs/latest/guides/zerolatencyinterrupts.html (although
+worked with a three-bit priority system)
+
+This patch hardens up_irqinitialize against future peripheral-IRQ
+prioritisation.
+
+Signed-off-by: Daniel Fanache <dan@rts.ro>
+
+diff --git a/arch/arm/src/rp23xx/rp23xx_irq.c b/arch/arm/src/rp23xx/rp23xx_irq.c
+index ecb92e3126..d45c005dde 100644
+--- a/arch/arm/src/rp23xx/rp23xx_irq.c
++++ b/arch/arm/src/rp23xx/rp23xx_irq.c
+@@ -249,6 +249,7 @@ static inline void rp23xx_clrpend(int irq)
+ void up_irqinitialize(void)
+ {
+   uint32_t regaddr;
++  uint32_t regval;
+   int i;
+ 
+   /* Disable all interrupts */
+@@ -304,6 +305,23 @@ void up_irqinitialize(void)
+ 
+   rp23xx_prioritize_syscall(NVIC_SYSH_SVCALL_PRIORITY);
+ 
++  /* Place PendSV at the lowest NVIC priority. This is the deferred
++   * half of the Cortex-M context-switch path: a higher-priority ISR
++   * that wakes a task sets PendSV pending and returns; after that
++   * PendSV does the actual register save/restore. For this pattern to
++   * work safely PendSV must run only after all peripheral ISRs have
++   * finished, i.e. at the lowest priority.
++   *
++   * Read-modify-write SHPR3 to lower just the PendSV byte to MIN
++   * (0XF0) without disturbing the SysTick and DebugMon bytes that
++   * share the same register.
++   */
++
++  regval  = getreg32(NVIC_SYSH12_15_PRIORITY);
++  regval &= ~NVIC_SYSH_PRIORITY_PR14_MASK;
++  regval |= (NVIC_SYSH_PRIORITY_MIN << NVIC_SYSH_PRIORITY_PR14_SHIFT);
++  putreg32(regval, NVIC_SYSH12_15_PRIORITY);
++
+   /* Attach all other processor exceptions (except reset and sys tick) */
+ 
+ #ifdef CONFIG_DEBUG_FEATURES

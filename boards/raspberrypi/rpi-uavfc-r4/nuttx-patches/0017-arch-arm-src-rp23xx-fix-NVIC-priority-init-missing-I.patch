@@ -1,0 +1,50 @@
+From: Daniel Fanache <dan@rts.ro>
+Date: Fri, 8 May 2026 12:34:23 +0100
+Subject: [PATCH] arch/arm/src/rp23xx: fix NVIC priority init missing IRQs
+ 12-51
+
+At system startup, the NVIC was configured for proper default priority
+only for the first three IPR registers, even though the loop was
+executed 13 times - due to a gotcha on what the `NVIC_IRQ_PRIORITY(i)`
+macro returns.
+
+IRQs 12-51 stayed at the reset priority of 0 - highest in the system;
+so any peripherals issuing those interrupts will shoot through
+critical sections that rely on
+BASEPRI = NVIC_SYSH_PRIORITY_DEFAULT (0x80).
+
+This can corrupt the TCB ready-to-run list and semaphore wait queues;
+this is hard to reproduce (e.g. in ostest) because it requires a
+peripheral ISR to land inside a critical section, but the failure
+modes range from hangs to wild pointer crashes once it does.
+
+In my case I had SPI and I2C peripherals that were issuing IRQs and
+were preempting scheduler and semaphore list operations, causing
+corruption.
+
+Step the loop by four and bound it with RP23XX_IRQ_NEXTINT so every
+IPR covering IRQs 0..51 is written once with DEFPRIORITY32.
+
+Signed-off-by: Daniel Fanache <dan@rts.ro>
+
+diff --git a/arch/arm/src/rp23xx/rp23xx_irq.c b/arch/arm/src/rp23xx/rp23xx_irq.c
+index b2ce035221..ecb92e3126 100644
+--- a/arch/arm/src/rp23xx/rp23xx_irq.c
++++ b/arch/arm/src/rp23xx/rp23xx_irq.c
+@@ -280,9 +280,14 @@ void up_irqinitialize(void)
+   arm_ramvec_initialize();
+ #endif
+ 
+-  /* Now set all of the interrupt lines to the default priority */
++  /* Set all of the interrupt lines to the default priority.
++   * NVIC_IRQ_PRIORITY(n) maps IRQ number n to its IPR register via
++   * (n >> 2); each 32-bit IPR covers four IRQs.  Step by four and bound
++   * the loop by RP23XX_IRQ_NEXTINT so that every IPR (covering IRQs
++   * 0..51) is written exactly once.
++   */
+ 
+-  for (i = 0; i < 12; i++)
++  for (i = 0; i < RP23XX_IRQ_NEXTINT; i += 4)
+     {
+       regaddr = NVIC_IRQ_PRIORITY(i);
+       putreg32(DEFPRIORITY32, regaddr);

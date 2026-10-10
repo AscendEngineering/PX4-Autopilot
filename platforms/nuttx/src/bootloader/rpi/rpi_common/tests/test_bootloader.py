@@ -376,6 +376,14 @@ BACKPORT_MARKERS = {
     "arch/arm/Kconfig": [
         "select ARCH_USBDEV_STALLQUEUE if USBDEV",                  # 0004 (hand-added hunk)
     ],
+    "drivers/usbdev/cdcacm.c": [
+        "spin_lock_irqsave_nopreempt(&priv->lock",                              # 0016 TX ring drain under the class spinlock
+        "spin_unlock_irqrestore(&priv->lock, flags);\n\n  priv->ispolling = true;",  # 0015 cdcuart_txempty self-deadlock
+    ],
+    "arch/arm/src/rp23xx/rp23xx_irq.c": [
+        "for (i = 0; i < RP23XX_IRQ_NEXTINT; i += 4)",                           # 0017 NVIC priority for IRQs 12-51
+        "Place PendSV at the lowest NVIC priority",                              # 0018 PendSV priority
+    ],
 }
 
 
@@ -436,7 +444,8 @@ class BootloaderTest(unittest.TestCase):
             partial = missing_backports(tree)
             self.assertIn("arch/arm/src/rp23xx/rp23xx_usbdev.c", partial, "0004/0005 missing must be detected")
             self.assertIn("arch/arm/Kconfig", partial, "0004 Kconfig select missing must be detected")
-            for patch in sorted(PATCHES.glob("000[45]-*.patch")):
+            rest = [p for p in sorted(PATCHES.glob("0*.patch")) if not p.name.startswith(("0001-", "0002-", "0003-"))]
+            for patch in rest:
                 subprocess.check_call(["git", "apply", str(patch)], cwd=tree)
             self.assertEqual(missing_backports(tree), [], "full series")
 

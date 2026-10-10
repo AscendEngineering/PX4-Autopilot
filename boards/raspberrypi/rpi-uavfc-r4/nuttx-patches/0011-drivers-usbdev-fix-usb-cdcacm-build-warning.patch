@@ -1,0 +1,25 @@
+From: yangsong8 <yangsong8@xiaomi.com>
+Date: Sat, 21 Jun 2025 22:20:29 +0800
+Subject: [PATCH] drivers/usbdev: fix usb cdcacm build warning
+
+usbdev/cdcacm.c:371:11: warning: implicit declaration of function 'spin_lock_irqsave' [-Wimplicit-function-declaration]
+  371 |   flags = spin_lock_irqsave(&priv->lock);
+      |           ^~~~~~~~~~~~~~~~~
+usbdev/cdcacm.c:375:3: warning: implicit declaration of function 'spin_unlock_irqrestore' [-Wimplicit-function-declaration]
+  375 |   spin_unlock_irqrestore(&priv->lock, flags);
+      |   ^~~~~~~~~~~~~~~~~~~~~~
+
+Signed-off-by: yangsong8 <yangsong8@xiaomi.com>
+
+diff --git a/drivers/usbdev/cdcacm.c b/drivers/usbdev/cdcacm.c
+index 554688f3c3..73c7bc03be 100644
+--- a/drivers/usbdev/cdcacm.c
++++ b/drivers/usbdev/cdcacm.c
+@@ -25,6 +25,7 @@
+  ****************************************************************************/
+ 
+ #include <nuttx/config.h>
++#include <nuttx/spinlock.h>
+ 
+ #include <sys/types.h>
+ #include <stdint.h>
