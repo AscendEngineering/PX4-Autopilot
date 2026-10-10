@@ -1,0 +1,15 @@
+#!/bin/sh
+#
+# RPI-UAVFC-R4 defaults. Generic quad X airframe so the startup script finds
+# an airframe and starts the flight stack. Battery divider from the
+# schematic: 22.1 k over 2.2 k. The current scale depends on the ESC.
+# Both circuit breakers are set for bench use; review them before flight.
+# No SD card yet: dataman keeps missions in RAM.
+#
+#------------------------------------------------------------------------------
+
+param set-default SYS_AUTOSTART 4001
+param set-default BAT1_V_DIV 11.045
+param set-default CBRK_SUPPLY_CHK 894281
+param set-default CBRK_IO_SAFETY 22027
+param set-default SYS_DM_BACKEND 1

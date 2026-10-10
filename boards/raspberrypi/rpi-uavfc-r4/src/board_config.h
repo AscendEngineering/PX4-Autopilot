@@ -44,7 +44,6 @@
 #include <px4_platform_common/px4_config.h>
 #include <nuttx/compiler.h>
 #include <stdint.h>
-#include <hardware/rp23xx_usbctrl_regs.h>
 
 /* LEDs: schematic U1 pin 77 GPIO0 BF_BLUE_LEDn, pin 78 GPIO1 BF_GREEN_LEDn,
  * pulled to +3V3: active low, so an output set high is off. */
@@ -90,14 +89,13 @@
  * (board_reset.cpp REBOOT_TO_ISP through the ROM reboot call) */
 #define BOARD_HAS_ISP_BOOTLOADER	1
 
-/* No VBUS sense GPIO is wired. The USB controller reports VBUS itself
- * (SIE_STATUS bit 0). A plain volatile read keeps this header free of
- * arm_internal.h, which not every includer has. */
-static inline int board_usb_vbus_present(void)
-{
-	return (*(volatile uint32_t *)RP23XX_USBCTRL_REGS_SIE_STATUS & RP23XX_USBCTRL_REGS_SIE_STATUS_VBUS_DETECTED) != 0;
-}
-#define BOARD_ADC_USB_CONNECTED	board_usb_vbus_present()
+/* No VBUS sense GPIO is wired, and the RP2350 has no VBUS pin of its own:
+ * the USB controller's VBUS_DETECTED bit is only ever set by the override
+ * that the rp23xx driver writes when a class driver registers. Reading it
+ * before sercon therefore says "no VBUS" and cdcacm_autostart never
+ * connects. Report VBUS as present: the board is USB powered on the bench
+ * and MAVLink over USB is its console. */
+#define BOARD_ADC_USB_CONNECTED	(true)
 
 /* Flash-based parameters in the 64 KB reservation at the top of the 4 MB
  * part (hw_config.h APP_RESERVATION_SIZE): two 32 KB pages, numbered by

@@ -1,0 +1,13 @@
+#!/bin/sh
+#
+# RPI-UAVFC-R4 sensors: ICM-56686 on SPI0 (driven by the icm45686 driver until
+# the bench confirms its WHO_AM_I), DPS368 on I2C0 at 0x76. Each start returns
+# on its own when the part is absent, which is the case on a bare Pico 2.
+#
+#------------------------------------------------------------------------------
+
+board_adc start
+
+icm45686 -s -b 1 -R 0 start
+
+dps310 -8 -I -b 1 -a 0x76 start
