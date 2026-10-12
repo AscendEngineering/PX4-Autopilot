@@ -163,8 +163,8 @@ What it took:
    `rp23xx_usbdev.c` arms a buffer with AVAILABLE and FULL in one write;
    the RP2350 needs AVAILABLE set in a second write after the other fields
    settle. Upstream apache/nuttx d89019aa78, cfeca506f8 and a85b28bc2c fix
-   this and two related arming bugs; they are `nuttx-patches/0003` to
-   `0005` and commits on the submodule branch `rp2350-backports`.
+   this and two related arming bugs; they are in the Ascend fork commit
+   `2b9d05baa9` the submodule now points at (see the fork review below).
 2. GET_CRC over the 3.9 MB region takes 0.98 s on the chip (about 4 MB/s
    through the flash cache and XIP). The uploader slept 0.5 s and then
    allowed 0.5 s, a margin of about 20 ms. `Tools/px4_uploader.py` now

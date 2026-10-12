@@ -359,40 +359,31 @@ def run(exe, scenario):
     return result.stdout
 
 
-PATCHES = ROOT / "boards/raspberrypi/rpi-uavfc-r4/nuttx-patches"
+FORK_PIN = "2b9d05baa97d2038bfd426a240d1be69c3178675"   # AscendEngineering/NuttX pr-nuttx_rp23xx
 
-# One marker per patch so a partially applied series is reported, not just a pristine tree.
-BACKPORT_MARKERS = {
-    "arch/arm/src/armv8-m/arm_doirq.c": [
-        ': "r0"',                                                   # 0001 exception_direct clobber
-    ],
+# One marker per kept fix so a submodule checked out at the old PX4 pin is reported, file by file.
+RP23XX_FIX_MARKERS = {
+    "arch/arm/src/armv8-m/arm_doirq.c": [': "r0"'],                                   # exception_direct clobber
     "arch/arm/src/rp23xx/rp23xx_usbdev.c": [
-        "setbits_reg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF",   # 0002 keep PULLUP_EN
-        "privreq->armed = true;",                                   # 0003 arm a request once
-        "rp23xx_epwrite(ep0, response, 2);",                        # 0004 GET_STATUS data stage
-        "UP_DMB();",                                                # 0005 BUFF_STATUS clear before AVAIL
-        "putreg32(value & ~RP23XX_USBCTRL_DPSRAM_EP_BUFF_CTRL_AVAIL",  # 0005 two-step AVAIL write
+        "setbits_reg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF",   # keep PULLUP_EN
+        "privreq->armed = true;",                                   # arm a request once
+        "rp23xx_epwrite(ep0, response, 2);",                        # GET_STATUS data stage
+        "UP_DMB();",                                                # BUFF_STATUS clear before AVAIL
     ],
-    "arch/arm/Kconfig": [
-        "select ARCH_USBDEV_STALLQUEUE if USBDEV",                  # 0004 (hand-added hunk)
-    ],
-    "drivers/usbdev/cdcacm.c": [
-        "spin_lock_irqsave_nopreempt(&priv->lock",                              # 0016 TX ring drain under the class spinlock
-        "spin_unlock_irqrestore(&priv->lock, flags);\n\n  priv->ispolling = true;",  # 0015 cdcuart_txempty self-deadlock
-    ],
+    "arch/arm/Kconfig": ["select ARCH_USBDEV_STALLQUEUE if USBDEV"],
     "arch/arm/src/rp23xx/rp23xx_irq.c": [
-        "for (i = 0; i < RP23XX_IRQ_NEXTINT; i += 4)",                           # 0017 NVIC priority for IRQs 12-51
-        "Place PendSV at the lowest NVIC priority",                              # 0018 PendSV priority
+        "for (i = 0; i < RP23XX_IRQ_NEXTINT; i += 4)",              # NVIC priority for IRQs 12-51
+        "Place PendSV at the lowest NVIC priority",
     ],
 }
 
 
-def missing_backports(nuttx):
-    """Files under the NuttX tree `nuttx` that lack at least one backport marker."""
+def missing_rp23xx_fixes(nuttx):
+    """Files under the NuttX tree `nuttx` that lack at least one kept-fix marker."""
     missing = []
-    for rel, needles in BACKPORT_MARKERS.items():
-        text = (nuttx / rel).read_text(errors="replace")
-        if any(needle not in text for needle in needles):
+    for rel, needles in RP23XX_FIX_MARKERS.items():
+        text = (pathlib.Path(nuttx) / rel).read_text(errors="replace")
+        if any(n not in text for n in needles):
             missing.append(rel)
     return missing
 
@@ -426,34 +417,12 @@ class BootloaderTest(unittest.TestCase):
             self.assertEqual(run(exe, "boot_vbus").strip(), "bootloader timeout=5000 scratch=0 jumped=0 cinit=1")
             self.assertEqual(run(exe, "boot_signature").strip(), "bootloader timeout=0 scratch=0 jumped=0 cinit=1")
 
-    def test_nuttx_submodule_patches_applied(self):
-        """The upstream NuttX backports in boards/.../nuttx-patches must be present in the submodule."""
+    def test_nuttx_submodule_has_rp23xx_fixes(self):
+        """The submodule must be the AscendEngineering fork commit that carries the rp23xx fixes."""
         nuttx = ROOT / "platforms/nuttx/NuttX/nuttx"
-        missing = missing_backports(nuttx)
-        self.assertFalse(missing, "NuttX submodule lacks the rpi-uavfc-r4 backports in " + ", ".join(missing)
-                         + f"; from the pristine submodule pin run: git -C {nuttx} apply {PATCHES}/*.patch")
-
-    def test_backport_guard_detects_partial_series(self):
-        """A tree with only patches 0001 to 0003 applied must still be reported as incomplete."""
-        nuttx = ROOT / "platforms/nuttx/NuttX/nuttx"
-        pin = subprocess.check_output(["git", "ls-tree", "HEAD", "platforms/nuttx/NuttX/nuttx"],
-                                      cwd=ROOT, text=True).split()[2]
-        with tempfile.TemporaryDirectory(prefix="rpi-bl-backports-") as temp:
-            tree = pathlib.Path(temp)
-            for rel in BACKPORT_MARKERS:
-                target = tree / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(subprocess.check_output(["git", "show", f"{pin}:{rel}"], cwd=nuttx))
-            self.assertEqual(sorted(missing_backports(tree)), sorted(BACKPORT_MARKERS), "pristine tree")
-            for patch in sorted(PATCHES.glob("000[123]-*.patch")):
-                subprocess.check_call(["git", "apply", str(patch)], cwd=tree)
-            partial = missing_backports(tree)
-            self.assertIn("arch/arm/src/rp23xx/rp23xx_usbdev.c", partial, "0004/0005 missing must be detected")
-            self.assertIn("arch/arm/Kconfig", partial, "0004 Kconfig select missing must be detected")
-            rest = [p for p in sorted(PATCHES.glob("0*.patch")) if not p.name.startswith(("0001-", "0002-", "0003-"))]
-            for patch in rest:
-                subprocess.check_call(["git", "apply", str(patch)], cwd=tree)
-            self.assertEqual(missing_backports(tree), [], "full series")
+        missing = missing_rp23xx_fixes(nuttx)
+        self.assertFalse(missing, "NuttX submodule lacks the rp23xx fixes in " + ", ".join(missing)
+                         + f"; run: git submodule update --init platforms/nuttx/NuttX/nuttx (expects {FORK_PIN[:10]})")
 
     def test_masked_image_hides_only_the_version_string(self):
         a = b"xxPX4BLv1.18.0ga739176859yy"
