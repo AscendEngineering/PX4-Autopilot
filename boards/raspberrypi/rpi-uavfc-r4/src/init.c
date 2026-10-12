@@ -34,36 +34,26 @@
 /**
  * @file init.c
  *
- * ARKFMU-specific early startup code.  This file implements the
- * board_app_initialize() function that is called early by nsh during startup.
- *
- * Code here is run before the rcS script is invoked; it should start required
- * subsystems and perform board-specific initialization.
+ * RPI-UAVFC-R4 board initialisation: the schematic's pin map (UARTs, I2C,
+ * SPI, ADC pads, regulator enables), LEDs, the micro SD slot and
+ * flash-based parameters.
  */
 
-/****************************************************************************
- * Included Files
- ****************************************************************************/
-
 #include "board_config.h"
-#include "spix_sync.h"
 
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <debug.h>
+#include <syslog.h>
 #include <errno.h>
 
 #include <nuttx/config.h>
 #include <nuttx/board.h>
 #include <nuttx/spi/spi.h>
-#include <nuttx/sdio.h>
 #include <nuttx/mmcsd.h>
-#include <nuttx/analog/adc.h>
-#include <nuttx/mm/gran.h>
-#include <chip.h>
-#include <rp23xx_uart.h>
 #include <arch/board/board.h>
+#include <rp23xx_gpio.h>
+#include <hardware/rp23xx_pads_bank0.h>
 #include "arm_internal.h"
 
 #include <drivers/drv_hrt.h>
@@ -71,230 +61,149 @@
 #include <systemlib/px4_macros.h>
 #include <px4_arch/io_timer.h>
 #include <px4_platform_common/init.h>
-#include <px4_platform_common/px4_manifest.h>
-#include <px4_platform/gpio.h>
-#include <px4_platform/board_determine_hw_info.h>
 #include <px4_platform/board_dma_alloc.h>
+#include <px4_platform/gpio.h>
 
-# if defined(FLASH_BASED_PARAMS)
+#if defined(FLASH_BASED_PARAMS)
 #  include <parameters/flashparams/flashfs.h>
 #endif
 
-/****************************************************************************
- * Pre-Processor Definitions
- ****************************************************************************/
-
-/* Configuration ************************************************************/
-
-/*
- * Ideally we'd be able to get these from arm_internal.h,
- * but since we want to be able to disable the NuttX use
- * of leds for system indication at will and there is no
- * separate switch, we need to build independent of the
- * CONFIG_ARCH_LEDS configuration switch.
- */
 __BEGIN_DECLS
 extern void led_init(void);
 extern void led_on(int led);
 extern void led_off(int led);
 __END_DECLS
 
-
-/************************************************************************************
- * Name: board_peripheral_reset
- *
- * Description:
- *
- ************************************************************************************/
 __EXPORT void board_peripheral_reset(int ms)
 {
-	/* set the peripheral rails off */
-
-	PAYLOAD_POWER_EN(false);
-	board_control_spi_sensors_power(false, 0xffff);
-	SPI6_RESET(true);
-
-	/* wait for the peripheral rail to reach GND */
-	usleep(ms * 1000);
-	syslog(LOG_DEBUG, "reset done, %d ms\n", ms);
-
-	/* re-enable power */
-
-	/* switch the peripheral rail back on */
-	board_control_spi_sensors_power(true, 0xffff);
-	PAYLOAD_POWER_EN(true);
-
-	/* Release SPI6 Reset */
-	SPI6_RESET(false);
+	UNUSED(ms);	/* no switched peripheral rail on this board */
 }
 
-/************************************************************************************
- * Name: board_on_reset
- *
- * Description:
- * Optionally provided function called on entry to board_system_reset
- * It should perform any house keeping prior to the rest.
- *
- * status - 1 if resetting to boot loader
- *          0 if just resetting
- *
- ************************************************************************************/
 __EXPORT void board_on_reset(int status)
 {
+	/* PWM outputs low while the board resets */
 	for (int i = 0; i < DIRECT_PWM_OUTPUT_CHANNELS; ++i) {
-		px4_arch_configgpio(PX4_MAKE_GPIO_INPUT(io_timer_channel_get_as_pwm_input(i)));
+		px4_arch_configgpio(io_timer_channel_get_gpio_output(i));
 	}
 
-	/*
-	 * On resets invoked from system (not boot) ensure we establish a low
-	 * output state on PWM pins to disarm the ESC and prevent the reset from potentially
-	 * spinning up the motors.
-	 */
 	if (status >= 0) {
-		up_mdelay(100);
+		up_mdelay(400);
 	}
 }
 
-/************************************************************************************
- * Name: rpi_boardinitialize
- *
- * Description:
- *   All architectures must provide the following entry point.  This entry point
- *   is called early in the initialization -- after all memory has been configured
- *   and mapped but before any devices have been initialized.
- *
- ************************************************************************************/
-
-__EXPORT void
-rpi_boardinitialize(void)
+/* VBUS for cdcacm_autostart and the usb_connected command: 0 = present.
+ * There is no VBUS sense, and the controller's VBUS_DETECTED bit is only
+ * set by the override the rp23xx driver writes when a class driver
+ * registers, so a real read would keep cdcacm_autostart from ever running
+ * sercon. Report VBUS as present; system_power.usb_connected reads the
+ * real bus state through BOARD_ADC_USB_CONNECTED instead. */
+int board_read_VBUS_state(void)
 {
-	board_on_reset(-1); /* Reset PWM first thing */
+	return 0;
+}
 
-	/* configure LEDs */
+/* Called from rp23xx_start.c before the FPU and the serial console exist. */
+void rp23xx_boardearlyinitialize(void)
+{
+	rp23xx_gpio_initialize();
+}
 
-	board_autoled_initialize();
-
-	/* configure pins */
-
+/* Called from rp23xx_start.c after the clocks; before nx_start(). */
+void rp23xx_boardinitialize(void)
+{
+	/* Pins the board owns: LEDs off, sounder off, 9 V off, 5 V on */
 	const uint32_t gpio[] = PX4_GPIO_INIT_LIST;
 	px4_gpio_init(gpio, arraySize(gpio));
 
-	/* configure USB interfaces */
+	/* UART0 (DJI air unit) and UART1 (GPS): function UART on the schematic
+	 * pins. The NuttX driver uses whichever pins carry the UART function. */
+	rp23xx_gpio_set_function(GPIO_UART0_TX, RP23XX_GPIO_FUNC_UART);
+	rp23xx_gpio_set_function(GPIO_UART0_RX, RP23XX_GPIO_FUNC_UART);
+	rp23xx_gpio_set_pulls(GPIO_UART0_RX, true, false);
+	rp23xx_gpio_set_function(GPIO_UART1_TX, RP23XX_GPIO_FUNC_UART);
+	rp23xx_gpio_set_function(GPIO_UART1_RX, RP23XX_GPIO_FUNC_UART);
+	rp23xx_gpio_set_pulls(GPIO_UART1_RX, true, false);
+
+	/* I2C0 (barometer) and I2C1 (external), with pull-ups */
+	rp23xx_gpio_set_function(GPIO_I2C0_SDA, RP23XX_GPIO_FUNC_I2C);
+	rp23xx_gpio_set_function(GPIO_I2C0_SCL, RP23XX_GPIO_FUNC_I2C);
+	rp23xx_gpio_set_pulls(GPIO_I2C0_SDA, true, false);
+	rp23xx_gpio_set_pulls(GPIO_I2C0_SCL, true, false);
+	rp23xx_gpio_set_function(GPIO_I2C1_SDA, RP23XX_GPIO_FUNC_I2C);
+	rp23xx_gpio_set_function(GPIO_I2C1_SCL, RP23XX_GPIO_FUNC_I2C);
+	rp23xx_gpio_set_pulls(GPIO_I2C1_SDA, true, false);
+	rp23xx_gpio_set_pulls(GPIO_I2C1_SCL, true, false);
+
+	/* SPI0 (IMU) and SPI1 (SD) pins. The SD card leaves its data-out line
+	 * floating until it is selected, so SPI1 MISO gets a pull-up, as the
+	 * NuttX rp23xx SPI SD bring-up (rp23xx_spisd.c) does. */
+	rpi_spiinitialize();
+	rp23xx_gpio_set_pulls(GPIO_SPI1_MISO & GPIO_NUM_MASK, true, false);
+
+	/* ADC pads for VBAT and current: analogue, so no digital input, no
+	 * output, no pulls, and the reset isolation latch released. The PX4 ADC
+	 * backend (rpi_common/adc) assumes the board has done this, as the Pico
+	 * board does for GPIO26 to 29. */
+	const uint32_t adc_pins[] = { GPIO_ADC_VBAT, GPIO_ADC_CURRENT };
+
+	for (unsigned i = 0; i < arraySize(adc_pins); i++) {
+		rp23xx_gpio_set_function(adc_pins[i], RP23XX_GPIO_FUNC_NULL);
+		modbits_reg32(RP23XX_PADS_BANK0_GPIO_OD,
+			      RP23XX_PADS_BANK0_GPIO_IE | RP23XX_PADS_BANK0_GPIO_PUE | RP23XX_PADS_BANK0_GPIO_PDE |
+			      RP23XX_PADS_BANK0_GPIO_ISO | RP23XX_PADS_BANK0_GPIO_OD,
+			      RP23XX_PADS_BANK0_GPIO(adc_pins[i]));
+	}
 
 	rp23xx_usbinitialize();
-
 }
-
-/****************************************************************************
- * Name: board_app_initialize
- *
- * Description:
- *   Perform application specific initialization.  This function is never
- *   called directly from application code, but only indirectly via the
- *   (non-standard) boardctl() interface using the command BOARDIOC_INIT.
- *
- * Input Parameters:
- *   arg - The boardctl() argument is passed to the board_app_initialize()
- *         implementation without modification.  The argument has no
- *         meaning to NuttX; the meaning of the argument is a contract
- *         between the board-specific initalization logic and the the
- *         matching application logic.  The value cold be such things as a
- *         mode enumeration value, a set of DIP switch switch settings, a
- *         pointer to configuration data read from a file or serial FLASH,
- *         or whatever you would like to do with it.  Every implementation
- *         should accept zero/NULL as a default configuration.
- *
- * Returned Value:
- *   Zero (OK) is returned on success; a negated errno value is returned on
- *   any failure to indicate the nature of the failure.
- *
- ****************************************************************************/
 
 __EXPORT int board_app_initialize(uintptr_t arg)
 {
-	/* Power on Interfaces */
-	PAYLOAD_POWER_EN(true);
-
-	SPI6_RESET(false);
-
-	/* Need hrt running before using the ADC */
-
 	px4_platform_init();
-
-	// Use the default HW_VER_REV(0x0,0x0) for Ramtron
-
-	rpi_spiinitialize();
-
-#if defined(FLASH_BASED_PARAMS)
-	static sector_descriptor_t params_sector_map[] = {
-		{15, 128 * 1024, 0x081E0000},
-		{0, 0, 0},
-	};
-
-	/* Initialize the flashfs layer to use heap allocated memory */
-	int result = parameter_flashfs_init(params_sector_map, NULL, 0);
-
-	if (result != OK) {
-		syslog(LOG_ERR, "[boot] FAILED to init params in FLASH %d\n", result);
-		led_on(LED_AMBER);
-	}
-
-#endif // FLASH_BASED_PARAMS
-
-	/* Configure the HW based on the manifest */
-
-	px4_platform_configure();
-
-	if (OK == board_determine_hw_info()) {
-		syslog(LOG_INFO, "[boot] Rev 0x%1x : Ver 0x%1x %s\n", board_get_hw_revision(), board_get_hw_version(),
-		       board_get_hw_type_name());
-
-	} else {
-		syslog(LOG_ERR, "[boot] Failed to read HW revision and version\n");
-	}
-
-	/* Configure the Actual SPI interfaces (after we determined the HW version)  */
-
-	rpi_spiinitialize();
-
-	board_spi_reset(10, 0xffff);
-
-	/* Configure the DMA allocator */
 
 	if (board_dma_alloc_init() < 0) {
 		syslog(LOG_ERR, "[boot] DMA alloc FAILED\n");
 	}
 
-/* #if defined(SERIAL_HAVE_RXDMA) */
-/* 	// set up the serial DMA polling at 1ms intervals for received bytes that have not triggered a DMA event. */
-/* 	static struct hrt_call serial_dma_call; */
-/* 	hrt_call_every(&serial_dma_call, 1000, 1000, (hrt_callout)stm32_serial_dma_poll, NULL); */
-/* #endif */
-
-	/* initial LED state */
 	drv_led_start();
-	led_off(LED_RED);
-	led_on(LED_GREEN); // Indicate Power.
-	led_off(LED_BLUE);
+	led_on(LED_BLUE);
 
-	if (board_hardfault_init(2, true) != 0) {
-		led_on(LED_RED);
+	/* Micro SD on SPI1 (PX4 bus 2), chip select GPIO29 (src/spi.cpp). The
+	 * MMC/SD SPI driver registers /dev/mmcsd0 with or without a card, and
+	 * rcS mounts it on /fs/microsd when a card answers. The same steps as
+	 * the NuttX rp23xx board_spisd_initialize(), without its /mnt/sd0 mount,
+	 * which would hold the block device against the rcS mount. */
+	struct spi_dev_s *spi_sd = px4_spibus_initialize(2);
+
+	if (spi_sd == NULL) {
+		syslog(LOG_ERR, "[boot] FAILED to initialize SPI1 for the SD card\n");
+
+	} else {
+		int ret = mmcsd_spislotinitialize(0, 0, spi_sd);
+
+		if (ret != OK) {
+			syslog(LOG_ERR, "[boot] FAILED to bind SPI1 to the MMC/SD driver: %d\n", ret);
+		}
 	}
 
-	// Ensure Power is off for > 10 mS
-	usleep(15 * 1000);
-	VDD_3V3_SD_CARD_EN(true);
-	usleep(500 * 1000);
-//TODO:
-/* #ifdef CONFIG_MMCSD */
-/* 	int ret = stm32_sdio_initialize(); */
-/**/
-/* 	if (ret != OK) { */
-/* 		led_on(LED_RED); */
-/* 		return ret; */
-/* 	} */
-/**/
-/* #endif /* CONFIG_MMCSD */ */
-/**/
+#if defined(FLASH_BASED_PARAMS)
+	/* Two 32 KB pages at the top of flash; numbers are 4 kB sector indices
+	 * (rpi_progmem.c, hw_config.h APP_RESERVATION_SIZE). */
+	static sector_descriptor_t params_sector_map[] = {
+		{1008, BOARD_PARAMS_FLASH_PAGE_SIZE, BOARD_PARAMS_FLASH_ADDRESS},
+		{1016, BOARD_PARAMS_FLASH_PAGE_SIZE, BOARD_PARAMS_FLASH_ADDRESS + BOARD_PARAMS_FLASH_PAGE_SIZE},
+		{0, 0, 0},
+	};
+
+	int result = parameter_flashfs_init(params_sector_map, NULL, 0);
+
+	if (result != OK) {
+		syslog(LOG_ERR, "[boot] FAILED to init params in FLASH %d\n", result);
+		led_off(LED_BLUE);
+	}
+
+#endif
+
+	px4_platform_configure();
 	return OK;
 }

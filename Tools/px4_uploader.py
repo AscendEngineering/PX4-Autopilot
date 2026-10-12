@@ -714,10 +714,24 @@ class BootloaderProtocol:
         data = bytes([cmd]) + b"".join(args) + bytes([BootloaderResponse.EOC])
         self.transport.send(data)
 
-    def _recv_int(self) -> int:
-        """Receive a 32-bit little-endian integer."""
-        raw = self.transport.recv(4)
+    def _recv_int(self, timeout: Optional[float] = None) -> int:
+        """Receive a 32-bit little-endian integer.
+
+        Args:
+            timeout: Read timeout override; None uses the transport default
+        """
+        raw = self.transport.recv(4, timeout=timeout)
         return struct.unpack("<I", raw)[0]
+
+    def crc_timeout(self) -> float:
+        """Read timeout for the GET_CRC reply.
+
+        The bootloader computes the CRC over the whole application region before
+        it answers, so the wait grows with the flash size. Measured: an RP2350
+        takes 0.98 s for 3.9 MB through its flash cache; allow one second plus
+        one second per megabyte, and never less than the sync timeout.
+        """
+        return max(self.sync_timeout, 1.0 + self.fw_maxsize / (1024 * 1024))
 
     def _get_sync(self, flush: bool = True) -> None:
         """Wait for and validate sync response.
@@ -1146,13 +1160,14 @@ class BootloaderProtocol:
 
         self._send_command(BootloaderCommand.GET_CRC)
 
-        # CRC calculation takes time, especially on larger flash
+        # CRC calculation takes time, especially on larger flash: sleep a little,
+        # then wait for the reply with a timeout sized to the flash region
         time.sleep(0.5)
 
         if progress_callback:
             progress_callback(0.5, 1.0)
 
-        reported_crc = self._recv_int()
+        reported_crc = self._recv_int(timeout=self.crc_timeout())
         self._get_sync()
 
         if progress_callback:

@@ -124,3 +124,13 @@ _emscripten_sdk/
 # Claude Code local settings and worktrees
 .claude/settings.local.json
 /.claude/worktrees/
+
+# Local RP2350 reference and design documents
+/docs/RP-008373-DS-2-rp2350-datasheet.pdf
+/docs/superpowers/
+
+# RP2350 bare-metal bench probe (phase 1 scaffolding, kept on the bench machine only)
+/boards/raspberrypi/rpi-uavfc-r4/probe/
+
+# Personal Claude Code instructions (CLAUDE.md itself is tracked and shared)
+CLAUDE.local.md

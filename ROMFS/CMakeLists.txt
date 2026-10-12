@@ -256,6 +256,10 @@ endif()
 set(OPTIONAL_BOARD_EXTRAS)
 file(GLOB OPTIONAL_BOARD_EXTRAS ${PX4_BOARD_DIR}/extras/*)
 
+# A bootloader UF2 (RP2350: dropped on the ROM's BOOTSEL drive from the host)
+# is an install artifact, not something the firmware reads: keep it out.
+list(FILTER OPTIONAL_BOARD_EXTRAS EXCLUDE REGEX "_bootloader\\.uf2$")
+
 # bootloader (optional)
 #  - if systemcmds/bl_update included and board bootloader available then generate rc.board_bootloader_upgrade and copy bootloader binary
 #  - otherwise remove bootloader binary from extras in final ROMFS

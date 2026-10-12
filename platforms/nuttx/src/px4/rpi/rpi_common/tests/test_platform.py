@@ -8,6 +8,7 @@ NuttX register headers are the real ones from the submodule and the GPIO API is
 stubbed. This does not simulate PWM waveforms or replace hardware validation.
 """
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -90,6 +91,11 @@ void {c['fn']}_gpio_disable_irq(uint32_t);
 #define ERROR -1
 #define PX4_SOC_ARCH_ID_UNUSED 0
 #define PX4_GUID_BYTE_LENGTH 18
+#define FLASH_BASED_PARAMS 1
+#define BOARD_USE_EXTERNAL_FLASH 1
+#define BOARD_PARAMS_FLASH_ADDRESS 0x103f0000u
+#define BOARD_PARAMS_FLASH_SIZE (64 * 1024)
+#define BOARD_PARAMS_FLASH_PAGE_SIZE (32 * 1024)
 __BEGIN_DECLS
 typedef unsigned irqstate_t;
 typedef int (*xcpt_t)(int, void *, void *);
@@ -122,6 +128,189 @@ TEST_CPP = r'''
 #include <cerrno>
 #include <cstring>
 #include <sys/mman.h>
+#include <cstdio>
+#include <cstdlib>
+#include <px4_arch/rpi_rom.h>
+
+static void map_fixed(uintptr_t base, size_t len)
+{
+	void *want = (void *)(base & ~(uintptr_t)4095);
+	void *got = mmap(want, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+	if (got != want) { perror("mmap"); exit(2); }
+}
+
+#include <px4_arch/rpi_flash.h>
+
+#define XIP ((volatile uint8_t *)(uintptr_t)RPI_FLASH_BASE)
+#define XIP_SIZE (4u * 1024u * 1024u)
+
+/* ROM fakes: record the call sequence and act on the XIP window */
+static char calls[64];
+static unsigned ncalls;
+static uint32_t last_erase_addr, last_erase_count, last_erase_block;
+static uint8_t last_erase_cmd;
+static uint32_t last_prog_addr, last_prog_count;
+static uint32_t xip_image[64];
+static uintptr_t xip_setup_holder;
+static int restore_ok;
+static bool rom_present = true;
+static bool rom_missing_erase = false;
+
+static void log_call(char c) { if (ncalls < sizeof(calls) - 1) { calls[ncalls] = c; calls[ncalls + 1] = 0; } ncalls++; }
+static void reset_log() { ncalls = 0; calls[0] = 0; restore_ok = 0; }
+extern "C" void fake_connect(void) { log_call('C'); }
+extern "C" void fake_exit_xip(void) { log_call('X'); }
+extern "C" void fake_flush(void) { log_call('F'); }
+extern "C" void fake_erase(uint32_t addr, size_t count, uint32_t block, uint8_t cmd)
+{
+	log_call('E'); last_erase_addr = addr; last_erase_count = count; last_erase_block = block; last_erase_cmd = cmd;
+	assert(addr % 4096 == 0 && count % 4096 == 0);
+	memset((void *)(XIP + addr), 0xff, count);
+}
+extern "C" void fake_program(uint32_t addr, const uint8_t *data, size_t count)
+{
+	log_call('P'); last_prog_addr = addr; last_prog_count = count;
+	assert(addr % 256 == 0 && count % 256 == 0);
+	for (size_t i = 0; i < count; i++) { XIP[addr + i] &= data[i]; }   /* NOR: only clears bits */
+}
+
+extern "C" bool rpi_rom_present(void) { return rom_present; }
+extern "C" void *rpi_rom_func(uint32_t code)
+{
+	if (!rom_present) { return nullptr; }
+	if (code == RPI_ROM_FUNC_CONNECT_INTERNAL_FLASH) { return (void *)fake_connect; }
+	if (code == RPI_ROM_FUNC_FLASH_EXIT_XIP) { return (void *)fake_exit_xip; }
+	if (code == RPI_ROM_FUNC_FLASH_RANGE_ERASE) { return rom_missing_erase ? nullptr : (void *)fake_erase; }
+	if (code == RPI_ROM_FUNC_FLASH_RANGE_PROGRAM) { return (void *)fake_program; }
+	if (code == RPI_ROM_FUNC_FLASH_FLUSH_CACHE) { return (void *)fake_flush; }
+	return nullptr;
+}
+extern "C" void *rpi_rom_data(uint32_t code)
+{
+	return code == RPI_ROM_CODE('X', 'F') ? (void *)&xip_setup_holder : nullptr;
+}
+extern "C" void rpi_flash_xip_restore(const uint32_t *copy)
+{
+	log_call('R');
+	restore_ok = memcmp(copy, xip_image, sizeof(xip_image)) == 0;
+	assert((uintptr_t)copy < RPI_FLASH_BASE || (uintptr_t)copy >= RPI_FLASH_BASE + XIP_SIZE);   /* the copy is not in flash */
+}
+
+static void flash_fixture()
+{
+	map_fixed(RPI_FLASH_BASE, XIP_SIZE);
+	memset((void *)XIP, 0xff, XIP_SIZE);   /* an anonymous mapping reads as zero; erased NOR reads as ones */
+	for (unsigned i = 0; i < 64; i++) { xip_image[i] = 0xb5000000u + i; }
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+	memcpy((void *)(uintptr_t)RPI_BOOTRAM_BASE, xip_image, sizeof(xip_image));   /* boot RAM mapped by test_rom_header */
+	xip_setup_holder = RPI_BOOTRAM_BASE;
+#else
+	memcpy((void *)(uintptr_t)RPI_FLASH_BASE, xip_image, sizeof(xip_image));     /* boot2 at the start of flash */
+#endif
+}
+
+static void test_flash_library()
+{
+	flash_fixture();
+	assert(rpi_flash_init());
+
+	/* argument checks never reach the ROM */
+	uint8_t page[256]; memset(page, 0, sizeof(page));
+	assert(rpi_flash_erase(100, 4096) == 0 && rpi_flash_erase(4096, 100) == 0 && rpi_flash_erase(4096, 0) == 0);
+	assert(rpi_flash_program(4, page, 256) == 0 && rpi_flash_program(0, page, 100) == 0 && rpi_flash_program(0, page, 0) == 0);
+	assert(ncalls == 0);
+
+	/* an aligned 64 kB run is one block erase; the ragged ends are sector erases; blank parts cost nothing */
+	memset((void *)(XIP + 0x10000), 0xa5, 0x30000);
+	assert(rpi_flash_erase(0x0f000, 0x12000) == 0x12000);             /* 0x0f000..0x21000: 1 sector + 1 block + 1 sector */
+	assert(strcmp(calls, "CXEFRCXEFR") == 0 && restore_ok);            /* the sector at 0x0f000 was blank already: 2 ops */
+	assert(last_erase_addr == 0x20000 && last_erase_count == 4096 && last_erase_block == 4096 && last_erase_cmd == 0x20);
+	assert(XIP[0x10000] == 0xff && XIP[0x20fff] == 0xff && XIP[0x21000] == 0xa5);
+	assert(rpi_flash_is_blank(0x0f000, 0x12000) && !rpi_flash_is_blank(0x21000, 4096));
+	reset_log();
+	assert(rpi_flash_erase(0x0f000, 0x12000) == 0x12000 && ncalls == 0);   /* already blank */
+
+	/* program: whole pages, NOR semantics, XIP restored from the copy */
+	for (unsigned i = 0; i < 256; i++) { page[i] = (uint8_t)i; }
+	assert(rpi_flash_program(0x20100, page, 256) == 256);
+	assert(strcmp(calls, "CXPFR") == 0 && restore_ok && last_prog_addr == 0x20100 && last_prog_count == 256);
+	assert(XIP[0x20100] == 0 && XIP[0x201ff] == 0xff);
+	reset_log();
+
+	/* a ROM without the erase entry: init fails, nothing is called */
+	rom_missing_erase = true;
+	assert(!rpi_flash_init_fresh());
+	assert(rpi_flash_erase(0x20000, 4096) == 0 && rpi_flash_program(0x20000, page, 256) == 0 && ncalls == 0);
+	rom_missing_erase = false;
+	assert(rpi_flash_init_fresh());
+	puts("flash library ok");
+}
+
+static void test_rom_header()
+{
+	static_assert(RPI_ROM_FUNC_FLASH_RANGE_ERASE == ('R' | ('E' << 8)), "ROM code packing");
+	static_assert(RPI_XIP_SETUP_BYTES == 256, "XIP setup routine is 256 bytes on both chips");
+	assert(RPI_FLASH_BASE == 0x10000000u);
+#if defined(CONFIG_ARCH_CHIP_RP23XX)
+	map_fixed(RPI_BOOTRAM_BASE, 4096);
+	xip_setup_holder = RPI_BOOTRAM_BASE + 64;
+	assert(rpi_rom_xip_setup() == (const uint32_t *)(RPI_BOOTRAM_BASE + 64));   /* 'X','F' points at a pointer */
+	xip_setup_holder = 0;
+	assert(rpi_rom_xip_setup() == (const uint32_t *)RPI_BOOTRAM_BASE);          /* documented fallback */
+	assert(RPI_BOOT_SIGNATURE_REG == RP23XX_WATCHDOG_BASE + 0x0c);              /* SCRATCH0 */
+#else
+	assert(rpi_rom_xip_setup() == (const uint32_t *)RPI_FLASH_BASE);            /* boot2 */
+	assert(RPI_BOOT_SIGNATURE_REG == RP2040_WATCHDOG_BASE + 0x0c);
+#endif
+	/* the handshake register is WATCHDOG SCRATCH0 on both chips: it survives SYSRESETREQ and not power-on */
+	assert((RPI_BOOT_SIGNATURE_REG & 0xfff) == 0x00c);
+	assert(rpi_rom_reboot_bootsel() == -1);                                     /* no 'R','B' / 'U','B' entry in the fake */
+	puts("rom header ok");
+}
+
+extern "C" ssize_t up_progmem_ext_getpage(size_t addr);
+extern "C" ssize_t up_progmem_ext_eraseblock(size_t block);
+extern "C" ssize_t up_progmem_ext_write(size_t addr, const void *buf, size_t count);
+
+static void test_progmem_shim()
+{
+	const size_t params = 0x103f0000u;
+	const size_t page_bytes = 32 * 1024;
+
+	/* page numbers: 4 kB sector index of the page's first byte */
+	assert(up_progmem_ext_getpage(params) == 1008);
+	assert(up_progmem_ext_getpage(params + page_bytes - 1) == 1008);
+	assert(up_progmem_ext_getpage(params + page_bytes) == 1016);
+	assert(up_progmem_ext_getpage(params + 2 * page_bytes - 1) == 1016);
+	assert(up_progmem_ext_getpage(params - 1) < 0 && up_progmem_ext_getpage(params + 2 * page_bytes) < 0);
+
+	/* erase one page: 32 kB, aligned, as eight sector erases or none when blank */
+	memset((void *)(XIP + 0x3f0000), 0x11, 2 * page_bytes);
+	reset_log();
+	assert(up_progmem_ext_eraseblock(1016) == (ssize_t)page_bytes);
+	assert(ncalls == 5 * 8 && last_erase_addr == 0x3ff000 && last_erase_cmd == 0x20);   /* not block aligned: 8 sector erases */
+	assert(XIP[0x3f8000] == 0xff && XIP[0x3fffff] == 0xff && XIP[0x3f7fff] == 0x11);   /* page 1008 untouched */
+	assert(up_progmem_ext_eraseblock(1009) < 0 && up_progmem_ext_eraseblock(1024) < 0);  /* not a page start, outside */
+	reset_log();
+
+	/* write across a 256-byte boundary, starting mid-page: neighbours keep their value */
+	uint8_t buf[200];   /* 16 bytes in the page at 0x3f8100, 184 in the page at 0x3f8200 */
+	for (unsigned i = 0; i < sizeof(buf); i++) { buf[i] = (uint8_t)(0x80 + i); }
+	assert(up_progmem_ext_write(params + page_bytes + 0x1f0, buf, sizeof(buf)) == (ssize_t)sizeof(buf));
+	assert(strcmp(calls, "CXPFRCXPFR") == 0 && last_prog_addr == 0x3f8200 && last_prog_count == 256);
+	assert(XIP[0x3f81ef] == 0xff && memcmp((const void *)(XIP + 0x3f81f0), buf, sizeof(buf)) == 0 && XIP[0x3f82b8] == 0xff);
+	reset_log();
+
+	/* a second write into the same page only clears bits: the earlier bytes survive */
+	uint8_t zero[4] = {0, 0, 0, 0};
+	assert(up_progmem_ext_write(params + page_bytes + 0x200, zero, 4) == 4);
+	assert(XIP[0x3f8200] == 0 && XIP[0x3f8204] == buf[0x14] && strcmp(calls, "CXPFR") == 0);
+	reset_log();
+
+	assert(up_progmem_ext_write(params - 4, buf, 8) < 0 && up_progmem_ext_write(params + 2 * page_bytes - 4, buf, 8) < 0);
+	assert(ncalls == 0);
+	puts("progmem shim ok");
+}
 
 constexpr auto absent = initSPIDevice(1, {});
 constexpr auto cs0 = initSPIDevice(1, {GPIO::Pin0});
@@ -197,6 +386,9 @@ static void map_page(uintptr_t base) {
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0) != MAP_FAILED);
 }
 int main() {
+    test_rom_header();
+    test_flash_library();
+    test_progmem_shim();
     map_page(RPI_PWM_BASE);
     const unsigned a = LAST_A, b = LAST_B, pin_a = timer_io_channels[a].gpio_out & GPIO_NUM_MASK,
                    pin_b = timer_io_channels[b].gpio_out & GPIO_NUM_MASK;
@@ -272,24 +464,39 @@ int main() {
 '''
 
 SOURCES = ("io_pins/io_timer.c", "io_pins/pwm_servo.c", "io_pins/rpi_pinset.c",
-           "version/board_identity.c", "version/board_mcu_version.c")
+           "version/board_identity.c", "version/board_mcu_version.c",
+           "flash/rpi_flash.c", "flash/rpi_progmem.c")
+
+
+ROM_HEADER_TU = """
+#include <px4_arch/rpi_rom.h>
+bool present(void) { return rpi_rom_present(); }
+void *func(void) { return rpi_rom_func(0x5845u); }   /* 'E','X' */
+void *data(void) { return rpi_rom_data(0x4658u); }   /* 'X','F' */
+"""
+
+
+def chip_flags(chip, temp):
+    """Write the NuttX stubs for `chip` into `temp` and return the include and define flags."""
+    c = CHIPS[chip]
+    for name, text in stubs(chip).items():
+        path = temp / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    includes = [temp, PLATFORM.parent / chip / "include",
+                ROOT / "platforms/common/include",
+                ROOT / "platforms/nuttx/src/px4/common/include",
+                NUTTX_ARCH / c["nuttx_dir"]]
+    flags = [f"-I{p}" for p in includes]
+    flags += [f"-DTEST_CHIP_ID={c['chip_id']:#x}u", f"-DTEST_REV='{c['rev']}'"]
+    return flags
 
 
 class PlatformTest(unittest.TestCase):
     def run_chip(self, chip):
-        c = CHIPS[chip]
         with tempfile.TemporaryDirectory(prefix=f"{chip}-test-") as temp:
             temp = pathlib.Path(temp)
-            for name, text in stubs(chip).items():
-                path = temp / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(text)
-            includes = [temp, PLATFORM.parent / chip / "include",
-                        ROOT / "platforms/common/include",
-                        ROOT / "platforms/nuttx/src/px4/common/include",
-                        NUTTX_ARCH / c["nuttx_dir"]]
-            flags = [f"-I{p}" for p in includes]
-            flags += [f"-DTEST_CHIP_ID={c['chip_id']:#x}u", f"-DTEST_REV='{c['rev']}'"]
+            flags = chip_flags(chip, temp)
             objects = []
             for source in SOURCES:
                 obj = temp / (pathlib.Path(source).stem + ".o")
@@ -303,11 +510,41 @@ class PlatformTest(unittest.TestCase):
             subprocess.run(["c++", "-std=c++14", "-Wall", *flags, str(test), *objects, "-o", str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
 
+    def compile_rom_header(self, chip):
+        """The ROM wrapper's ARM-only inline readers must build with -Werror=array-bounds on GCC 12 and later.
+
+        GCC 12 treats a constant address inside the first page (the boot ROM magic at 0x10 and the
+        table pointers after it) as a zero-size object and rejects the read; PX4 builds with -Werror.
+        """
+        version = next((v for v in ("14", "13", "12") if shutil.which(f"gcc-{v}")), None)
+        if version is None:
+            self.skipTest("no GCC 12 or newer on the host")
+        # The C++ rule (no implicit void * conversion) does not depend on the version; use the matching g++ if present.
+        cxx = f"g++-{version}" if shutil.which(f"g++-{version}") else "c++"
+        with tempfile.TemporaryDirectory(prefix=f"{chip}-rom-") as temp:
+            temp = pathlib.Path(temp)
+            flags = chip_flags(chip, temp)
+            # The header is included from C (-Wbad-function-cast) and from C++ (no implicit void * conversion).
+            for compiler, suffix, std in ((f"gcc-{version}", "c", "-std=gnu11"), (cxx, "cpp", "-std=c++14")):
+                source = temp / f"rom.{suffix}"
+                source.write_text(ROM_HEADER_TU)
+                result = subprocess.run([compiler, std, "-O2", "-Wall", "-Werror=array-bounds", "-Wbad-function-cast",
+                                         "-D__ARM_ARCH=8", "-Wno-int-to-pointer-cast", *flags,
+                                         "-c", str(source), "-o", str(temp / f"rom-{suffix}.o")],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, f"{compiler} rejects rpi_rom.h for {chip}:\n{result.stderr}")
+
     def test_rp2040(self):
         self.run_chip("rp2040")
 
     def test_rp2350(self):
         self.run_chip("rp2350")
+
+    def test_rom_header_builds_with_array_bounds_rp2040(self):
+        self.compile_rom_header("rp2040")
+
+    def test_rom_header_builds_with_array_bounds_rp2350(self):
+        self.compile_rom_header("rp2350")
 
 
 if __name__ == "__main__":

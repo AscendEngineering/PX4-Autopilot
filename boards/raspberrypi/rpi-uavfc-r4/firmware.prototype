@@ -1,0 +1,13 @@
+{
+    "board_id": 7300,
+    "magic": "RPIUAVFCR4",
+    "description": "Firmware for the Raspberry Pi RPI-UAVFC-R4 board",
+    "image": "",
+    "build_time": 0,
+    "summary": "RPIUAVFCR4",
+    "version": "0.1",
+    "image_size": 0,
+    "image_maxsize": 3997696,
+    "git_identity": "",
+    "board_revision": 0
+}

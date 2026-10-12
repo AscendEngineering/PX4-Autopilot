@@ -18,34 +18,7 @@ RPI_COMMON = HERE.parent
 BOOTLOADER = RPI_COMMON.parents[1]          # platforms/nuttx/src/bootloader
 ROOT = next(p for p in HERE.parents if (p / "Tools").is_dir())
 NUTTX_ARCH = ROOT / "platforms/nuttx/NuttX/nuttx/arch/arm/src"
-
-# Values the board's hw_config.h is expected to carry (design spec 3.1, 4.4)
-HW_CONFIG = """
-#pragma once
-#define USB0_DEV 0x01
-#define BOARD_TYPE 7300
-#define BOOTLOADER_RESERVATION_SIZE (128 * 1024)
-#define APP_LOAD_ADDRESS 0x10020000
-#define APP_RESERVATION_SIZE (64 * 1024)
-#define BOARD_FLASH_SIZE (4 * 1024 * 1024)
-#define BOARD_FLASH_SECTORS 1024
-#define BOARD_FIRST_FLASH_SECTOR_TO_ERASE 32
-#define BOOTLOADER_DELAY 5000
-#define INTERFACE_USB 1
-#define INTERFACE_USB_CONFIG "/dev/ttyACM0"
-#define INTERFACE_USART 0
-#define SERIAL_BREAK_DETECT_DISABLED 1
-#define BOARD_PIN_LED_ACTIVITY 0
-#define BOARD_PIN_LED_BOOTLOADER 1
-#define BOARD_LED_ON 0
-#define BOARD_LED_OFF 1
-#define ARCH_SN_MAX_LENGTH 8
-#define BOOT_DEVICES_SELECTION USB0_DEV
-#define BOOT_DEVICES_FILTER_ONUSB USB0_DEV
-#if defined(TEST_VBUS)
-#define BOARD_VBUS 24
-#endif
-"""
+BOARD = ROOT / "boards/raspberrypi/rpi-uavfc-r4/src"   # the real hw_config.h
 
 STUBS = {
     "nuttx/config.h": "#pragma once\n#define CONFIG_ARCH_CHIP_RP23XX 1\n",
@@ -69,7 +42,6 @@ void rp23xx_gpio_put(uint32_t gpio, int set);
 bool rp23xx_gpio_get(uint32_t gpio);
 void rp23xx_gpio_setdir(uint32_t gpio, int out);
 """,
-    "hw_config.h": HW_CONFIG,
 }
 
 TEST_C = r'''
@@ -81,11 +53,15 @@ TEST_C = r'''
 #include "hw_config.h"
 #include "bl.h"
 #include "bl_chip.h"
+#include <px4_arch/rpi_rom.h>
+#include <px4_arch/rpi_flash.h>
 #include <lib/systick.h>
 #include <lib/flash_cache.h>
 #include <nvic.h>
 
-#define XIP ((volatile uint8_t *)(uintptr_t)BL_FLASH_BASE)
+#define XIP ((volatile uint8_t *)(uintptr_t)RPI_FLASH_BASE)
+
+_Static_assert(ARCH_SN_MAX_LENGTH >= 12, "GET_SN must accept uploader offsets 0, 4 and 8");
 
 /* declared nowhere in bl.h: provided by flash.c and main.c */
 ssize_t arch_flash_write(uintptr_t address, const void *buffer, size_t buflen);
@@ -132,26 +108,29 @@ static void fake_program(uint32_t addr, const uint8_t *data, size_t count)
 	assert(addr % 256 == 0 && count % 256 == 0);
 	for (size_t i = 0; i < count; i++) XIP[addr + i] &= data[i];   /* NOR: only clears bits */
 }
-static void *fake_lookup(uint32_t code, uint32_t mask)
+/* ROM host hooks (px4_arch/rpi_rom.h) and the flash library's XIP restore hook */
+static bool rom_present = true;
+bool rpi_rom_present(void) { return rom_present; }
+void *rpi_rom_func(uint32_t code)
 {
 	switch (code) {
-	case 'I' | 'F' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_connect : NULL;
-	case 'E' | 'X' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_exit_xip : NULL;
-	case 'R' | 'E' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_erase : NULL;
-	case 'R' | 'P' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_program : NULL;
-	case 'F' | 'C' << 8: return mask == BL_ROM_RT_FLAG_FUNC_ARM_SEC ? (void *)fake_flush : NULL;
-	case 'X' | 'F' << 8: return mask == BL_ROM_RT_FLAG_DATA ? (void *)&xip_setup_ptr_holder : NULL;
+	case 'I' | 'F' << 8: return (void *)fake_connect;
+	case 'E' | 'X' << 8: return (void *)fake_exit_xip;
+	case 'R' | 'E' << 8: return (void *)fake_erase;
+	case 'R' | 'P' << 8: return (void *)fake_program;
+	case 'F' | 'C' << 8: return (void *)fake_flush;
 	}
 	return NULL;
 }
-static bool rom_present = true;
-bool bl_rom_present(void) { return rom_present; }
-bl_rom_table_lookup_fn bl_rom_table_lookup(void) { return fake_lookup; }
-void bl_xip_restore(const uint32_t *copy)
+void *rpi_rom_data(uint32_t code)
+{
+	return code == ('X' | 'F' << 8) ? (void *)&xip_setup_ptr_holder : NULL;
+}
+void rpi_flash_xip_restore(const uint32_t *copy)
 {
 	log_call('R');
 	restore_ok = memcmp(copy, xip_image, sizeof(xip_image)) == 0;
-	assert((uintptr_t)copy < BL_FLASH_BASE || (uintptr_t)copy >= BL_FLASH_BASE + BOARD_FLASH_SIZE); /* copy is not in flash */
+	assert((uintptr_t)copy < RPI_FLASH_BASE || (uintptr_t)copy >= RPI_FLASH_BASE + BOARD_FLASH_SIZE); /* copy is not in flash */
 }
 
 /* common bootloader fakes */
@@ -235,9 +214,9 @@ static void test_flash(void)
 	assert(arch_flash_write(APP_LOAD_ADDRESS + 4, page, 256) == 0);
 	assert(arch_flash_write(APP_LOAD_ADDRESS, page, 100) == 0);
 	assert(arch_flash_write(APP_LOAD_ADDRESS - 256, page, 256) == 0);
-	assert(arch_flash_write(BL_FLASH_BASE + BOARD_FLASH_SIZE - 128, page, 256) == 0);
+	assert(arch_flash_write(RPI_FLASH_BASE + BOARD_FLASH_SIZE - 128, page, 256) == 0);
 	assert(ncalls == 0);
-	assert(arch_flash_write(BL_FLASH_BASE + BOARD_FLASH_SIZE - 256, page, 256) == 256 && XIP[BOARD_FLASH_SIZE - 1] == 0);
+	assert(arch_flash_write(RPI_FLASH_BASE + BOARD_FLASH_SIZE - 256, page, 256) == 256 && XIP[BOARD_FLASH_SIZE - 1] == 0);
 	reset_log();
 
 	/* no usable ROM: nothing is touched */
@@ -307,17 +286,17 @@ static void test_systick_leds(void)
 
 int main(int argc, char **argv)
 {
-	map(BL_FLASH_BASE, BOARD_FLASH_SIZE);
+	map(RPI_FLASH_BASE, BOARD_FLASH_SIZE);
 	map(RP23XX_SYSINFO_BASE, 4096);
 	map(BL_RESETS_SET, 4096);
 	map(RP23XX_WATCHDOG_BASE, 4096);
-	map(BL_BOOTRAM_BASE, 4096);
+	map(RPI_BOOTRAM_BASE, 4096);
 	map(RP23XX_OTP_DATA_BASE, 4096);
 	map(0xe000e000u, 4096);
 
 	for (unsigned i = 0; i < 64; i++) xip_image[i] = 0xb5000000u + i;
-	memcpy((void *)(uintptr_t)BL_BOOTRAM_BASE, xip_image, sizeof(xip_image));
-	xip_setup_ptr_holder = BL_BOOTRAM_BASE;
+	memcpy((void *)(uintptr_t)RPI_BOOTRAM_BASE, xip_image, sizeof(xip_image));
+	xip_setup_ptr_holder = RPI_BOOTRAM_BASE;
 
 	const char *scenario = argc > 1 ? argv[1] : "";
 	if (strcmp(scenario, "units") == 0) {
@@ -343,6 +322,7 @@ int main(int argc, char **argv)
 '''
 
 SOURCES = (RPI_COMMON / "flash.c", RPI_COMMON / "main.c", RPI_COMMON / "systick.c",
+           ROOT / "platforms/nuttx/src/px4/rpi/rpi_common/flash/rpi_flash.c",
            BOOTLOADER / "common/lib/flash_cache.c")
 
 
@@ -352,7 +332,8 @@ def build(temp, extra_flags=()):
         path = temp / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
-    includes = [temp, BOOTLOADER / "common", RPI_COMMON.parent / "rp2350/include",
+    includes = [temp, BOARD, BOOTLOADER / "common", RPI_COMMON.parent / "rp2350/include",
+                ROOT / "platforms/nuttx/src/px4/rpi/rp2350/include",
                 NUTTX_ARCH / "rp23xx", NUTTX_ARCH / "armv8-m"]
     # The firmware build force-includes nuttx/config.h, which flash_cache.h needs to pick the
     # page size; NuttX's <string.h> also brings in the fixed-width types bl.h relies on.
@@ -378,6 +359,41 @@ def run(exe, scenario):
     return result.stdout
 
 
+FORK_PIN = "2b9d05baa97d2038bfd426a240d1be69c3178675"   # AscendEngineering/NuttX pr-nuttx_rp23xx
+
+# One marker per kept fix so a submodule checked out at the old PX4 pin is reported, file by file.
+RP23XX_FIX_MARKERS = {
+    "arch/arm/src/armv8-m/arm_doirq.c": [': "r0"'],                                   # exception_direct clobber
+    "arch/arm/src/rp23xx/rp23xx_usbdev.c": [
+        "setbits_reg32(RP23XX_USBCTRL_REGS_SIE_CTRL_EP0_INT_1BUF",   # keep PULLUP_EN
+        "privreq->armed = true;",                                   # arm a request once
+        "rp23xx_epwrite(ep0, response, 2);",                        # GET_STATUS data stage
+        "UP_DMB();",                                                # BUFF_STATUS clear before AVAIL
+    ],
+    "arch/arm/Kconfig": ["select ARCH_USBDEV_STALLQUEUE if USBDEV"],
+    "arch/arm/src/rp23xx/rp23xx_irq.c": [
+        "for (i = 0; i < RP23XX_IRQ_NEXTINT; i += 4)",              # NVIC priority for IRQs 12-51
+        "Place PendSV at the lowest NVIC priority",
+    ],
+}
+
+
+def missing_rp23xx_fixes(nuttx):
+    """Files under the NuttX tree `nuttx` that lack at least one kept-fix marker."""
+    missing = []
+    for rel, needles in RP23XX_FIX_MARKERS.items():
+        text = (pathlib.Path(nuttx) / rel).read_text(errors="replace")
+        if any(n not in text for n in needles):
+            missing.append(rel)
+    return missing
+
+
+def masked_image(data: bytes) -> bytes:
+    """Zero the bootloader's version string so a rebuild at another commit compares equal."""
+    import re
+    return re.sub(rb"PX4BLv[0-9A-Za-z.\-]+g[0-9a-f]{7,12}", lambda m: b"\0" * len(m.group(0)), data)
+
+
 class BootloaderTest(unittest.TestCase):
     def test_units(self):
         with tempfile.TemporaryDirectory(prefix="rpi-bl-test-") as temp:
@@ -394,12 +410,158 @@ class BootloaderTest(unittest.TestCase):
 
     def test_boot_decision_with_vbus(self):
         with tempfile.TemporaryDirectory(prefix="rpi-bl-test-") as temp:
-            exe = build(temp, ["-DTEST_VBUS"])
+            exe = build(temp, ["-DBOARD_VBUS=24"])
             # VBUS absent: try the application first; it is not bootable here, so stay forever
             self.assertEqual(run(exe, "boot").strip(), "bootloader timeout=0 scratch=0xb007b007 jumped=1 cinit=1")
             # VBUS present: wait for an upload with the usual timeout
             self.assertEqual(run(exe, "boot_vbus").strip(), "bootloader timeout=5000 scratch=0 jumped=0 cinit=1")
             self.assertEqual(run(exe, "boot_signature").strip(), "bootloader timeout=0 scratch=0 jumped=0 cinit=1")
+
+    def test_nuttx_submodule_has_rp23xx_fixes(self):
+        """The submodule must be the AscendEngineering fork commit that carries the rp23xx fixes."""
+        nuttx = ROOT / "platforms/nuttx/NuttX/nuttx"
+        missing = missing_rp23xx_fixes(nuttx)
+        self.assertFalse(missing, "NuttX submodule lacks the rp23xx fixes in " + ", ".join(missing)
+                         + f"; run: git submodule update --init platforms/nuttx/NuttX/nuttx (expects {FORK_PIN[:10]})")
+
+    def test_masked_image_hides_only_the_version_string(self):
+        a = b"xxPX4BLv1.18.0ga739176859yy"
+        b = b"xxPX4BLv1.18.0g0c05c332b4yy"
+        self.assertEqual(masked_image(a), masked_image(b))
+        self.assertEqual(masked_image(b"no version here"), b"no version here")
+        self.assertNotEqual(masked_image(a + b"1"), masked_image(b + b"2"))
+
+    def test_bootloader_image_layout(self):
+        """Check the binary and production code placement in the linked ELF."""
+        import os
+        import re
+        import struct
+        bin_path = ROOT / "boards/raspberrypi/rpi-uavfc-r4/extras/raspberrypi_rpi-uavfc-r4_bootloader.bin"
+        elf_path = ROOT / "build/raspberrypi_rpi-uavfc-r4_bootloader/raspberrypi_rpi-uavfc-r4_bootloader.elf"
+        required = os.environ.get("PX4_REQUIRE_BOOTLOADER_BUILD") == "1"
+        if not elf_path.exists():
+            if required:
+                self.fail(f"missing build artefact: {elf_path}")
+            self.skipTest("bootloader ELF not built")
+        # The binary under test is always derived from this ELF; a committed extras/.bin
+        # must be byte-identical to it, otherwise the two are out of step.
+        with tempfile.TemporaryDirectory(prefix="rp2350-layout-") as temp:
+            derived = pathlib.Path(temp) / "bootloader.bin"
+            subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", str(elf_path), str(derived)], check=True)
+            data = derived.read_bytes()
+        if bin_path.exists():
+            committed = bin_path.read_bytes()
+            self.assertEqual(len(committed), len(data), "committed extras/.bin has a different size from a fresh build")
+            self.assertEqual(masked_image(committed), masked_image(data),
+                             "committed extras/.bin differs from a fresh build beyond the version string")
+            self.assertNotEqual(masked_image(data), data, "the version string was not found in the image")
+        defconfig = (ROOT / "boards/raspberrypi/rpi-uavfc-r4/nuttx-config/bootloader/defconfig").read_text()
+        idle_stack = int(re.search(r"^CONFIG_IDLETHREAD_STACKSIZE=(\d+)$", defconfig, re.M).group(1))
+        image_def = (0xFFFFDED3, 0x10210142, 0x000001FF, 0x00000000, 0xAB123579)
+        vectors = 16 + 52                      # NR_IRQS on rp23xx
+        self.assertLessEqual(len(data), 128 * 1024, "bootloader image over its 128 KB reservation")
+        self.assertEqual(struct.unpack_from("<5I", data, vectors * 4), image_def, "IMAGE_DEF not right after the vector table")
+        # the ROM scans the first 4 KB: exactly one block start marker there, at that offset
+        first_4k = data[:4096]
+        marker = struct.pack("<I", image_def[0])
+        self.assertEqual([i for i in range(0, 4096 - 3, 4) if first_4k[i:i + 4] == marker], [vectors * 4])
+        msp, pc = struct.unpack_from("<2I", data, 0)
+        self.assertTrue(0x20000000 < msp <= 0x20080000 and msp % 8 == 0, f"initial MSP {msp:#x}")
+        self.assertTrue(pc & 1 and 0x10000000 <= (pc & ~1) < 0x10000000 + len(data), f"reset vector {pc:#x}")
+
+        nm = subprocess.check_output(["arm-none-eabi-nm", "--defined-only", str(elf_path)], text=True)
+        symbols = {}
+        for line in nm.splitlines():
+            fields = line.split()
+            if len(fields) == 3:
+                symbols[fields[2]] = int(fields[0], 16)
+        for name in ("bootloader_main", "_sdata", "_edata", "_eronly", "_ebss"):
+            self.assertIn(name, symbols, f"required symbol discarded or missing: {name}")
+        self.assertTrue(0x10000000 <= symbols["bootloader_main"] < 0x10000000 + len(data))
+        # The production image starts the real bootloader; the phase 2 diagnostic must be gone
+        self.assertFalse("status_main" in symbols, "phase 2 status_main is still linked")
+        dot_config = (elf_path.parent / "NuttX/nuttx/.config").read_text()
+        self.assertIn('CONFIG_INIT_ENTRYPOINT="bootloader_main"', dot_config)
+        self.assertEqual(symbols["_ebss"] % 8, 0)
+        self.assertEqual(msp, symbols["_ebss"] + idle_stack)
+        flash_ops = [address for name, address in symbols.items()
+                     if name == "flash_op" or name.startswith("flash_op.")]
+        self.assertTrue(flash_ops, "production flash_op was discarded")
+        self.assertTrue(0x20000000 <= symbols["_sdata"] < symbols["_edata"] <= 0x20080000)
+        for address in flash_ops:
+            self.assertTrue(symbols["_sdata"] <= address < symbols["_edata"],
+                            f"flash_op {address:#x} is outside the SRAM data copy")
+
+        sections = subprocess.check_output(["arm-none-eabi-objdump", "-h", str(elf_path)], text=True)
+        data_sections = [line.split() for line in sections.splitlines()
+                         if len(line.split()) >= 5 and line.split()[1] == ".data"]
+        self.assertEqual(len(data_sections), 1)
+        _, _, size_hex, vma_hex, lma_hex, *_ = data_sections[0]
+        size, vma, lma = (int(value, 16) for value in (size_hex, vma_hex, lma_hex))
+        self.assertEqual((vma, vma + size), (symbols["_sdata"], symbols["_edata"]))
+        self.assertEqual(lma, symbols["_eronly"], "NuttX would copy .data from the wrong address")
+        self.assertTrue(0x10000000 <= lma < lma + size <= 0x10000000 + len(data))
+
+    def test_application_image_layout(self):
+        """The firmware image sits in the application window with its ROM flash wrapper in SRAM."""
+        import os
+        import re
+        import struct
+        elf_path = ROOT / "build/raspberrypi_rpi-uavfc-r4_default/raspberrypi_rpi-uavfc-r4_default.elf"
+        uf2_path = elf_path.with_suffix(".uf2")
+        required = os.environ.get("PX4_REQUIRE_BOOTLOADER_BUILD") == "1"
+        if not elf_path.exists():
+            if required:
+                self.fail(f"missing build artefact: {elf_path}")
+            self.skipTest("application ELF not built")
+        app_base = 0x10020000
+        app_end = 0x10000000 + 4 * 1024 * 1024 - 64 * 1024     # params reservation starts here
+        with tempfile.TemporaryDirectory(prefix="rp2350-app-layout-") as temp:
+            derived = pathlib.Path(temp) / "app.bin"
+            subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", str(elf_path), str(derived)], check=True)
+            data = derived.read_bytes()
+        self.assertLessEqual(app_base + len(data), app_end, "application overflows into the params reservation")
+        vectors = 16 + 52
+        image_def = (0xFFFFDED3, 0x10210142, 0x000001FF, 0x00000000, 0xAB123579)
+        self.assertEqual(struct.unpack_from("<5I", data, vectors * 4), image_def, "IMAGE_DEF not right after the vector table")
+        msp, pc = struct.unpack_from("<2I", data, 0)
+        self.assertTrue(0x20000000 < msp <= 0x20080000 and msp % 8 == 0, f"initial MSP {msp:#x}")
+        self.assertTrue(pc & 1 and app_base <= (pc & ~1) < app_base + len(data), f"reset vector {pc:#x}")
+
+        nm = subprocess.check_output(["arm-none-eabi-nm", "--defined-only", str(elf_path)], text=True)
+        symbols = {}
+        for line in nm.splitlines():
+            fields = line.split()
+            if len(fields) == 3:
+                symbols[fields[2]] = int(fields[0], 16)
+        for name in ("up_progmem_ext_write", "rpi_flash_program", "board_reset", "_sdata", "_edata", "_eronly"):
+            self.assertIn(name, symbols, f"required symbol missing: {name}")
+        flash_ops = [a for n, a in symbols.items() if n == "flash_op" or n.startswith("flash_op.")]
+        self.assertTrue(flash_ops, "flash_op was discarded")
+        for address in flash_ops:
+            self.assertTrue(symbols["_sdata"] <= address < symbols["_edata"], f"flash_op {address:#x} is not in the SRAM data copy")
+        self.assertTrue(app_base <= symbols["rpi_flash_program"] < app_end)
+
+        sections = subprocess.check_output(["arm-none-eabi-objdump", "-h", str(elf_path)], text=True)
+        data_sections = [l.split() for l in sections.splitlines() if len(l.split()) >= 5 and l.split()[1] == ".data"]
+        self.assertEqual(len(data_sections), 1)
+        _, _, size_hex, vma_hex, lma_hex, *_ = data_sections[0]
+        size, vma, lma = (int(v, 16) for v in (size_hex, vma_hex, lma_hex))
+        self.assertEqual(lma, symbols["_eronly"], "NuttX would copy .data from the wrong address")
+        self.assertTrue(app_base <= lma < lma + size <= app_base + len(data))
+
+        self.assertTrue(uf2_path.exists(), f"missing {uf2_path}")
+        uf2 = uf2_path.read_bytes()
+        self.assertEqual(len(uf2) % 512, 0)
+        magic0, magic1, flags, target_addr, payload, block_no, num_blocks, family = struct.unpack_from("<8I", uf2, 0)
+        self.assertEqual((magic0, magic1), (0x0A324655, 0x9E5D5157))
+        # The build derives the UF2 base from the board's hw_config.h, not from a constant in platform CMake
+        hw_config = (ROOT / "boards/raspberrypi/rpi-uavfc-r4/src/hw_config.h").read_text()
+        app_load_address = int(re.search(r"^#define APP_LOAD_ADDRESS\s+(0x[0-9a-fA-F]+)", hw_config, re.M).group(1), 16)
+        self.assertEqual(app_load_address, app_base)
+        self.assertEqual(target_addr, app_load_address, "application UF2 must load at the board's APP_LOAD_ADDRESS")
+        self.assertEqual(family, 0xE48BFF59, "family must be rp2350-arm-s")
+        self.assertEqual(num_blocks, len(uf2) // 512)
 
 
 if __name__ == "__main__":

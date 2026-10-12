@@ -34,8 +34,10 @@
 /**
  * @file bootloader_main.c
  *
- * FMU-specific early startup code for bootloader
-*/
+ * RPI-UAVFC-R4 board hooks for the bootloader image. The bootloader itself
+ * is platforms/nuttx/src/bootloader/rpi/rpi_common/main.c; this file only
+ * supplies what NuttX and px4_layer call into the board for.
+ */
 
 #include "board_config.h"
 #include "bl.h"
@@ -43,29 +45,23 @@
 #include <nuttx/config.h>
 #include <nuttx/board.h>
 #include <chip.h>
-#include <rp23xx_uart.h>
 #include <arch/board/board.h>
 #include "arm_internal.h"
-#include <px4_platform/gpio.h>
 #include <px4_platform_common/init.h>
 
 extern int sercon_main(int c, char **argv);
 
 __EXPORT void board_on_reset(int status) {}
 
-__EXPORT void rpi_boardinitialize(void)
+/* Before clocks and serial: nothing to do, the bootloader has no UART. */
+void rp23xx_boardearlyinitialize(void)
 {
-	/* configure pins */
-	const uint32_t list[] = PX4_GPIO_INIT_LIST;
+}
 
-	for (size_t gpio = 0; gpio < arraySize(list); gpio++) {
-		if (list[gpio] != 0) {
-			px4_arch_configgpio(list[gpio]);
-		}
-	}
-
-	/* configure USB interfaces */
-	rp23xx_usbinitialize();
+/* After clocks, before NuttX starts. LEDs are configured by the bootloader's
+ * own board_init(); USB needs no pins on this chip. */
+void rp23xx_boardinitialize(void)
+{
 }
 
 __EXPORT int board_app_initialize(uintptr_t arg)
@@ -73,6 +69,7 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 	return 0;
 }
 
+/* Bring up /dev/ttyACM0 before the entry point opens it. */
 void board_late_initialize(void)
 {
 	sercon_main(0, NULL);

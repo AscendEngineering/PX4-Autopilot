@@ -524,7 +524,45 @@ if("${PX4_BOARD_LABEL}" STREQUAL "bootloader")
 		COMMAND ${CMAKE_OBJCOPY} -O binary ${PX4_BINARY_DIR_REL}/${FW_NAME} ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin
 		DEPENDS px4
 	)
-	add_custom_target(px4_bootloader_keep ALL DEPENDS ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin)
+	set(bootloader_keep_outputs ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin)
+
+	# RP2350: the ROM's BOOTSEL drive takes UF2, so ship the bootloader in
+	# that form as well, at the XIP base where the ROM boots from.
+	if(CONFIG_ARCH_CHIP_RP23XX)
+		add_custom_command(OUTPUT ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.uf2
+			COMMAND ${PYTHON_EXECUTABLE} ${PX4_SOURCE_DIR}/Tools/uf2conv.py
+				${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin
+				--base 0x10000000
+				-o ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.uf2
+			DEPENDS ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.bin ${PX4_SOURCE_DIR}/Tools/uf2conv.py
+		)
+		list(APPEND bootloader_keep_outputs ${PX4_BOARD_DIR}/extras/${PX4_BOARD}_bootloader.uf2)
+	endif()
+
+	add_custom_target(px4_bootloader_keep ALL DEPENDS ${bootloader_keep_outputs})
+endif()
+
+# RP2350 application UF2: the no-bootloader recovery path (drop it on the
+# ROM's BOOTSEL drive). The load address is the board's APP_LOAD_ADDRESS
+# from src/hw_config.h when the board ships a PX4 bootloader, else the XIP
+# base; the layout test in test_bootloader.py checks the address.
+if(CONFIG_ARCH_CHIP_RP23XX AND NOT ("${PX4_BOARD_LABEL}" MATCHES "^bootloader"))
+	set(rp23xx_uf2_base 0x10000000)
+	if(EXISTS ${PX4_BOARD_DIR}/src/hw_config.h)
+		file(STRINGS ${PX4_BOARD_DIR}/src/hw_config.h rp23xx_app_load_line REGEX "^#define[ \t]+APP_LOAD_ADDRESS[ \t]+0x[0-9A-Fa-f]+")
+		if(rp23xx_app_load_line)
+			string(REGEX REPLACE "^#define[ \t]+APP_LOAD_ADDRESS[ \t]+(0x[0-9A-Fa-f]+).*" "\\1" rp23xx_uf2_base "${rp23xx_app_load_line}")
+		endif()
+	endif()
+	message(STATUS "RP2350 application UF2 base: ${rp23xx_uf2_base}")
+	add_custom_command(OUTPUT ${PX4_BINARY_DIR}/${PX4_CONFIG}.uf2
+		COMMAND ${PYTHON_EXECUTABLE} ${PX4_SOURCE_DIR}/Tools/uf2conv.py
+			${PX4_BINARY_DIR}/${PX4_CONFIG}.bin
+			--base ${rp23xx_uf2_base}
+			-o ${PX4_BINARY_DIR}/${PX4_CONFIG}.uf2
+		DEPENDS ${PX4_BINARY_OUTPUT} ${PX4_SOURCE_DIR}/Tools/uf2conv.py
+	)
+	add_custom_target(px4_uf2 ALL DEPENDS ${PX4_BINARY_DIR}/${PX4_CONFIG}.uf2)
 endif()
 
 # print weak symbols

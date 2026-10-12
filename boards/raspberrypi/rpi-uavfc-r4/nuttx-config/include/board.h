@@ -48,7 +48,12 @@
 #define MHZ                     1000000
 
 #define BOARD_XOSC_FREQ         (12 * MHZ)
-#define BOARD_XOSC_STARTUPDELAY 64
+/* Multiplier on the ~1 ms crystal start-up count, as in NuttX's own Pico 2
+ * board. rp23xx_xosc.c scales it by 6 and asserts the result is below 8192
+ * (STARTUP register width); the RP2040 pico board's 64 was milliseconds for
+ * a different formula and trips that assert before the FPU is enabled,
+ * which locks the core with no way to see why. */
+#define BOARD_XOSC_STARTUPDELAY 1
 #define BOARD_PLL_SYS_FREQ      (150 * MHZ)
 #define BOARD_PLL_USB_FREQ      (48 * MHZ)
 
@@ -57,92 +62,45 @@
 #define BOARD_PERI_FREQ         (150 * MHZ)
 #define BOARD_USB_FREQ          (48 * MHZ)
 #define BOARD_ADC_FREQ          (48 * MHZ)
+#define BOARD_HSTX_FREQ         (150 * MHZ)	/* clk_hstx = clk_sys; HSTX unused, rp23xx_clock.c needs the value */
 #define BOARD_RTC_FREQ          46875
 
 #define BOARD_UART_BASEFREQ     BOARD_PERI_FREQ
 
 #define BOARD_TICK_CLOCK        (1 * MHZ)
 
-/* If CONFIG_ARCH_LEDs is defined, then NuttX will control the 2 LEDs on board the
- * omnibusf4sd.  The following definitions describe how NuttX controls the LEDs:
- */
-
-// #define LED_STARTED       0  /* LED1 */
-// #define LED_HEAPALLOCATE  1  /* LED2 */
-// #define LED_IRQSENABLED   2  /* LED1 */
-// #define LED_STACKCREATED  3  /* LED1 + LED2 */
-// #define LED_INIRQ         4  /* LED1 */
-// #define LED_SIGNAL        5  /* LED2 */
-// #define LED_ASSERTION     6  /* LED1 + LED2 */
-// #define LED_PANIC         7  /* LED1 + LED2 */
 
 /* Alternate function pin selections ************************************************/
-//TODO:
-/*
- * UARTs.
- * UART0TX: GPIO44
- * UART0RX: GPIO45
- * UART1TX: GPIO36
- * UART1RX: GPIO37
- * UART2TX: GPIO43
- * UART2RX: GPIO44
- */
 
-//TODO:
-#define CONFIG_RP23XX_UART0_GPIO	0	/* SBUS RX */
+/* UARTs: hardware UART0 and UART1. The pins are set by the board in
+ * rp23xx_boardinitialize() (src/init.c). NuttX's CONFIG_RP23XX_UART0_TX_GPIO
+ * and friends are applied only by boards/arm/rp23xx/common, which this
+ * image does not link, and their Kconfig ranges stop at GPIO29 (RP2350A):
+ * UART0's default there is GPIO0/1, the LED pins. Never link that code. */
+#define GPIO_UART0_TX		44	/* DVTX_UART0_TX, DJI air unit connector */
+#define GPIO_UART0_RX		45	/* DVTX_UART0_RX */
+#define GPIO_UART1_TX		36	/* GPS_UART1_TX */
+#define GPIO_UART1_RX		37	/* GPS_UART1_RX */
 
-// #define CONFIG_RP23XX_UART1_GPIO	8	/* GPS */
-//
-// #define CONFIG_RP23XX_UART2_GPIO	8	/* RC */
-//
-// #define CONFIG_RP23XX_UART3_GPIO	8	/* TELEM */
-/*
- * I2C internal
- *
- * I2C0SCL: GPIO25
- * I2C0SDA: GPIO24 
- *
- */
-/*
- * I2C (external)
- *
+/* I2C0 (internal): barometer DPS368, address 0x76. I2C1 (external connector). */
+#define GPIO_I2C0_SDA		24
+#define GPIO_I2C0_SCL		25
+#define GPIO_I2C1_SDA		38
+#define GPIO_I2C1_SCL		39
 
- * I2C1SCL: GPIO39
- * I2C1SDA: GPIO6
- *
- * TODO:
- *   The optional _GPIO configurations allow the I2C driver to manually
- *   reset the bus to clear stuck slaves.  They match the pin configuration,
- *   but are normally-high GPIOs.
- */
-#define CONFIG_RP23XX_I2C0_GPIO		24
-#define CONFIG_RP23XX_I2C1_GPIO		38
+/* SPI0: ICM-56686. CS GPIO33 (src/spi.cpp), SCK GPIO34, MISO (RX) GPIO32, MOSI (TX) GPIO35 */
+#define GPIO_SPI0_SCLK	( 34 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
+#define GPIO_SPI0_MISO	( 32 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
+#define GPIO_SPI0_MOSI	( 35 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
 
-/* SPI0:
- *  ICM-56686
- *  CS: GPIO33 -- configured in src/spi.cpp
- *  CLK: GPIO34
- *  MISO: GPIO32
- *  MOSI: GPIO35
- */
+/* SPI1: micro SD. CS GPIO29 (src/spi.cpp), SCK GPIO30, MISO (RX) GPIO28, MOSI (TX) GPIO31 */
+#define GPIO_SPI1_SCLK	( 30 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
+#define GPIO_SPI1_MISO	( 28 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
+#define GPIO_SPI1_MOSI	( 31 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
 
-#define GPIO_SPI1_SCLK	( 34 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
-#define GPIO_SPI1_MISO	( 32 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
-#define GPIO_SPI1_MOSI	( 35 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
+/* ADC (RP2350B: ADC0..7 on GPIO40..47) */
+#define GPIO_ADC_VBAT		46	/* VBAT_SENSE, 22.1k / 2.2k divider: BAT1_V_DIV 11.045 */
+#define GPIO_ADC_CURRENT	47	/* CURRENT_SENSE from the ESC connector */
 
-/* SPI1:
- *  SPIDEV_FLASH: Micro SD
- *  CS: GPIO29 -- configured in src/spi.cpp
- *  CLK: GPIO30
- *  MISO: GPIO28
- *  MOSI: GPIO31
- */
-
-#define GPIO_SPI0_SCLK  ( 30 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
-#define GPIO_SPI0_MISO ( 28 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
-#define GPIO_SPI0_MOSI ( 31 | GPIO_FUN(RP23XX_GPIO_FUNC_SPI) )
-
-
-//TODO: vbat and current sense
 
 #endif  /* __ARCH_BOARD_BOARD_H */

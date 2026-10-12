@@ -201,6 +201,7 @@
       - [mRo Control Zero F7](flight_controller/mro_control_zero_f7.md)
       - [NWBlue Pro H757](flight_controller/nwblue_pro-h757.md)
       - [Radiolink PIX6](flight_controller/radiolink_pix6.md)
+      - [Raspberry Pi RPI-UAVFC-R4](flight_controller/rpi_uavfc_r4.md)
       - [Sky-Drones AIRLink](flight_controller/airlink.md)
       - [SPRacing SPRacingH7EXTREME](flight_controller/spracingh7extreme.md)
       - [SVehicle E2](flight_controller/svehicle_e2.md)
