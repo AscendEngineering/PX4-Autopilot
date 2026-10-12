@@ -391,7 +391,7 @@ is the first image built without the eleven `cdcacm.c` patches. Logs are in
 | Step | Result |
 |---|---|
 | Host tests, both files | 9 passed (`test_platform.py` 2, `test_bootloader.py` 7, layout tests on fresh builds, no skips) |
-| Bootloader build, clean `build/` | OK, 170 UF2 blocks; `extras/` differs from the committed image in the git hash string only |
+| Bootloader build, clean `build/` | OK, 170 UF2 blocks. The image is 43 464 bytes, 88 bytes smaller than the committed `extras/` image built on 2026-10-09 from the tree with the `cdcacm.c` patches; `test_bootloader_image_layout` caught the difference and `extras/` is refreshed from this build |
 | Firmware build, clean `build/` | first link failed: `rp23xx_spi0register`, `rp23xx_spi1register` undefined. `CONFIG_MMCSD` defaults `CONFIG_SPI_CALLBACK=y`, which makes the rp23xx SPI driver expect NuttX board hooks PX4 never compiles. Fixed with `# CONFIG_SPI_CALLBACK is not set`; the SD driver does not use the callback. Phase 5 linked only because NuttX kept a stale `rp23xx_spi.o` from before the SD change |
 | Build hygiene | a defconfig change needs `git -C platforms/nuttx/NuttX/nuttx clean -dXfq` as well as `rm -rf build/<target>`: NuttX compiles inside the submodule and does not recompile on a `.config` change (the Makefile only wipes on a target switch) |
 | Firmware on the board | `ver all`: PX4 git-hash `6b3afca9e7`, OS git-hash `2b9d05baa9`, build 2026-10-12 11:48 |
