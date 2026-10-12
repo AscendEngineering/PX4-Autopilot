@@ -395,12 +395,14 @@ is the first image built without the eleven `cdcacm.c` patches. Logs are in
 | Firmware build, clean `build/` | first link failed: `rp23xx_spi0register`, `rp23xx_spi1register` undefined. `CONFIG_MMCSD` defaults `CONFIG_SPI_CALLBACK=y`, which makes the rp23xx SPI driver expect NuttX board hooks PX4 never compiles. Fixed with `# CONFIG_SPI_CALLBACK is not set`; the SD driver does not use the callback. Phase 5 linked only because NuttX kept a stale `rp23xx_spi.o` from before the SD change |
 | Build hygiene | a defconfig change needs `git -C platforms/nuttx/NuttX/nuttx clean -dXfq` as well as `rm -rf build/<target>`: NuttX compiles inside the submodule and does not recompile on a `.config` change (the Makefile only wipes on a target switch) |
 | Firmware on the board | `ver all`: PX4 git-hash `6b3afca9e7`, OS git-hash `2b9d05baa9`, build 2026-10-12 11:48 |
-| Bootloader reflash over SWD | not done: OpenOCD reports `Error connecting DP: cannot read IDR` at 5000 and 1000 kHz, probe on USB, SWD side silent. The resident bootloader (e3136291d8 build) stays; its NuttX tree had the same seven fixes plus `cdcacm.c` patches, so the bootloader path without them is still untested |
-| Upload round trips, 3 of 3 | MAVLink reboot ack 0; firmware gone in 0.76 to 0.93 s; bootloader up 0.32 to 0.34 s later; upload exit 0 in 17.1 to 17.3 s; heartbeat type 2 back; 22.9 to 23.7 s total |
+| Bootloader reflash over SWD | first attempts failed with `Error connecting DP: cannot read IDR` at 5000 down to 50 kHz, probe fine, every ack `JUNK`; the link came back after the cable at the board end was reseated. Then `reset halt`, `flash write_image erase` (43 520 bytes in 1.26 s), `verify_image` (43 464 bytes OK), `reset run`: `rb_fork_flash_bl.log` |
+| Cold reset with the phase 6 bootloader | `reset run` from OpenOCD: `PX4 BL RPI-UAVFC-R4` on USB at +0.27 s, gone at +5.20 s, `PX4 RPI-UAVFC-R4` at +6.50 s: `rb_fork_bl_reset_handoff.log` |
+| Upload round trips through the phase 6 bootloader, 3 of 3 | reboot ack 0; firmware gone in 0.78 to 0.90 s; bootloader up 0.32 to 0.35 s later; upload exit 0 in 16.7 to 16.9 s; heartbeat type 2 back; 22.6 to 23.2 s total: `rb_fork_bl_roundtrip_[123].log` |
+| Upload round trips through the resident phase 5 bootloader, 3 of 3 | MAVLink reboot ack 0; firmware gone in 0.76 to 0.93 s; bootloader up 0.32 to 0.34 s later; upload exit 0 in 17.1 to 17.3 s; heartbeat type 2 back; 22.9 to 23.7 s total |
 | Shell stress, 554 s | 162 commands over the MAVLink shell (`dmesg`, `uorb top -1`, `param show -c`, `ver all`, `free`, `top once`), 0 failures, 158 662 bytes; `free` answers afterwards. Fewer commands than phase 4b because each call opens a new MAVLink connection |
 
-Open: flash the phase 6 bootloader once SWD answers again (check the
-Debug Probe D-port cable), then repeat the three round trips.
+Both images on the board are now built from the fork tree without the
+`cdcacm.c` patches: bootloader and firmware.
 
 #### NuttX fork review, 2026-10-12
 
