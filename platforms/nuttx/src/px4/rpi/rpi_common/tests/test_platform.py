@@ -8,6 +8,7 @@ NuttX register headers are the real ones from the submodule and the GPIO API is
 stubbed. This does not simulate PWM waveforms or replace hardware validation.
 """
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -467,21 +468,35 @@ SOURCES = ("io_pins/io_timer.c", "io_pins/pwm_servo.c", "io_pins/rpi_pinset.c",
            "flash/rpi_flash.c", "flash/rpi_progmem.c")
 
 
+ROM_HEADER_TU = """
+#include <px4_arch/rpi_rom.h>
+bool present(void) { return rpi_rom_present(); }
+void *func(void) { return rpi_rom_func(0x5845u); }   /* 'E','X' */
+void *data(void) { return rpi_rom_data(0x4658u); }   /* 'X','F' */
+"""
+
+
+def chip_flags(chip, temp):
+    """Write the NuttX stubs for `chip` into `temp` and return the include and define flags."""
+    c = CHIPS[chip]
+    for name, text in stubs(chip).items():
+        path = temp / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    includes = [temp, PLATFORM.parent / chip / "include",
+                ROOT / "platforms/common/include",
+                ROOT / "platforms/nuttx/src/px4/common/include",
+                NUTTX_ARCH / c["nuttx_dir"]]
+    flags = [f"-I{p}" for p in includes]
+    flags += [f"-DTEST_CHIP_ID={c['chip_id']:#x}u", f"-DTEST_REV='{c['rev']}'"]
+    return flags
+
+
 class PlatformTest(unittest.TestCase):
     def run_chip(self, chip):
-        c = CHIPS[chip]
         with tempfile.TemporaryDirectory(prefix=f"{chip}-test-") as temp:
             temp = pathlib.Path(temp)
-            for name, text in stubs(chip).items():
-                path = temp / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(text)
-            includes = [temp, PLATFORM.parent / chip / "include",
-                        ROOT / "platforms/common/include",
-                        ROOT / "platforms/nuttx/src/px4/common/include",
-                        NUTTX_ARCH / c["nuttx_dir"]]
-            flags = [f"-I{p}" for p in includes]
-            flags += [f"-DTEST_CHIP_ID={c['chip_id']:#x}u", f"-DTEST_REV='{c['rev']}'"]
+            flags = chip_flags(chip, temp)
             objects = []
             for source in SOURCES:
                 obj = temp / (pathlib.Path(source).stem + ".o")
@@ -495,11 +510,41 @@ class PlatformTest(unittest.TestCase):
             subprocess.run(["c++", "-std=c++14", "-Wall", *flags, str(test), *objects, "-o", str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
 
+    def compile_rom_header(self, chip):
+        """The ROM wrapper's ARM-only inline readers must build with -Werror=array-bounds on GCC 12 and later.
+
+        GCC 12 treats a constant address inside the first page (the boot ROM magic at 0x10 and the
+        table pointers after it) as a zero-size object and rejects the read; PX4 builds with -Werror.
+        """
+        version = next((v for v in ("14", "13", "12") if shutil.which(f"gcc-{v}")), None)
+        if version is None:
+            self.skipTest("no GCC 12 or newer on the host")
+        # The C++ rule (no implicit void * conversion) does not depend on the version; use the matching g++ if present.
+        cxx = f"g++-{version}" if shutil.which(f"g++-{version}") else "c++"
+        with tempfile.TemporaryDirectory(prefix=f"{chip}-rom-") as temp:
+            temp = pathlib.Path(temp)
+            flags = chip_flags(chip, temp)
+            # The header is included from C (-Wbad-function-cast) and from C++ (no implicit void * conversion).
+            for compiler, suffix, std in ((f"gcc-{version}", "c", "-std=gnu11"), (cxx, "cpp", "-std=c++14")):
+                source = temp / f"rom.{suffix}"
+                source.write_text(ROM_HEADER_TU)
+                result = subprocess.run([compiler, std, "-O2", "-Wall", "-Werror=array-bounds", "-Wbad-function-cast",
+                                         "-D__ARM_ARCH=8", "-Wno-int-to-pointer-cast", *flags,
+                                         "-c", str(source), "-o", str(temp / f"rom-{suffix}.o")],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, f"{compiler} rejects rpi_rom.h for {chip}:\n{result.stderr}")
+
     def test_rp2040(self):
         self.run_chip("rp2040")
 
     def test_rp2350(self):
         self.run_chip("rp2350")
+
+    def test_rom_header_builds_with_array_bounds_rp2040(self):
+        self.compile_rom_header("rp2040")
+
+    def test_rom_header_builds_with_array_bounds_rp2350(self):
+        self.compile_rom_header("rp2350")
 
 
 if __name__ == "__main__":

@@ -71,9 +71,19 @@ typedef void *(*rpi_rom_table_lookup_fn)(uint16_t *table, uint32_t code);
 typedef void (*rpi_rom_reset_usb_boot_fn)(uint32_t gpio_activity_pin_mask, uint32_t disable_interface_mask);
 
 #if defined(__ARM_ARCH)
+/* GCC 12 and later treat a constant address inside the first page as a
+ * zero-size object and reject a read from it with -Warray-bounds. The boot
+ * ROM really does live there, so pass the address through a register where
+ * the compiler cannot see the constant. No code is generated. */
+static inline const volatile void *rpi_rom_ptr(uintptr_t addr)
+{
+	__asm__ volatile("" : "+r"(addr));
+	return (const volatile void *)addr;
+}
+
 static inline bool rpi_rom_present(void)
 {
-	const volatile uint8_t *m = (const volatile uint8_t *)RPI_ROM_MAGIC_ADDR;
+	const volatile uint8_t *m = (const volatile uint8_t *)rpi_rom_ptr(RPI_ROM_MAGIC_ADDR);
 	return m[0] == 'M' && m[1] == 'u' && m[2] == RPI_ROM_MAGIC_VERSION;
 }
 
@@ -83,8 +93,10 @@ static inline void *rpi_rom_lookup(uint32_t table_ptr, uint32_t code)
 		return NULL;
 	}
 
-	rpi_rom_table_lookup_fn lookup = (rpi_rom_table_lookup_fn)(uintptr_t) * (const volatile uint16_t *)RPI_ROM_TABLE_LOOKUP_PTR;
-	uint16_t *table = (uint16_t *)(uintptr_t) * (const volatile uint16_t *)table_ptr;
+	const volatile uint16_t *lookup_ptr = (const volatile uint16_t *)rpi_rom_ptr(RPI_ROM_TABLE_LOOKUP_PTR);
+	rpi_rom_table_lookup_fn lookup = (rpi_rom_table_lookup_fn)(uintptr_t) * lookup_ptr;
+	const volatile uint16_t *table_loc = (const volatile uint16_t *)rpi_rom_ptr(table_ptr);
+	uint16_t *table = (uint16_t *)(uintptr_t) * table_loc;
 	return lookup(table, code);
 }
 
