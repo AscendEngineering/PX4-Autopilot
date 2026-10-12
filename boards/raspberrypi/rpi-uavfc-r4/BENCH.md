@@ -380,3 +380,23 @@ The four reviewer comments of 2026-10-09, checked against HEAD:
 11. 9 V rail stays off at boot (meter on the VTX connector); `gpio` write to GPIO18 turns it on.
 12. Commander preflight passes with sensors present; arm on the bench with propellers off, USB unplugged: `listener system_power` must show `usb_connected: False` on battery.
 13. SD card: insert a FAT32 card and reboot. `ls /fs/microsd` lists files, `df` shows `/fs/microsd`, `logger status` writes a log, and the boot log has no `format failed`. Without a card the boot log reads `formatting /dev/mmcsd0` then `format failed`, and the arming check warns `Missing FMU SD Card`. Also confirm the slot is wired to SPI1 as in `board.h` (SCK 30, MISO 28, MOSI 31, CS 29) if a known-good card still fails.
+
+#### NuttX fork review, 2026-10-12
+
+Fork: `AscendEngineering/NuttX` branch `pr-nuttx_rp23xx`, commit
+`2b9d05baa9`, one squashed commit on the PX4 pin `6e8169b9e1`. Its tree is
+identical to the local submodule branch `rp2350-backports` the bench ran
+from. None of the fixes is in `px4_firmware_nuttx-12.12.0+` as of
+`ede7b156ae` (the five commits after the pin touch imxrt and imx9 only).
+Each marker below was counted in the fork tree with `git show`.
+
+| Patch | Upstream | Without it | Evidence | In fork |
+|---|---|---|---|---|
+| 0001 `exception_direct` r0 clobber | apache/nuttx | panic on the first interrupt | phase 2 | yes |
+| 0002 keep `PULLUP_EN` | apache/nuttx | the device never attaches on USB | phase 2 | yes |
+| 0003 to 0005 rp23xx bulk endpoint fixes, `ARCH_USBDEV_STALLQUEUE` | d89019aa78, cfeca506f8, a85b28bc2c | the INSYNC after GET_CRC is lost | phase 3 | yes |
+| 0017, 0018 NVIC priorities | ed5a661da8, 614cdcd93f | console TX stops within 20 s | `t1_stress_after_1.log`, `t1_stress_after_2.log`: 772 and 771 commands in 540 s, no stall | yes |
+| 0006 to 0016 `cdcacm.c` | eleven commits | nothing observed: with these alone the stall stayed | `t1_stress_after_cdcacm_only_STALL.log`: stall after 20 s, command 22 | dropped |
+
+Decision: the fork needs no further patch. The eleven `cdcacm.c` patches
+are not applied and are removed from the tree.
