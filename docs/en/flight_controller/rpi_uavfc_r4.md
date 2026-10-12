@@ -39,7 +39,7 @@ Availability: to be announced by Raspberry Pi.
 | Analogue VTX            | GPIO16/17, 9 V rail on GPIO18                                             | not yet supported                                       |
 | ESC (8 way)             | M1 to M4 on GPIO9, 8, 7, 6; current sense ADC7; ESC telemetry GPIO5       | PWM outputs 1 to 4 (DShot not yet supported)            |
 | USB-C                   | CDC ACM, MAVLink                                                          | `/dev/ttyACM0`                                          |
-| Micro SD                | SPI1, CS GPIO29                                                           | not yet supported                                       |
+| Micro SD                | SPI1, CS GPIO29                                                           | `/fs/microsd` (logs)                                    |
 | Spare IO                | GPIO12 to 14, ADC0 on GPIO40                                              | GPIO                                                    |
 | SWD                     | SWCLK, SWDIO                                                              | debug                                                   |
 
@@ -69,7 +69,7 @@ After that the firmware is uploaded through the PX4 bootloader by `make ... uplo
 - The USB port carries MAVLink. For a shell use QGroundControl's MAVLink Console or `Tools/mavlink_shell.py`; there is no NSH console on USB or on a UART.
 - The USB identity 3185:0040 is provisional.
 - `CBRK_SUPPLY_CHK` and `CBRK_IO_SAFETY` are set by default for bench use; review them before flight.
-- Missions are kept in RAM (`SYS_DM_BACKEND` 1) until the SD card is supported.
+- Missions are kept in RAM (`SYS_DM_BACKEND` 1), as on other FPV boards; the SD card holds logs.
 - A reboot to the bootloader (`reboot -b`, or the QGC flasher) keeps the bootloader resident until an upload or a power cycle. `reboot -i` lands on the ROM's BOOTSEL drive.
 
 ## Pinout

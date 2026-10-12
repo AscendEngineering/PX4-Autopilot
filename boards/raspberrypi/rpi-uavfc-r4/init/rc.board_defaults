@@ -4,7 +4,7 @@
 # an airframe and starts the flight stack. Battery divider from the
 # schematic: 22.1 k over 2.2 k. The current scale depends on the ESC.
 # Both circuit breakers are set for bench use; review them before flight.
-# No SD card yet: dataman keeps missions in RAM.
+# Missions stay in RAM, as on other FPV boards; the SD card holds logs.
 #
 #------------------------------------------------------------------------------
 

@@ -35,7 +35,8 @@
  * @file init.c
  *
  * RPI-UAVFC-R4 board initialisation: the schematic's pin map (UARTs, I2C,
- * SPI, ADC pads, regulator enables), LEDs and flash-based parameters.
+ * SPI, ADC pads, regulator enables), LEDs, the micro SD slot and
+ * flash-based parameters.
  */
 
 #include "board_config.h"
@@ -48,6 +49,8 @@
 
 #include <nuttx/config.h>
 #include <nuttx/board.h>
+#include <nuttx/spi/spi.h>
+#include <nuttx/mmcsd.h>
 #include <arch/board/board.h>
 #include <rp23xx_gpio.h>
 #include <hardware/rp23xx_pads_bank0.h>
@@ -131,8 +134,11 @@ void rp23xx_boardinitialize(void)
 	rp23xx_gpio_set_pulls(GPIO_I2C1_SDA, true, false);
 	rp23xx_gpio_set_pulls(GPIO_I2C1_SCL, true, false);
 
-	/* SPI0 (IMU) and SPI1 (SD) pins */
+	/* SPI0 (IMU) and SPI1 (SD) pins. The SD card leaves its data-out line
+	 * floating until it is selected, so SPI1 MISO gets a pull-up, as the
+	 * NuttX rp23xx SPI SD bring-up (rp23xx_spisd.c) does. */
 	rpi_spiinitialize();
+	rp23xx_gpio_set_pulls(GPIO_SPI1_MISO & GPIO_NUM_MASK, true, false);
 
 	/* ADC pads for VBAT and current: analogue, so no digital input, no
 	 * output, no pulls, and the reset isolation latch released. The PX4 ADC
@@ -161,6 +167,24 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 
 	drv_led_start();
 	led_on(LED_BLUE);
+
+	/* Micro SD on SPI1 (PX4 bus 2), chip select GPIO29 (src/spi.cpp). The
+	 * MMC/SD SPI driver registers /dev/mmcsd0 with or without a card, and
+	 * rcS mounts it on /fs/microsd when a card answers. The same steps as
+	 * the NuttX rp23xx board_spisd_initialize(), without its /mnt/sd0 mount,
+	 * which would hold the block device against the rcS mount. */
+	struct spi_dev_s *spi_sd = px4_spibus_initialize(2);
+
+	if (spi_sd == NULL) {
+		syslog(LOG_ERR, "[boot] FAILED to initialize SPI1 for the SD card\n");
+
+	} else {
+		int ret = mmcsd_spislotinitialize(0, 0, spi_sd);
+
+		if (ret != OK) {
+			syslog(LOG_ERR, "[boot] FAILED to bind SPI1 to the MMC/SD driver: %d\n", ret);
+		}
+	}
 
 #if defined(FLASH_BASED_PARAMS)
 	/* Two 32 KB pages at the top of flash; numbers are 4 kB sector indices
