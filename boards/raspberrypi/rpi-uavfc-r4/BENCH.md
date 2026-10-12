@@ -302,10 +302,73 @@ What it took:
 9. Bench logs, SWD dumps and the helper scripts for this phase are kept in
    `probe/phase4b-evidence/` on the development machine (git-ignored).
 
-#### Real board checklist (not run: no RPI-UAVFC-R4 on the bench)
+### Phase 5, 2026-10-11: bootloader on the RPI-UAVFC-R4
 
-1. BOOTSEL install of `extras/raspberrypi_rpi-uavfc-r4_bootloader.uf2`; blue LED (GPIO0) pattern per `bl.c`; `lsusb` shows 3185:0040.
-2. `make raspberrypi_rpi-uavfc-r4_default upload`; MAVLink heartbeat on USB; green LED on after boot.
+First run on the flight controller. Debug probe: Raspberry Pi Debug Probe
+over SWD with the Raspberry Pi OpenOCD fork (0.12.0+dev); no UART wired.
+The board came with Betaflight; its full 4 MB flash was dumped first
+(`probe/real-board/betaflight_flash_backup_20261011.bin`, git-ignored).
+The chip was erased in full, the bootloader ELF from commit e3136291d8 was
+written and verified over SWD, and the firmware is the HEAD build
+(6a14a12c0f, 1228336 B).
+
+| item | measured |
+|------|----------|
+| chip, package, flash | RP2350 rev 3 (CHIP_ID 0x30004927); RP2350B (PADS_BANK0 for GPIO46/47 present); W25Q32JV, JEDEC 0x1640ef, 4 MB, 1024 sectors |
+| bootloader install over SWD | `flash write_image` of the ELF, `verify_image` 43552 bytes OK |
+| enumeration | 3185:0040 `PX4 BL RPI-UAVFC-R4` 6 s after `reset run`; resident with a blank application for more than 10 s, no timeout |
+| identify | protocol v5, board 7300 rev 0, flash 3997696, `PX4BLv1.18.0ge3136291d8`, chip `RP2350 rev 3` |
+| first upload, blank application | 16.2 s from open to reboot ack; firmware enumerates as 3185:0040 `PX4 RPI-UAVFC-R4` |
+| firmware over MAVLink | heartbeat 0.01 s after open, type 2; `SYS_AUTOSTART` 4001, `MAV_TYPE` 2; `ver all` hash 6a14a12c0f, NuttX 7fe3b06b9b, `MCU: RP2350, rev. 3` |
+| reboot-to-bootloader round trip (param1 = 3) | ack 0; firmware gone 0.85 s; bootloader up 0.32 s after that; upload 18.2 s; firmware heartbeat back, total 23.2 s |
+| reset hand-off (OpenOCD `reset run` as the power-cycle proxy) | firmware gone 0.18 s; bootloader up 0.32 s; resident 4.53 s (host view); firmware up 1.09 s after the bootloader dropped; heartbeat type 2 |
+| `free` | 226 KB of 491 KB free |
+| LEDs | not checked: nobody at the bench to look; user item |
+| `icm45686 status`, `dps310 status` | `Not running` on both: sensor bring-up is the next item (checklist 3 to 5) |
+| second firmware build, 20:17 (SD card driver, uncommitted) | upload 17.9 s, heartbeat back 22.7 s after the reboot command; boot log: `/dev/mmcsd0` registered, rcS `mount` then `mkfatfs` on it failed, so nothing in the slot answered; `dps310 #0 on I2C bus 1 address 0x76` started this boot; `icm45686: no instance started (no device on bus?)` |
+
+What it took:
+
+1. The first OpenOCD flash probe (also triggered by the first gdb attach of
+   a session) runs ROM code on the target. With Betaflight resident the core
+   came back in HardFault at its vector 3 after resume; `reset run` recovered
+   it. Start flash work from `reset halt`.
+2. Betaflight's own USB CDC (2e8a:0009) and the debug probe's UART CDC both
+   show up as `ttyACM*`; use `/dev/serial/by-id/` names.
+
+#### PR #3 review follow-up (2026-10-11)
+
+The four reviewer comments of 2026-10-09, checked against HEAD:
+
+1. `.vscode/tasks.json` ("just a vscode artifact?"): the branch's change was
+   removed in 9f6d07c05c; the file now matches the base branch.
+2. `probe/flash.c` and `probe/openocd.cfg` ("two flash.c files; artifacts
+   don't belong here"): the whole `probe/` directory left the tree in
+   9f6d07c05c and is git-ignored. It stays on the bench machine.
+3. Bootloader `rpi_common/flash.c` ("move this to
+   boards/raspberrypi/rpi-uavfc-r4/src"): the ROM flash and XIP code the
+   comment points at left the bootloader in 315bc56257 for the shared
+   platform library `platforms/nuttx/src/px4/rpi/rpi_common/flash/`, with
+   the chip facts in `<chip>/include/px4_arch/rpi_rom.h`. The firmware's
+   parameter store runs the same code, and a second RP2350 board would need
+   it too, so the board directory was not the destination. What remains in
+   the bootloader `flash.c` is the common bootloader's sector policy, fed
+   from the board's `hw_config.h`, as on the STM32 ports. Whether that
+   answers the comment is the reviewer's call.
+4. Link to NuttX `rp23xx_spisd.c` `board_spisd_initialize()`: the branch had
+   dropped the base's commented-out `stm32_sdio_initialize()` stub without
+   an SD card path. Added: `CONFIG_MMCSD` in the nsh defconfig and
+   `mmcsd_spislotinitialize()` on SPI1 in `init.c`, with the MISO pull-up
+   the NuttX function applies but without its `/mnt/sd0` mount, since rcS
+   mounts `/fs/microsd` itself and the NuttX board sources are not part of a
+   PX4 build (`nuttx-config/src/Make.defs` lists nothing). First boot:
+   `/dev/mmcsd0` present, rcS mount and format failed, so no card answered.
+   Checklist item 13.
+
+#### Real board checklist (items 1 and 2 done 2026-10-11, phase 5; the rest open)
+
+1. Done (over SWD instead of BOOTSEL): `lsusb` shows 3185:0040. Blue LED (GPIO0) pattern per `bl.c` not yet looked at.
+2. Done: upload through the bootloader, MAVLink heartbeat on USB. Green LED after boot not yet looked at.
 3. `icm45686 status`: if the driver reports a WHO_AM_I mismatch, read the register by hand (`icm45686 -s -b 1 start` with debug, or a short `spi` probe) and record the value. The ICM-56686 may need its own WHO_AM_I constant in `src/drivers/imu/invensense/icm45686/InvenSense_ICM45686_registers.hpp` (0xE9 is the ICM-45686) or its own driver if the register map differs. Decision point for the user.
 4. `dps310 status`: DPS368 detected at 0x76 on bus 1 (product id 0x11).
 5. `sensors status`, `listener sensor_accel`, `listener sensor_baro`: rates and sane values.
@@ -316,3 +379,4 @@ What it took:
 10. `i2cdetect -b 2` with a device on the external connector.
 11. 9 V rail stays off at boot (meter on the VTX connector); `gpio` write to GPIO18 turns it on.
 12. Commander preflight passes with sensors present; arm on the bench with propellers off, USB unplugged: `listener system_power` must show `usb_connected: False` on battery.
+13. SD card: insert a FAT32 card and reboot. `ls /fs/microsd` lists files, `df` shows `/fs/microsd`, `logger status` writes a log, and the boot log has no `format failed`. Without a card the boot log reads `formatting /dev/mmcsd0` then `format failed`, and the arming check warns `Missing FMU SD Card`. Also confirm the slot is wired to SPI1 as in `board.h` (SCK 30, MISO 28, MOSI 31, CS 29) if a known-good card still fails.
