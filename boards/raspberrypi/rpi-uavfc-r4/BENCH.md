@@ -381,6 +381,27 @@ The four reviewer comments of 2026-10-09, checked against HEAD:
 12. Commander preflight passes with sensors present; arm on the bench with propellers off, USB unplugged: `listener system_power` must show `usb_connected: False` on battery.
 13. SD card: insert a FAT32 card and reboot. `ls /fs/microsd` lists files, `df` shows `/fs/microsd`, `logger status` writes a log, and the boot log has no `format failed`. Without a card the boot log reads `formatting /dev/mmcsd0` then `format failed`, and the arming check warns `Missing FMU SD Card`. Also confirm the slot is wired to SPI1 as in `board.h` (SCK 30, MISO 28, MOSI 31, CS 29) if a known-good card still fails.
 
+### Phase 6, 2026-10-12: fork submodule regression
+
+The submodule points at the Ascend fork commit `2b9d05baa9` (seven rp23xx
+fixes, no `cdcacm.c` patches); the `nuttx-patches` directory is gone. This
+is the first image built without the eleven `cdcacm.c` patches. Logs are in
+`probe/real-board/rb_fork_*.log` (git-ignored).
+
+| Step | Result |
+|---|---|
+| Host tests, both files | 9 passed (`test_platform.py` 2, `test_bootloader.py` 7, layout tests on fresh builds, no skips) |
+| Bootloader build, clean `build/` | OK, 170 UF2 blocks; `extras/` differs from the committed image in the git hash string only |
+| Firmware build, clean `build/` | first link failed: `rp23xx_spi0register`, `rp23xx_spi1register` undefined. `CONFIG_MMCSD` defaults `CONFIG_SPI_CALLBACK=y`, which makes the rp23xx SPI driver expect NuttX board hooks PX4 never compiles. Fixed with `# CONFIG_SPI_CALLBACK is not set`; the SD driver does not use the callback. Phase 5 linked only because NuttX kept a stale `rp23xx_spi.o` from before the SD change |
+| Build hygiene | a defconfig change needs `git -C platforms/nuttx/NuttX/nuttx clean -dXfq` as well as `rm -rf build/<target>`: NuttX compiles inside the submodule and does not recompile on a `.config` change (the Makefile only wipes on a target switch) |
+| Firmware on the board | `ver all`: PX4 git-hash `6b3afca9e7`, OS git-hash `2b9d05baa9`, build 2026-10-12 11:48 |
+| Bootloader reflash over SWD | not done: OpenOCD reports `Error connecting DP: cannot read IDR` at 5000 and 1000 kHz, probe on USB, SWD side silent. The resident bootloader (e3136291d8 build) stays; its NuttX tree had the same seven fixes plus `cdcacm.c` patches, so the bootloader path without them is still untested |
+| Upload round trips, 3 of 3 | MAVLink reboot ack 0; firmware gone in 0.76 to 0.93 s; bootloader up 0.32 to 0.34 s later; upload exit 0 in 17.1 to 17.3 s; heartbeat type 2 back; 22.9 to 23.7 s total |
+| Shell stress, 554 s | 162 commands over the MAVLink shell (`dmesg`, `uorb top -1`, `param show -c`, `ver all`, `free`, `top once`), 0 failures, 158 662 bytes; `free` answers afterwards. Fewer commands than phase 4b because each call opens a new MAVLink connection |
+
+Open: flash the phase 6 bootloader once SWD answers again (check the
+Debug Probe D-port cable), then repeat the three round trips.
+
 #### NuttX fork review, 2026-10-12
 
 Fork: `AscendEngineering/NuttX` branch `pr-nuttx_rp23xx`, commit
@@ -396,7 +417,8 @@ Each marker below was counted in the fork tree with `git show`.
 | 0002 keep `PULLUP_EN` | apache/nuttx | the device never attaches on USB | phase 2 | yes |
 | 0003 to 0005 rp23xx bulk endpoint fixes, `ARCH_USBDEV_STALLQUEUE` | d89019aa78, cfeca506f8, a85b28bc2c | the INSYNC after GET_CRC is lost | phase 3 | yes |
 | 0017, 0018 NVIC priorities | ed5a661da8, 614cdcd93f | console TX stops within 20 s | `t1_stress_after_1.log`, `t1_stress_after_2.log`: 772 and 771 commands in 540 s, no stall | yes |
-| 0006 to 0016 `cdcacm.c` | eleven commits | nothing observed: with these alone the stall stayed | `t1_stress_after_cdcacm_only_STALL.log`: stall after 20 s, command 22 | dropped |
+| 0006 to 0016 `cdcacm.c` | eleven commits | nothing observed: with these alone the stall stayed; the phase 4b and 5 images had them together with 0017/0018 (OS git-hash `7fe3b06b9b`), so phase 6 is the first run without them | `t1_stress_after_cdcacm_only_STALL.log`: stall after 20 s, command 22 | dropped |
 
 Decision: the fork needs no further patch. The eleven `cdcacm.c` patches
-are not applied and are removed from the tree.
+are not applied and are removed from the tree. Phase 6 below is the
+regression that shows the tree without them holds up.
