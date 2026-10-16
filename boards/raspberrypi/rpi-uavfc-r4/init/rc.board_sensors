@@ -8,6 +8,6 @@
 
 board_adc start
 
-icm45686 -s -b 1 -R 0 start
+icm56686 -s -b 1 -R 0 start
 
 dps310 -8 -I -b 1 -a 0x76 start

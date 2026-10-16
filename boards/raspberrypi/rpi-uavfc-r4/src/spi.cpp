@@ -37,9 +37,8 @@
 
 constexpr px4_spi_bus_t px4_spi_buses[SPI_BUS_MAX_BUS_ITEMS] = {
 	initSPIBus(SPI::Bus::SPI0, {
-		/* ICM-56686, CS GPIO33, INT1 on GPIO26. Driven by the icm45686 driver
-		 * until the bench confirms the WHO_AM_I (hand-off item). */
-		initSPIDevice(DRV_IMU_DEVTYPE_ICM45686, SPI::CS{GPIO::Pin33}, SPI::DRDY{GPIO::Pin26}),
+		/* ICM-56686, CS GPIO33, INT1 on GPIO26 */
+		initSPIDevice(DRV_IMU_DEVTYPE_ICM56686, SPI::CS{GPIO::Pin33}, SPI::DRDY{GPIO::Pin26}),
 	}),
 	initSPIBus(SPI::Bus::SPI1, {
 		initSPIDevice(SPIDEV_MMCSD(0), SPI::CS{GPIO::Pin29}),
