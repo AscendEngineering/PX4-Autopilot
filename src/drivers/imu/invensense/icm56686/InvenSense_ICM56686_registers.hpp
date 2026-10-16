@@ -103,6 +103,7 @@ enum class BANK_0 : uint8_t {
 	INT_APEX_CONFIG1 = 0x3E,
 	INT_APEX_STATUS0 = 0x3F,
 	INT_APEX_STATUS1 = 0x40,
+	PWR_MGMT_AUX1 = 0x58,
 	INT2_CONFIG0 = 0x5A,
 	INT2_CONFIG1 = 0x60,
 	INT2_CONFIG2 = 0x61,
@@ -130,6 +131,9 @@ enum PWR_MGMT0_BIT : uint8_t {
 	ACCEL_MODE_LOW_NOISE = Bit1 | Bit0, // 11: Places accelerometer in Low Noise (LN) Mode
 };
 
+enum PWR_MGMT_AUX1_BIT : uint8_t {
+	AUX1_DISABLE  = Bit1 | Bit0, // 3: Turn Off AUX1
+};
 enum INT1_STATUS0 : uint8_t {
 	INT1_STATUS_RESET_DONE = Bit7,
 	INT1_STATUS_AUX1_AGC = Bit6,

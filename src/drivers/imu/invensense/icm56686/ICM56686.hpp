@@ -167,13 +167,14 @@ private:
 	uint16_t _fifo_empty_interval_us{1250}; // default 1250 us / 800 Hz transfer interval
 	int32_t _fifo_gyro_samples{static_cast<int32_t>(_fifo_empty_interval_us / (1000000 / GYRO_RATE))};
 
-	static constexpr uint8_t size_register_bank0_cfg{13};
+	static constexpr uint8_t size_register_bank0_cfg{14};
 	register_bank0_config_t _register_bank0_cfg[size_register_bank0_cfg] {
 		// route only the FIFO threshold (watermark) interrupt to INT1
 		{ Register::BANK_0::INT1_CONFIG0, INT1_CONFIG0_BIT::INT1_STATUS_EN_FIFO_THS, (uint8_t)~INT1_CONFIG0_BIT::INT1_STATUS_EN_FIFO_THS },
 		// INT1: push-pull, pulsed, active low
 		{ Register::BANK_0::INT1_CONFIG2, 0, INT1_CONFIG2_BIT::INT1_DRIVE | INT1_CONFIG2_BIT::INT1_MODE | INT1_CONFIG2_BIT::INT1_POLARITY },
 		{ Register::BANK_0::PWR_MGMT0, PWR_MGMT0_BIT::GYRO_MODE_LOW_NOISE | PWR_MGMT0_BIT::ACCEL_MODE_LOW_NOISE, 0 },
+		{ Register::BANK_0::PWR_MGMT_AUX1, 0, PWR_MGMT_AUX1_BIT::AUX1_DISABLE},
 
 		{ Register::BANK_0::GYRO_CONFIG0, GYRO_CONFIG0_BIT::GYRO_UI_FS_SEL_4000_DPS_SET | GYRO_CONFIG0_BIT::GYRO_ODR_6400_HZ_SET, GYRO_CONFIG0_BIT::GYRO_UI_FS_SEL_4000_DPS_CLEAR | GYRO_CONFIG0_BIT::GYRO_ODR_6400_HZ_CLEAR },
 		{ Register::BANK_0::ACCEL_CONFIG0, ACCEL_CONFIG0_BIT::ACCEL_UI_FS_SEL_32_G_SET | ACCEL_CONFIG0_BIT::ACCEL_ODR_6400_HZ_SET, ACCEL_CONFIG0_BIT::ACCEL_UI_FS_SEL_32_G_CLEAR | ACCEL_CONFIG0_BIT::ACCEL_ODR_6400_HZ_CLEAR },
@@ -181,7 +182,6 @@ private:
 		{ Register::BANK_0::FIFO_CONFIG0, FIFO_CONFIG0_BIT::FIFO_MODE_STOP_ON_FULL_SET | FIFO_CONFIG0_BIT::FIFO_DEPTH_8K_SET, FIFO_CONFIG0_BIT::FIFO_MODE_STOP_ON_FULL_CLEAR | FIFO_CONFIG0_BIT::FIFO_DEPTH_8K_CLEAR },
 		{ Register::BANK_0::FIFO_CONFIG1_0, 0, 0}, // FIFO_WM[7:0] set at runtime
 		{ Register::BANK_0::FIFO_CONFIG1_1, 0, 0}, // FIFO_WM[15:8] set at runtime
-		// TODO: figure out watermark 
 		// assert the watermark interrupt on count >= threshold, otherwise it is missed whenever
 		// the FIFO overshoots the threshold between reads
 		{ Register::BANK_0::FIFO_CONFIG2, FIFO_CONFIG2_BIT::FIFO_WR_WM_EQ_OR_GT_TH, 0 },

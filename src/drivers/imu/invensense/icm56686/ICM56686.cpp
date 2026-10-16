@@ -35,6 +35,9 @@
 
 using namespace time_literals;
 
+// Diagnostics
+// Removed diagnostics
+
 static constexpr int16_t combine(uint8_t msb, uint8_t lsb)
 {
 	return (msb << 8u) | lsb;
@@ -152,8 +155,11 @@ void ICM56686::RunImpl()
 		if ((RegisterRead(Register::BANK_0::WHO_AM_I) == WHOAMI)
 		    && ((RegisterRead(Register::BANK_0::REG_MISC2) & Bit1) == 0x0)) {
 
+			RegisterWrite(Register::BANK_0::PWR_MGMT_AUX1, PWR_MGMT_AUX1_BIT::AUX1_DISABLE);
+
 			// Wakeup accel and gyro and schedule remaining configuration
 			RegisterWrite(Register::BANK_0::PWR_MGMT0, PWR_MGMT0_BIT::GYRO_MODE_LOW_NOISE | PWR_MGMT0_BIT::ACCEL_MODE_LOW_NOISE);
+
 			_state = STATE::CONFIGURE;
 			ScheduleDelayed(70_ms); // 35 ms gyro startup time, 10 ms accel from sleep to valid data
 
@@ -333,6 +339,7 @@ bool ICM56686::Configure()
 	// the LSByte, or FIFO_THS never fires and INT1 never pulses.
 	RegisterWrite(Register::BANK_0::FIFO_CONFIG1_1, (uint8_t)((_fifo_gyro_samples >> 8) & 0xFF));
 
+
 	// now check that all are configured
 	bool success = true;
 
@@ -435,6 +442,7 @@ int ICM56686::DataReadyInterruptCallback(int irq, void *context, void *arg)
 
 void ICM56686::DataReady()
 {
+	g_drdy_count++;
 	_drdy_timestamp_sample.store(hrt_absolute_time());
 	ScheduleNow();
 }
@@ -444,6 +452,9 @@ bool ICM56686::DataReadyInterruptConfigure()
 	if (_drdy_gpio == 0) {
 		return false;
 	}
+
+	// Enable internal pull-up to prevent the pin from floating low (open-drain)
+	px4_arch_configgpio(_drdy_gpio | GPIO_PU_MASK);
 
 	// Setup data ready on falling edge (INT1 is configured pulsed, active low)
 	return px4_arch_gpiosetevent(_drdy_gpio, false, true, true, &DataReadyInterruptCallback, this) == 0;
@@ -493,6 +504,12 @@ bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 		// samples with the current timestamp, so reset for a clean restart instead. Also covers
 		// the FIFO being saturated, where stop-on-full has already dropped newer samples.
 		perf_count(_fifo_overflow_perf);
+
+		const bool interrupt_triggered = (_drdy_timestamp_sample.load() != 0);
+		PX4_ERR("FIFO Overflow: packets=%u, limit=%d, interval=%u us, trigger=%s",
+			fifo_packets, static_cast<int>(FIFO_MAX_SAMPLES), _fifo_empty_interval_us,
+			interrupt_triggered ? "INT" : "WATCHDOG");
+
 		FIFOReset();
 		return false;
 	}
@@ -578,9 +595,7 @@ void ICM56686::FIFOReset()
 			  FIFO_CONFIG3_BIT::FIFO_ACCEL_EN |
 			  FIFO_CONFIG3_BIT::FIFO_IF_EN);
 
-	// FIFO_FLUSH is auto-cleared
-	RegisterSetBits(Register::BANK_0::FIFO_CONFIG2,
-			  FIFO_CONFIG2_BIT::FIFO_FLUSH);
+
 	// Disable FIFO by switching to bypass mode
 	RegisterSetAndClearBits(Register::BANK_0::FIFO_CONFIG0,
 				FIFO_CONFIG0_BIT::FIFO_MODE_BYPASS_SET,
@@ -598,6 +613,12 @@ void ICM56686::FIFOReset()
 			FIFO_CONFIG3_BIT::FIFO_GYRO_EN |
 			FIFO_CONFIG3_BIT::FIFO_ACCEL_EN |
 			FIFO_CONFIG3_BIT::FIFO_IF_EN);
+	
+	// FIFO_FLUSH is auto-cleared, but explicitly clearing it as seen in ArduPilot
+	RegisterSetBits(Register::BANK_0::FIFO_CONFIG2,
+			  FIFO_CONFIG2_BIT::FIFO_FLUSH);
+	RegisterClearBits(Register::BANK_0::FIFO_CONFIG2,
+			  FIFO_CONFIG2_BIT::FIFO_FLUSH);
 }
 
 void ICM56686::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DATA fifo[], const uint8_t samples)
