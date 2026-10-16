@@ -11,3 +11,6 @@ board_adc start
 icm45686 -s -b 1 -R 0 start
 
 dps310 -8 -I -b 1 -a 0x76 start
+
+# QMC5883L compass on the GPS connector (I2C1, bus 2, address 0x0D)
+qmc5883l -X start
