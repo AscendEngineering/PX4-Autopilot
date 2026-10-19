@@ -59,15 +59,9 @@ ICM56686::ICM56686(const I2CSPIDriverConfig &config) :
 		_drdy_missed_perf = perf_alloc(PC_COUNT, MODULE_NAME": DRDY missed");
 	}
 
-	if (config.custom1 != 0) {
-		_enable_clock_input = true;
-		_input_clock_freq = config.custom1;
-		// TODO: this is not tested
-		ConfigureCLKIN();
-
-	} else {
-		_enable_clock_input = false;
-	}
+	// Force internal oscillator use. External clock config (custom1) is ignored
+	// because the rpi-uavfc board does not currently generate a clock on GPIO 27.
+	_enable_clock_input = false;
 
 	ConfigureSampleRate(_px4_gyro.get_max_rate_hz());
 }
@@ -114,6 +108,12 @@ void ICM56686::print_status()
 
 	PX4_INFO("FIFO empty interval: %d us (%.1f Hz)", _fifo_empty_interval_us, 1e6 / _fifo_empty_interval_us);
 	PX4_INFO("Clock input: %s", _enable_clock_input ? "enabled" : "disabled");
+
+	// Diagnostic register read-backs
+	uint8_t config3 = RegisterRead(Register::BANK_0::FIFO_CONFIG3);
+	// uint8_t sreg = RegisterRead(Register::BANK_0::SREG_CTRL);
+	// PX4_INFO("Regs: FIFO_CONFIG3=0x%02x, SREG_CTRL=0x%02x", config3, sreg);
+	PX4_INFO("Regs: FIFO_CONFIG3=0x%02x", config3);
 
 	perf_print_counter(_bad_transfer_perf);
 	perf_print_counter(_fifo_empty_perf);
@@ -236,15 +236,13 @@ void ICM56686::RunImpl()
 			}
 
 			bool success = false;
-
 			if (FIFORead(timestamp_sample)) {
 				success = true;
-
+				PX4_INFO("Fifo read success");
 				if (_failure_count > 0) {
 					_failure_count--;
 				}
 			}
-
 			if (!success) {
 				_failure_count++;
 
@@ -316,13 +314,14 @@ void ICM56686::ConfigureCLKIN()
 
 bool ICM56686::Configure()
 {
-	// Set it to little endian first, otherwise the chip doesn't match the manual
-	// which is just utterly confusing.
+	// Set it to little endian first.
+	// On some versions of this chip, SREG_CTRL must be written with specific timing.
 	uint8_t cmd[3] {
 	   BANK_IPREG_TOP1,
 	       SREG_CTRL,
 	   SREG_CTRL_SREG_DATA_ENDIAN_SEL_BIT::SREG_CTRL_SREG_DATA_ENDIAN_SEL_BIG };
 	transfer(cmd, cmd, sizeof(cmd));
+	px4_udelay(100);
 
 	// first set and clear all configured register bits
 	for (const auto &reg_cfg : _register_ireg_cfg) {
@@ -333,12 +332,27 @@ bool ICM56686::Configure()
 		RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
 	}
 
-	// The watermark latches only when FIFO_WM[15:8] is written, and the MSByte is 0 for every
-	// rate this driver can pick, so the read-modify-write above skips it and the threshold stays
-	// at 0 -- which the datasheet defines as watermark disabled. Write it unconditionally, after
-	// the LSByte, or FIFO_THS never fires and INT1 never pulses.
+	// Explicitly ensure we are using the internal oscillator if external clock is disabled.
+	if (!_enable_clock_input) {
+		RegisterClearBits(Register::BANK_0::RTC_CONFIG, RTC_CONFIG_BIT::RTC_MODE);
+		RegisterClearBits(Register::BANK_0::IOC_PAD_SCENARIO_OVRD, PADS_INT2_CFG_OVRD | PADS_INT2_CFG_OVRD_CLKIN);
+	}
+
+	// The watermark latches only when FIFO_WM[15:8] is written.
 	RegisterWrite(Register::BANK_0::FIFO_CONFIG1_1, (uint8_t)((_fifo_gyro_samples >> 8) & 0xFF));
 
+	// Now verify that the critical FIFO configuration was accepted.
+	// If FIFO_CONFIG3 is 0x00, the chip is ignoring our writes.
+	int retry = 0;
+	while (RegisterRead(Register::BANK_0::FIFO_CONFIG3) == 0 && retry < 5) {
+		PX4_INFO("FIFO_CONFIG3 is 0x00, retrying configuration...");
+		RegisterSetBits(Register::BANK_0::FIFO_CONFIG3,
+				FIFO_CONFIG3_BIT::FIFO_GYRO_EN |
+				FIFO_CONFIG3_BIT::FIFO_ACCEL_EN |
+				FIFO_CONFIG3_BIT::FIFO_IF_EN);
+		px4_udelay(1000);
+		retry++;
+	}
 
 	// now check that all are configured
 	bool success = true;
@@ -442,13 +456,16 @@ int ICM56686::DataReadyInterruptCallback(int irq, void *context, void *arg)
 
 void ICM56686::DataReady()
 {
+	#if 0
 	g_drdy_count++;
 	_drdy_timestamp_sample.store(hrt_absolute_time());
 	ScheduleNow();
+	#endif
 }
 
 bool ICM56686::DataReadyInterruptConfigure()
 {
+	# if 0
 	if (_drdy_gpio == 0) {
 		return false;
 	}
@@ -458,15 +475,17 @@ bool ICM56686::DataReadyInterruptConfigure()
 
 	// Setup data ready on falling edge (INT1 is configured pulsed, active low)
 	return px4_arch_gpiosetevent(_drdy_gpio, false, true, true, &DataReadyInterruptCallback, this) == 0;
+	#endif
+	return false;
 }
 
 bool ICM56686::DataReadyInterruptDisable()
 {
-	if (_drdy_gpio == 0) {
+	// if (_drdy_gpio == 0) {
 		return false;
-	}
-
-	return px4_arch_gpiosetevent(_drdy_gpio, false, false, false, nullptr, nullptr) == 0;
+	// }
+	//
+	// return px4_arch_gpiosetevent(_drdy_gpio, false, false, false, nullptr, nullptr) == 0;
 }
 
 uint16_t ICM56686::FIFOReadCount()
@@ -493,26 +512,47 @@ uint16_t ICM56686::FIFOReadCount()
 bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 {
 	const uint16_t fifo_packets = FIFOReadCount();
-
-	if (fifo_packets == 0) {
+	if (fifo_packets >= FIFO::SIZE) {
+		FIFOReset();
+		perf_count(_fifo_overflow_perf);
+		PX4_ERR("FIFO Overflow: packets=%u, limit=%d, interval=%u us, trigger=%s",
+			fifo_packets, static_cast<int>(FIFO_MAX_SAMPLES), _fifo_empty_interval_us, "WATCHDOG");
+	} else if (fifo_packets == 0) {
 		perf_count(_fifo_empty_perf);
 		return false;
+	} else {
+		uint8_t samples = fifo_packets;
+		if (samples > _fifo_gyro_samples) {
+			int extra_samples = samples - _fifo_gyro_samples;
+			samples = _fifo_gyro_samples;
+
+			if(_fifo_gyro_samples > extra_samples) {
+				const uint32_t reschedule_delay_us = (_fifo_gyro_samples - extra_samples) * static_cast<int>(FIFO_SAMPLE_DT);
+				ScheduleOnInterval(_fifo_empty_interval_us, reschedule_delay_us);
+			} else {
+				// otherwise schedule to run immediately
+				ScheduleOnInterval(_fifo_empty_interval_us);
+			}
+		} else if(samples < _fifo_gyro_samples) {
+			// reschedule next cycle to catch the desired number of samples
+			ScheduleOnInterval(_fifo_empty_interval_us, (_fifo_gyro_samples - samples) * static_cast<int>(FIFO_SAMPLE_DT));
+		}
+
 	}
-
-	if (fifo_packets > FIFO_MAX_SAMPLES) {
-		// More frames queued than a single transfer can publish. Draining them would stamp stale
-		// samples with the current timestamp, so reset for a clean restart instead. Also covers
-		// the FIFO being saturated, where stop-on-full has already dropped newer samples.
-		perf_count(_fifo_overflow_perf);
-
-		const bool interrupt_triggered = (_drdy_timestamp_sample.load() != 0);
-		PX4_ERR("FIFO Overflow: packets=%u, limit=%d, interval=%u us, trigger=%s",
-			fifo_packets, static_cast<int>(FIFO_MAX_SAMPLES), _fifo_empty_interval_us,
-			interrupt_triggered ? "INT" : "WATCHDOG");
-
-		FIFOReset();
-		return false;
-	}
+	// if (fifo_packets > FIFO_MAX_SAMPLES) {
+	// 	// More frames queued than a single transfer can publish. Draining them would stamp stale
+	// 	// samples with the current timestamp, so reset for a clean restart instead. Also covers
+	// 	// the FIFO being saturated, where stop-on-full has already dropped newer samples.
+	// 	perf_count(_fifo_overflow_perf);
+	//
+	// 	const bool interrupt_triggered = (_drdy_timestamp_sample.load() != 0);
+	// 	PX4_ERR("FIFO Overflow: packets=%u, limit=%d, interval=%u us, trigger=%s",
+	// 		fifo_packets, static_cast<int>(FIFO_MAX_SAMPLES), _fifo_empty_interval_us,
+	// 		interrupt_triggered ? "INT" : "WATCHDOG");
+	//
+	// 	FIFOReset();
+	// 	return false;
+	// }
 
 	const size_t transfer_size = math::min(sizeof(FIFOTransferBuffer), fifo_packets * sizeof(FIFO::DATA) + 1);
 
@@ -526,46 +566,59 @@ bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 		return false;
 	}
 
+	static int debug_cycle = 0;
+	bool print_debug = (debug_cycle++ % 100 == 0);
+
+	if (print_debug) {
+		PX4_INFO("FIFO RAW DUMP:");
+		for (int i = 0; i < 16 && i < static_cast<int>(transfer_size); i++) {
+			PX4_INFO("byte[%d]: 0x%02x", i, ((uint8_t *)&_fifo_buffer)[i]);
+		}
+	}
+
+	// Search for the first valid FIFO header to handle SPI alignment offsets.
+	// Valid header for Accel+Gyro+Timestamp: (header & 0xFC) == 0x68 (std) or 0x78 (hi-res).
+	int offset = -1;
+	for (int i = 0; i < static_cast<int>(transfer_size) - static_cast<int>(sizeof(FIFO::DATA)); i++) {
+		uint8_t header = ((uint8_t *)&_fifo_buffer)[i];
+		if ((header & 0xFC) == 0x68 || (header & 0xFC) == 0x78) {
+			offset = i;
+			break;
+		}
+	}
+
+	if (offset == -1) {
+		perf_count(_bad_transfer_perf);
+		return false;
+	}
+
 	unsigned valid_samples = 0;
+	const uint8_t *data_ptr = (uint8_t *)&_fifo_buffer + offset;
 
-	for (unsigned i = 0; i < transfer_size / sizeof(FIFO::DATA); i++) {
+	for (unsigned i = 0; (offset + (i + 1) * sizeof(FIFO::DATA)) <= transfer_size; i++) {
 		bool valid = true;
-
-		// With FIFO_ACCEL_EN and FIFO_GYRO_EN header should be 8’b_0110_10xx
-		const uint8_t FIFO_HEADER = _fifo_buffer.f[i].FIFO_Header;
+		const FIFO::DATA *sample = (const FIFO::DATA *)(data_ptr + (i * sizeof(FIFO::DATA)));
+		const uint8_t FIFO_HEADER = sample->FIFO_Header;
 
 		if (FIFO_HEADER & FIFO::FIFO_HEADER_BIT::HEADER_MSG) {
-			// FIFO sample empty if HEADER_MSG set
 			valid = false;
-
 		} else if (!(FIFO_HEADER & FIFO::FIFO_HEADER_BIT::HEADER_ACCEL)) {
-			// accel bit not set
 			valid = false;
-
 		} else if (!(FIFO_HEADER & FIFO::FIFO_HEADER_BIT::HEADER_GYRO)) {
-			// gyro bit not set
 			valid = false;
-
 		} else if (FIFO_HEADER & FIFO::FIFO_HEADER_BIT::HEADER_20) {
-			// 20-bit extension is not enabled
+			// Note: We handle 20-bit extension if needed, but for now 16-bit is expected
 			valid = false;
-
 		} else if ((FIFO_HEADER & FIFO::FIFO_HEADER_BIT::HEADER_TIMESTAMP_FSYNC) != Bit3) {
-			// Packet does not contain ODR timestamp
 			valid = false;
-
 		} else if (FIFO_HEADER & FIFO::FIFO_HEADER_BIT::HEADER_ODR_ACCEL) {
-			// accel ODR changed
 			valid = false;
-
 		} else if (FIFO_HEADER & FIFO::FIFO_HEADER_BIT::HEADER_ODR_GYRO) {
-			// gyro ODR changed
 			valid = false;
 		}
 
 		if (valid) {
 			valid_samples++;
-
 		} else {
 			perf_count(_bad_transfer_perf);
 			break;
@@ -573,8 +626,10 @@ bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 	}
 
 	if (valid_samples > 0) {
-		ProcessGyro(timestamp_sample, _fifo_buffer.f, valid_samples);
-		ProcessAccel(timestamp_sample, _fifo_buffer.f, valid_samples);
+		// Pass the aligned data pointer to the processors
+		const FIFO::DATA *aligned_fifo = (const FIFO::DATA *)data_ptr;
+		ProcessGyro(timestamp_sample, aligned_fifo, valid_samples);
+		ProcessAccel(timestamp_sample, aligned_fifo, valid_samples);
 		return true;
 	}
 
@@ -586,35 +641,10 @@ void ICM56686::FIFOReset()
 	perf_count(_fifo_reset_perf);
 	_drdy_timestamp_sample.store(0);
 
-	// Disable FIFO
-	RegisterClearBits(Register::BANK_0::FIFO_CONFIG3,
-			  FIFO_CONFIG3_BIT::FIFO_ES1_EN |
-			  FIFO_CONFIG3_BIT::FIFO_ES0_EN |
-			  FIFO_CONFIG3_BIT::FIFO_HIRES_EN |
-			  FIFO_CONFIG3_BIT::FIFO_GYRO_EN |
-			  FIFO_CONFIG3_BIT::FIFO_ACCEL_EN |
-			  FIFO_CONFIG3_BIT::FIFO_IF_EN);
-
-
-	// Disable FIFO by switching to bypass mode
-	RegisterSetAndClearBits(Register::BANK_0::FIFO_CONFIG0,
-				FIFO_CONFIG0_BIT::FIFO_MODE_BYPASS_SET,
-				FIFO_CONFIG0_BIT::FIFO_MODE_BYPASS_CLEAR);
-
-	// When the FIFO is disabled we can actually set the FIFO depth
-	RegisterSetBits(Register::BANK_0::FIFO_CONFIG0, FIFO_CONFIG0_BIT::FIFO_DEPTH_8K_SET);
-
-	// And then enable FIFO again
-	RegisterSetAndClearBits(Register::BANK_0::FIFO_CONFIG0, FIFO_CONFIG0_BIT::FIFO_MODE_STOP_ON_FULL_SET,
-				FIFO_CONFIG0_BIT::FIFO_MODE_STOP_ON_FULL_CLEAR);
-
-	// And enable again
-	RegisterSetBits(Register::BANK_0::FIFO_CONFIG3,
-			FIFO_CONFIG3_BIT::FIFO_GYRO_EN |
-			FIFO_CONFIG3_BIT::FIFO_ACCEL_EN |
-			FIFO_CONFIG3_BIT::FIFO_IF_EN);
-	
-	// FIFO_FLUSH is auto-cleared, but explicitly clearing it as seen in ArduPilot
+	// Minimal FIFO flush sequence as seen in ArduPilot.
+	// Trigger the FIFO_FLUSH bit in FIFO_CONFIG2, then clear it.
+	// We avoid modifying FIFO_CONFIG0 or FIFO_CONFIG3 to maintain the 
+	// Interface Enable state and prevent static SPI read patterns.
 	RegisterSetBits(Register::BANK_0::FIFO_CONFIG2,
 			  FIFO_CONFIG2_BIT::FIFO_FLUSH);
 	RegisterClearBits(Register::BANK_0::FIFO_CONFIG2,
