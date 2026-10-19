@@ -132,7 +132,7 @@ enum PWR_MGMT0_BIT : uint8_t {
 };
 
 enum PWR_MGMT_AUX1_BIT : uint8_t {
-	AUX1_DISABLE  = Bit1 | Bit0, // 3: Turn Off AUX1
+	AUX1_DISABLE  = 0, // 0: Turn off AUX1
 };
 enum INT1_STATUS0 : uint8_t {
 	INT1_STATUS_RESET_DONE = Bit7,
@@ -213,6 +213,7 @@ enum FIFO_CONFIG0_BIT : uint8_t {
 
 enum FIFO_CONFIG2_BIT : uint8_t {
 	FIFO_FLUSH = Bit7,
+	FIFO_RESET = 0,
 	FIFO_WR_WM_EQ_TH = 0,        // watermark reached only when count == threshold
 	FIFO_WR_WM_EQ_OR_GT_TH = Bit3, // watermark reached when count >= threshold
 };

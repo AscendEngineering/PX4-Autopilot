@@ -316,6 +316,7 @@ bool ICM56686::Configure()
 {
 	// Set it to little endian first.
 	// On some versions of this chip, SREG_CTRL must be written with specific timing.
+	// const uint8_t sreg = RegisterRead(Register::BANK_0:)
 	uint8_t cmd[3] {
 	   BANK_IPREG_TOP1,
 	       SREG_CTRL,
@@ -340,6 +341,12 @@ bool ICM56686::Configure()
 
 	// The watermark latches only when FIFO_WM[15:8] is written.
 	RegisterWrite(Register::BANK_0::FIFO_CONFIG1_1, (uint8_t)((_fifo_gyro_samples >> 8) & 0xFF));
+	RegisterClearBits(Register::BANK_0::FIFO_CONFIG2, FIFO_CONFIG2_BIT::FIFO_FLUSH);
+	RegisterSetBits(Register::BANK_0::FIFO_CONFIG2,
+			  FIFO_CONFIG2_BIT::FIFO_RESET | FIFO_CONFIG2_BIT::FIFO_WR_WM_EQ_OR_GT_TH);
+
+	// Set depth 2k
+	RegisterWrite(Register::BANK_0::FIFO_CONFIG0, FIFO_CONFIG0_BIT::FIFO_DEPTH_2K_SET);
 
 	// Now verify that the critical FIFO configuration was accepted.
 	// If FIFO_CONFIG3 is 0x00, the chip is ignoring our writes.
@@ -646,9 +653,9 @@ void ICM56686::FIFOReset()
 	// We avoid modifying FIFO_CONFIG0 or FIFO_CONFIG3 to maintain the 
 	// Interface Enable state and prevent static SPI read patterns.
 	RegisterSetBits(Register::BANK_0::FIFO_CONFIG2,
-			  FIFO_CONFIG2_BIT::FIFO_FLUSH);
+			  FIFO_CONFIG2_BIT::FIFO_FLUSH | FIFO_CONFIG2_BIT::FIFO_RESET);
 	RegisterClearBits(Register::BANK_0::FIFO_CONFIG2,
-			  FIFO_CONFIG2_BIT::FIFO_FLUSH);
+			  FIFO_CONFIG2_BIT::FIFO_FLUSH | FIFO_CONFIG2_BIT::FIFO_RESET);
 }
 
 void ICM56686::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DATA fifo[], const uint8_t samples)
