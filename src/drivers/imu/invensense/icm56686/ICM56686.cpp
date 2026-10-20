@@ -267,29 +267,29 @@ void ICM56686::ConfigureSampleRate(int sample_rate)
 	// recompute FIFO empty interval (us) with actual gyro sample limit
 	_fifo_empty_interval_us = _fifo_gyro_samples * (1e6f / GYRO_RATE);
 
-	// ConfigureFIFOWatermark(_fifo_gyro_samples);
+	ConfigureFIFOWatermark(_fifo_gyro_samples);
 }
 
-// void ICM56686::ConfigureFIFOWatermark(uint8_t samples)
-// {
-// 	// FIFO watermark threshold is a FIFO frame count, unlike the ICM42688P where it counts bytes
-// 	const uint16_t fifo_watermark_threshold = samples;
-//
-// 	for (auto &r : _register_bank0_cfg) {
-// 		if (r.reg == Register::BANK_0::FIFO_CONFIG1_0) {
-// 			// FIFO_WM[7:0]
-// 			const uint8_t value = fifo_watermark_threshold & 0xFF;
-// 			r.set_bits = value;
-// 			r.clear_bits = static_cast<uint8_t>(~value);
-//
-// 		} else if (r.reg == Register::BANK_0::FIFO_CONFIG1_1) {
-// 			// FIFO_WM[15:8]
-// 			const uint8_t value = (fifo_watermark_threshold >> 8) & 0xFF;
-// 			r.set_bits = value;
-// 			r.clear_bits = static_cast<uint8_t>(~value);
-// 		}
-// 	}
-// }
+void ICM56686::ConfigureFIFOWatermark(uint8_t samples)
+{
+	// FIFO watermark threshold is a FIFO frame count, unlike the ICM42688P where it counts bytes
+	const uint16_t fifo_watermark_threshold = samples;
+
+	for (auto &r : _register_bank0_cfg) {
+		if (r.reg == Register::BANK_0::FIFO_CONFIG1_0) {
+			// FIFO_WM[7:0]
+			const uint8_t value = fifo_watermark_threshold & 0xFF;
+			r.set_bits = value;
+			r.clear_bits = static_cast<uint8_t>(~value);
+
+		} else if (r.reg == Register::BANK_0::FIFO_CONFIG1_1) {
+			// FIFO_WM[15:8]
+			const uint8_t value = (fifo_watermark_threshold >> 8) & 0xFF;
+			r.set_bits = value;
+			r.clear_bits = static_cast<uint8_t>(~value);
+		}
+	}
+}
 
 void ICM56686::ConfigureCLKIN()
 {
@@ -514,53 +514,19 @@ bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 {
 	const uint16_t fifo_packets = FIFOReadCount();
 
-	if (fifo_packets >= FIFO::SIZE) {
-		FIFOReset();
-		perf_count(_fifo_overflow_perf);
-		PX4_ERR("FIFO Overflow: packets=%u, limit=%d, interval=%u us, trigger=%s",
-			fifo_packets, static_cast<int>(FIFO_MAX_SAMPLES), _fifo_empty_interval_us, "WATCHDOG");
-
-	} else if (fifo_packets == 0) {
+	if (fifo_packets == 0) {
 		perf_count(_fifo_empty_perf);
 		return false;
-
-	} else {
-		uint8_t samples = fifo_packets;
-
-		if (samples > _fifo_gyro_samples) {
-			int extra_samples = samples - _fifo_gyro_samples;
-			samples = _fifo_gyro_samples;
-
-			if (_fifo_gyro_samples > extra_samples) {
-				const uint32_t reschedule_delay_us = (_fifo_gyro_samples - extra_samples) * static_cast<int>(FIFO_SAMPLE_DT);
-				ScheduleOnInterval(_fifo_empty_interval_us, reschedule_delay_us);
-
-			} else {
-				// otherwise schedule to run immediately
-				ScheduleOnInterval(_fifo_empty_interval_us);
-			}
-
-		} else if (samples < _fifo_gyro_samples) {
-			// reschedule next cycle to catch the desired number of samples
-			ScheduleOnInterval(_fifo_empty_interval_us, (_fifo_gyro_samples - samples) * static_cast<int>(FIFO_SAMPLE_DT));
-		}
-
 	}
 
-	// if (fifo_packets > FIFO_MAX_SAMPLES) {
-	// 	// More frames queued than a single transfer can publish. Draining them would stamp stale
-	// 	// samples with the current timestamp, so reset for a clean restart instead. Also covers
-	// 	// the FIFO being saturated, where stop-on-full has already dropped newer samples.
-	// 	perf_count(_fifo_overflow_perf);
-	//
-	// 	const bool interrupt_triggered = (_drdy_timestamp_sample.load() != 0);
-	// 	PX4_ERR("FIFO Overflow: packets=%u, limit=%d, interval=%u us, trigger=%s",
-	// 		fifo_packets, static_cast<int>(FIFO_MAX_SAMPLES), _fifo_empty_interval_us,
-	// 		interrupt_triggered ? "INT" : "WATCHDOG");
-	//
-	// 	FIFOReset();
-	// 	return false;
-	// }
+	if (fifo_packets > FIFO_MAX_SAMPLES) {
+		// More frames queued than a single transfer can publish. Draining them would stamp stale
+		// samples with the current timestamp, so reset for a clean restart instead. Also covers
+		// the FIFO being saturated, where stop-on-full has already dropped newer samples.
+		perf_count(_fifo_overflow_perf);
+		FIFOReset();
+		return false;
+	}
 
 	const size_t transfer_size = math::min(sizeof(FIFOTransferBuffer), fifo_packets * sizeof(FIFO::DATA) + 1);
 
