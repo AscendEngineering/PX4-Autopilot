@@ -68,7 +68,11 @@ public:
 private:
 	void exit_and_cleanup() override;
 
-	static constexpr float FIFO_SAMPLE_DT{1e6f / 6400.f};
+	// 1.6 kHz ODR (datasheet code 0x05, as Betaflight uses for the accel). The RP2350 (150 MHz
+	// Cortex-M33 running from QSPI flash) saturates at the 6.4 kHz ODR: PX4 filters every raw
+	// sample, and with no idle time left the low-priority work queue never brought USB up on the
+	// RPI-UAVFC-R4. 6.4 kHz needs a faster MCU or a per-board ODR option.
+	static constexpr float FIFO_SAMPLE_DT{1e6f / 1600.f};
 
 	static constexpr size_t GYRO_FIFO_MAX_SAMPLES{
 		sizeof(sensor_gyro_fifo_s::x) / sizeof(sensor_gyro_fifo_s::x[0])
@@ -179,12 +183,12 @@ private:
 		},
 		{
 			Register::BANK_0::ACCEL_CONFIG0,
-			ACCEL_CONFIG0_BIT::ACCEL_UI_FS_SEL_32_G | ACCEL_CONFIG0_BIT::ACCEL_ODR_6400_HZ,
+			ACCEL_CONFIG0_BIT::ACCEL_UI_FS_SEL_32_G | ACCEL_CONFIG0_BIT::ACCEL_ODR_1600_HZ,
 			ACCEL_CONFIG0_BIT::ACCEL_CONFIG0_MASK
 		},
 		{
 			Register::BANK_0::GYRO_CONFIG0,
-			GYRO_CONFIG0_BIT::GYRO_UI_FS_SEL_4000_DPS | GYRO_CONFIG0_BIT::GYRO_ODR_6400_HZ,
+			GYRO_CONFIG0_BIT::GYRO_UI_FS_SEL_4000_DPS | GYRO_CONFIG0_BIT::GYRO_ODR_1600_HZ,
 			GYRO_CONFIG0_BIT::GYRO_CONFIG0_MASK
 		},
 		{Register::BANK_0::FIFO_CONFIG0, FIFO_CONFIG0_BIT::FIFO_MODE_STOP_ON_FULL | FIFO_CONFIG0_BIT::FIFO_DEPTH_2K, 0xFF},
