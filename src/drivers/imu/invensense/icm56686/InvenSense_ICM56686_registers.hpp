@@ -34,18 +34,17 @@
 /**
  * @file InvenSense_ICM56686_registers.hpp
  *
- * Invensense ICM-56686 registers.
- *
+ * InvenSense ICM-56686 registers.
  */
 
 #pragma once
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 namespace InvenSense_ICM56686
 {
-// TODO: move to a central header
+
 static constexpr uint8_t Bit0 = (1 << 0);
 static constexpr uint8_t Bit1 = (1 << 1);
 static constexpr uint8_t Bit2 = (1 << 2);
@@ -55,26 +54,26 @@ static constexpr uint8_t Bit5 = (1 << 5);
 static constexpr uint8_t Bit6 = (1 << 6);
 static constexpr uint8_t Bit7 = (1 << 7);
 
-static constexpr uint32_t SPI_SPEED = 24 * 1000 * 1000; // 24 MHz SPI
-static constexpr uint8_t DIR_READ = 0x80;
+// Staying below 10 MHz avoids the additional FIFO data-to-count tBUF requirement.
+static constexpr uint32_t SPI_SPEED = 8 * 1000 * 1000;
+static constexpr uint8_t DIR_READ = Bit7;
 
 static constexpr uint8_t WHOAMI = 0x08;
-static constexpr float TEMPERATURE_SENSITIVITY = 128.f; // LSB/C
-static constexpr float TEMPERATURE_OFFSET = 25.f; // C
+
+// Sensitivity of the 16 bit temperature data, which is what the 20 byte high resolution FIFO packet
+// carries. The 8 bit temperature of the 8/16 byte packets uses 2 LSB/degC instead.
+static constexpr float TEMPERATURE_SENSITIVITY = 128.f; // LSB/degC
+static constexpr float TEMPERATURE_OFFSET = 25.f; // degC
 
 namespace Register
 {
 
 enum class BANK_0 : uint8_t {
-	TEMP_DATA1_UI = 0x0c,
-	TEMP_DATA0_UI = 0x0d,
-
 	PWR_MGMT0 = 0x14,
 	FIFO_COUNT_0 = 0x16,
 	FIFO_COUNT_1 = 0x17,
 	FIFO_DATA = 0x18,
 	INT1_CONFIG0 = 0x1A,
-	INT1_CONFIG1 = 0x1B,
 	INT1_CONFIG2 = 0x1C,
 	INT1_STATUS0 = 0x1D,
 	ACCEL_CONFIG0 = 0x1F,
@@ -85,28 +84,11 @@ enum class BANK_0 : uint8_t {
 	FIFO_CONFIG2 = 0x24,
 	FIFO_CONFIG3 = 0x25,
 	FIFO_CONFIG4 = 0x26,
-	RTC_CONFIG = 0x2A,
-	DMP_EXT_SEN_ODR_CFG = 0x2B,
-	EDMP_APEX_EN0 = 0x2D,
-	EDMP_APEX_EN1 = 0x2E,
-	APEX_BUFFER_MGMT = 0x2F,
-	INTF_CONFIG0 = 0x30,
 	INTF_CONFIG1_OVRD = 0x31,
-	INTF_AUX_CONFIG = 0x32,
-	IOC_PAD_SCENARIO = 0x33,
-	IOC_PAD_SCENARIO_AUX_OVRD = 0x34,
-	IOC_PAD_SCENARIO_OVRD = 0x35,
 	DRIVE_CONFIG0 = 0x36,
-	DRIVE_CONFIG1 = 0x37,
-	DRIVE_CONFIG2 = 0x38,
-	INT_APEX_CONFIG1 = 0x3E,
-	INT_APEX_STATUS0 = 0x3F,
-	INT_APEX_STATUS1 = 0x40,
 	PWR_MGMT_AUX1 = 0x58,
 	INT2_CONFIG0 = 0x5A,
-	INT2_CONFIG1 = 0x60,
-	INT2_CONFIG2 = 0x61,
-	INT2_STATUS0 = 0x62,
+	INT2_CONFIG2 = 0x5C,
 	WHO_AM_I = 0x72,
 	IREG_ADDR_15_8 = 0x7C,
 	IREG_ADDR_7_0 = 0x7D,
@@ -114,197 +96,209 @@ enum class BANK_0 : uint8_t {
 	REG_MISC2 = 0x7F,
 };
 
-// Indirect registers, reached through IREG_ADDR_15_8/IREG_ADDR_7_0 + IREG_DATA as {bank base | offset}
-enum class IREG : uint16_t {
-	IPREG_SYS1_REG_166 = 0xA400 | 0x9A, // GYRO_SRC_CTRL
-	IPREG_SYS2_REG_123 = 0xA500 | 0x6D, // ACCEL_SRC_CTRL
-};
+} // namespace Register
 
-};
+namespace IREG
+{
 
-//---------------- BANK0 Register bits
+static constexpr uint16_t SMC_CONTROL_0 = 0xA258;
+static constexpr uint16_t SREG_CTRL = 0xA260;
+static constexpr uint16_t INT_PULSE_MIN_ON_INTF0 = 0xA262;
+static constexpr uint16_t INT_PULSE_MIN_OFF_INTF0 = 0xA264;
+static constexpr uint16_t GYRO_SRC_CTRL = 0xA49A;
+static constexpr uint16_t GYRO_UI_LPF_CFG = 0xA49E;
+static constexpr uint16_t ACCEL_SRC_CTRL = 0xA56D;
+static constexpr uint16_t ACCEL_UI_LPF_CFG = 0xA570;
 
-// PWR_MGMT0
+} // namespace IREG
+
 enum PWR_MGMT0_BIT : uint8_t {
-	GYRO_MODE_LOW_NOISE  = Bit3 | Bit2, // 11: Places gyroscope in Low Noise (LN) Mode
-	ACCEL_MODE_LOW_NOISE = Bit1 | Bit0, // 11: Places accelerometer in Low Noise (LN) Mode
+	GYRO_MODE_LOW_NOISE = Bit3 | Bit2,
+	ACCEL_MODE_LOW_NOISE = Bit1 | Bit0,
 };
 
-enum PWR_MGMT_AUX1_BIT : uint8_t {
-	AUX1_DISABLE  = 0, // 0: Turn off AUX1
+enum INT_CONFIG0_BIT : uint8_t {
+	INT1_STATUS_EN_RESET_DONE = Bit7,
+	STATUS_EN_FIFO_THS = Bit1,
+	STATUS_EN_FIFO_FULL = Bit0,
 };
-enum INT1_STATUS0 : uint8_t {
+
+enum INT_CONFIG2_BIT : uint8_t {
+	ACTIVE_HIGH = Bit0,
+	CONFIG_MASK = Bit2 | Bit1 | Bit0,
+};
+
+enum INT1_STATUS0_BIT : uint8_t {
 	INT1_STATUS_RESET_DONE = Bit7,
-	INT1_STATUS_AUX1_AGC = Bit6,
-	INT1_STATUS_AP_AGC_RDY = Bit5,
-	INT1_STATUS_AP_FSYNC = Bit4,
-	INT1_STATUS_AP_AUX1_DRDY = Bit3,
-	INT1_STATUS_AP_DRDY = Bit2,
 	INT1_STATUS_FIFO_THS = Bit1,
 	INT1_STATUS_FIFO_FULL = Bit0,
 };
 
-// INT1_CONFIG0: routes the corresponding status (same bit positions as INT1_STATUS0) to INT1
-enum INT1_CONFIG0_BIT : uint8_t {
-	INT1_STATUS_EN_RESET_DONE = Bit7,
-	INT1_STATUS_EN_AUX1_AGC = Bit6,
-	INT1_STATUS_EN_AP_AGC_RDY = Bit5,
-	INT1_STATUS_EN_AP_FSYNC = Bit4,
-	INT1_STATUS_EN_AP_AUX1_DRDY = Bit3,
-	INT1_STATUS_EN_AP_DRDY = Bit2,
-	INT1_STATUS_EN_FIFO_THS = Bit1,
-	INT1_STATUS_EN_FIFO_FULL = Bit0,
-};
-
-// INT1_CONFIG2
-enum INT1_CONFIG2_BIT : uint8_t {
-	INT1_DRIVE    = Bit2, // 0: push-pull, 1: open drain
-	INT1_MODE     = Bit1, // 0: pulsed, 1: latched
-	INT1_POLARITY = Bit0, // 0: active low, 1: active high
-};
-
 enum ACCEL_CONFIG0_BIT : uint8_t {
-	ACCEL_UI_FS_SEL_32_G_SET = 0,
-	ACCEL_UI_FS_SEL_32_G_CLEAR = Bit6 | Bit5 | Bit4,
-	ACCEL_UI_FS_SEL_16_G_SET = Bit4,
-	ACCEL_UI_FS_SEL_16_G_CLEAR = Bit6 | Bit5,
-	ACCEL_UI_FS_SEL_8_G_SET = Bit5,
-	ACCEL_UI_FS_SEL_8_G_CLEAR = Bit6 | Bit4,
-	ACCEL_ODR_6400_HZ_SET = Bit0 | Bit1,
-	ACCEL_ODR_6400_HZ_CLEAR = Bit2,
-	ACCEL_ODR_3200_HZ_SET = Bit2,
-	ACCEL_ODR_3200_HZ_CLEAR = Bit0 | Bit1,
-	ACCEL_ODR_1600_HZ_SET = Bit2 | Bit0,
-	ACCEL_ODR_1600_HZ_CLEAR = Bit1,
-	ACCEL_ODR_800_HZ_SET = Bit2 | Bit1,
-	ACCEL_ODR_800_HZ_CLEAR = Bit0,
+	ACCEL_UI_FS_SEL_32_G = 0,
+	ACCEL_ODR_6400_HZ = Bit1 | Bit0,
+	ACCEL_CONFIG0_MASK = Bit6 | Bit5 | Bit4 | Bit3 | Bit2 | Bit1 | Bit0,
 };
 
 enum GYRO_CONFIG0_BIT : uint8_t {
-	GYRO_UI_FS_SEL_4000_DPS_SET = 0,
-	GYRO_UI_FS_SEL_4000_DPS_CLEAR = Bit7 | Bit6 | Bit5 | Bit4,
-	GYRO_UI_FS_SEL_2000_DPS_SET = Bit4,
-	GYRO_UI_FS_SEL_2000_DPS_CLEAR = Bit7 | Bit6 | Bit5,
-	GYRO_UI_FS_SEL_1000_DPS_SET = Bit5,
-	GYRO_UI_FS_SEL_1000_DPS_CLEAR = Bit7 | Bit6 | Bit4,
-	GYRO_ODR_6400_HZ_SET = Bit0 | Bit1,
-	GYRO_ODR_6400_HZ_CLEAR = Bit2,
-	GYRO_ODR_3200_HZ_SET = Bit2,
-	GYRO_ODR_3200_HZ_CLEAR = Bit0 | Bit1,
-	GYRO_ODR_1600_HZ_SET = Bit2 | Bit0,
-	GYRO_ODR_1600_HZ_CLEAR = Bit1,
-	GYRO_ODR_800_HZ_SET = Bit2 | Bit1,
-	GYRO_ODR_800_HZ_CLEAR = Bit0,
+	GYRO_UI_FS_SEL_4000_DPS = 0,
+	GYRO_ODR_6400_HZ = Bit1 | Bit0,
+	GYRO_CONFIG0_MASK = 0xFF,
 };
 
 enum FIFO_CONFIG0_BIT : uint8_t {
-	FIFO_MODE_BYPASS_SET = 0,
-	FIFO_MODE_BYPASS_CLEAR = Bit0 | Bit1 | Bit2,
-	FIFO_MODE_STREAM_SET = Bit6,
-	FIFO_MODE_STREAM_CLEAR = Bit7,
-	FIFO_MODE_STOP_ON_FULL_SET = Bit7,
-	FIFO_MODE_STOP_ON_FULL_CLEAR = Bit6,
-	FIFO_DEPTH_2K_SET = Bit0 | Bit1 | Bit2,
-	FIFO_DEPTH_2K_CLEAR = Bit3 | Bit4,
-	FIFO_DEPTH_8K_SET = Bit0 | Bit1 | Bit2 | Bit3 | Bit4,
-	FIFO_DEPTH_8K_CLEAR = 0,
+	FIFO_MODE_BYPASS = 0,
+	FIFO_MODE_STOP_ON_FULL = Bit7,
+	FIFO_MODE_MASK = Bit7 | Bit6,
+	FIFO_DEPTH_2K = Bit2 | Bit1 | Bit0,
+	FIFO_DEPTH_MASK = Bit5 | Bit4 | Bit3 | Bit2 | Bit1 | Bit0,
 };
 
 enum FIFO_CONFIG2_BIT : uint8_t {
 	FIFO_FLUSH = Bit7,
-	FIFO_RESET = Bit5,
+	FIFO_RESERVED_RESET = Bit5, // reset 0x20, bits [6:5] reserved (DS-000563 v1.1 §23.34)
+	FIFO_INT_OVFL = Bit4,
+	FIFO_WR_WM_GT_TH = Bit3,
+	FIFO_CONFIG2_MASK = Bit6 | Bit5 | Bit4 | Bit3,
 };
 
 enum FIFO_CONFIG3_BIT : uint8_t {
-	FIFO_ES1_EN = Bit5, // External sensor 1 data insertion into FIFO frame
-	FIFO_ES0_EN = Bit4, // External sensor 0 data insertion into FIFO frame
-	FIFO_HIRES_EN = Bit3, // High resolution accel and gyro data insertion into FIFO frame
-	FIFO_GYRO_EN = Bit2, // Gyro data insertion into FIFO frame
-	FIFO_ACCEL_EN = Bit1, // Accel data insertion into FIFO frame
-	FIFO_IF_EN = Bit0, // Enable FIFO
+	FIFO_HIRES_EN = Bit3,
+	FIFO_GYRO_EN = Bit2,
+	FIFO_ACCEL_EN = Bit1,
+	FIFO_IF_EN = Bit0,
+	FIFO_CONFIG3_MASK = Bit3 | Bit2 | Bit1 | Bit0,
 };
 
 enum FIFO_CONFIG4_BIT : uint8_t {
-	FIFO_COMP_EN = Bit2, // FIFO compression enabled
-	FIFO_TMST_FSYNC_EN = Bit1, // Timestamp/FSYNC data inserted into FIFO frame
-};
-
-enum RTC_CONFIG_BIT : uint8_t {
-	RTC_ALIGN = Bit6, // Re-align command is generated by writing 1 to this bit
-	RTC_MODE = Bit5, // 0: RTC functionality not enabled, 1: RTC functionality enabled
-};
-
-enum IOC_PAD_SCENARIO_OVRD_BIT : uint8_t {
-	PADS_INT2_CFG_OVRD = Bit2, // Override enable for PADS_INT2_CFG, 0: disable, 1: enable
-	PADS_INT2_CFG_OVRD_INT2 = 0,
-	PADS_INT2_CFG_OVRD_FSYNC = Bit0,
-	PADS_INT2_CFG_OVRD_CLKIN = Bit1,
+	FIFO_COMP_NC_FLOW_CFG_MASK = Bit4 | Bit3 | Bit2,
+	FIFO_COMP_EN = Bit1,
+	FIFO_TMST_FSYNC_EN = Bit0,
+	FIFO_CONFIG4_MASK = FIFO_COMP_NC_FLOW_CFG_MASK | FIFO_COMP_EN | FIFO_TMST_FSYNC_EN,
 };
 
 enum REG_MISC2_BIT : uint8_t {
-	SOFT_RST = Bit1, // 1: Triggers soft reset operation
+	SOFT_RST = Bit1,
+	IREG_DONE = Bit0,
 };
 
-
-//---------------- IREG bits
-
-// IPREG_SYS1_REG_166
-enum IPREG_SYS1_REG_166_BIT : uint8_t {
-	// GYRO_SRC_CTRL[3:2] 10: interpolator and FIR anti-alias filter on (reset 00: both off)
-	GYRO_SRC_CTRL_INTERP_AAF_SET   = Bit3,
-	GYRO_SRC_CTRL_INTERP_AAF_CLEAR = Bit2,
+enum INTF0_PULSE_BIT : uint8_t {
+	DURATION_8_US = Bit0,
+	DURATION_MASK = Bit2 | Bit1 | Bit0,
 };
 
-// IPREG_SYS2_REG_123
-enum IPREG_SYS2_REG_123_BIT : uint8_t {
-	// ACCEL_SRC_CTRL[1:0] 10: interpolator and FIR anti-alias filter on (reset 00: both off)
-	ACCEL_SRC_CTRL_INTERP_AAF_SET   = Bit1,
-	ACCEL_SRC_CTRL_INTERP_AAF_CLEAR = Bit0,
+enum SREG_CTRL_BIT : uint8_t {
+	SREG_SIFS_20BITS_EN = Bit3,
+	SREG_DATA_ENDIAN_BIG = Bit1,
+	SREG_CTRL_MASK = Bit3 | Bit1,
 };
 
-// IPREG_TOP1
-static constexpr uint8_t BANK_IPREG_TOP1 = 0xA2;
-static constexpr uint8_t SREG_CTRL = 0x60;
-enum SREG_CTRL_SREG_DATA_ENDIAN_SEL_BIT : uint8_t {
-	SREG_CTRL_SREG_DATA_ENDIAN_SEL_BIG = Bit1, // big endian as documented (instead of default little endian)
+enum SMC_CONTROL_0_BIT : uint8_t {
+	TMST_EN = Bit0,
 };
 
+enum GYRO_SRC_CTRL_BIT : uint8_t {
+	GYRO_SRC_CTRL_MASK = Bit3 | Bit2,
+	GYRO_SRC_CTRL_SRC_ON_PREFILTER_ON = Bit3,
+};
+
+enum GYRO_UI_LPF_CFG_BIT : uint8_t {
+	GYRO_UI_LPFBW_ODR_DIV_2 = 0,
+	GYRO_UI_LPFBW_MASK = Bit6 | Bit5 | Bit4,
+};
+
+enum ACCEL_SRC_CTRL_BIT : uint8_t {
+	ACCEL_SRC_CTRL_MASK = Bit1 | Bit0,
+	ACCEL_SRC_CTRL_SRC_ON_PREFILTER_ON = Bit1,
+};
+
+enum ACCEL_UI_LPF_CFG_BIT : uint8_t {
+	ACCEL_UI_LPFBW_ODR_DIV_2 = 0,
+	ACCEL_UI_LPFBW_MASK = Bit2 | Bit1 | Bit0,
+};
 
 namespace FIFO
 {
-static constexpr size_t SIZE = 8192;
 
-// 16-byte packet (accel + gyro, FIFO_HIRES_EN clear)
+static constexpr size_t SIZE = 2048;
+
 struct DATA {
-	uint8_t FIFO_Header;
-	uint8_t ACCEL_DATA_XH;
-	uint8_t ACCEL_DATA_XL;
-	uint8_t ACCEL_DATA_YH;
-	uint8_t ACCEL_DATA_YL;
-	uint8_t ACCEL_DATA_ZH;
-	uint8_t ACCEL_DATA_ZL;
-	uint8_t GYRO_DATA_XH;
-	uint8_t GYRO_DATA_XL;
-	uint8_t GYRO_DATA_YH;
-	uint8_t GYRO_DATA_YL;
-	uint8_t GYRO_DATA_ZH;
-	uint8_t GYRO_DATA_ZL;
-	uint8_t temperature;
-	uint8_t Timestamp_H;
-	uint8_t Timestamp_L;
-};
-static_assert(sizeof(DATA) == 16, "FIFO packet is 16 bytes without HIRES");
+	uint8_t header;
+	uint8_t accel_x_l;
+	uint8_t accel_x_h;
+	uint8_t accel_y_l;
+	uint8_t accel_y_h;
+	uint8_t accel_z_l;
+	uint8_t accel_z_h;
+	uint8_t gyro_x_l;
+	uint8_t gyro_x_h;
+	uint8_t gyro_y_l;
+	uint8_t gyro_y_h;
+	uint8_t gyro_z_l;
+	uint8_t gyro_z_h;
+	uint8_t temperature_l;
+	uint8_t temperature_h;
+	uint8_t timestamp_l;
+	uint8_t timestamp_h;
+	uint8_t highres_x;
+	uint8_t highres_y;
+	uint8_t highres_z;
+} __attribute__((packed));
 
-// With FIFO_ACCEL_EN and FIFO_GYRO_EN header should be 8’b_0110_10xx
-enum FIFO_HEADER_BIT : uint8_t {
-	HEADER_MSG             = Bit7, // 1: FIFO is empty
-	HEADER_ACCEL           = Bit6, // 1: Packet is sized so that accel data have location in the packet, FIFO_ACCEL_EN must be 1
-	HEADER_GYRO            = Bit5, // 1: Packet is sized so that gyro data have location in the packet, FIFO_GYRO_EN must be1
-	HEADER_20              = Bit4, // 1: Packet has a new and valid sample of extended 20-bit data for gyro and/or accel
-	HEADER_TIMESTAMP_FSYNC = Bit3 | Bit2, // 10: Packet contains ODR Timestamp
-	HEADER_ODR_ACCEL       = Bit1, // 1: The ODR for accel is different for this accel data packet compared to the previous accel packet
-	HEADER_ODR_GYRO        = Bit0, // 1: The ODR for gyro is different for this gyro data packet compared to the previous gyro packet
-};
+static_assert(sizeof(DATA) == 20);
 
+// The FIFO count reports the number of unread frames, a full 2K FIFO holds this many.
+static constexpr uint16_t MAX_FRAMES = SIZE / sizeof(DATA);
+
+// A 20 bit sample of exactly negative full scale (-524288) marks invalid sensor data, its 16 bit
+// field (data[19:4]) reads INT16_MIN.
+static constexpr int16_t INVALID_SAMPLE = INT16_MIN;
+static constexpr int16_t INVALID_TEMPERATURE = INT16_MIN;
+
+static constexpr uint8_t HEADER = Bit6 | Bit5 | Bit4 | Bit3;
+static constexpr uint8_t HEADER_MASK = Bit7 | Bit6 | Bit5 | Bit4 | Bit3 | Bit2;
+
+static constexpr int16_t field16(const uint8_t high, const uint8_t low)
+{
+	return static_cast<int16_t>((static_cast<uint16_t>(high) << 8) | low);
 }
+
+static_assert(field16(0x7F, 0xFF) == INT16_MAX);
+static_assert(field16(0x80, 0x00) == INVALID_SAMPLE);
+static_assert(field16(0xFF, 0xFF) == -1);
+
+// The sensor data is byte swapped, SREG_DATA_ENDIAN_SEL selects little endian. In high resolution
+// mode each 16 bit field holds data[19:4] of the 20 bit sample, which always spans the full range,
+// and the highres_* bytes hold the data[3:0] extension nibbles, which are not used.
+static constexpr int16_t accelX(const DATA &sample)
+{
+	return field16(sample.accel_x_h, sample.accel_x_l);
+}
+
+static constexpr int16_t accelY(const DATA &sample)
+{
+	return field16(sample.accel_y_h, sample.accel_y_l);
+}
+
+static constexpr int16_t accelZ(const DATA &sample)
+{
+	return field16(sample.accel_z_h, sample.accel_z_l);
+}
+
+static constexpr int16_t gyroX(const DATA &sample)
+{
+	return field16(sample.gyro_x_h, sample.gyro_x_l);
+}
+
+static constexpr int16_t gyroY(const DATA &sample)
+{
+	return field16(sample.gyro_y_h, sample.gyro_y_l);
+}
+
+static constexpr int16_t gyroZ(const DATA &sample)
+{
+	return field16(sample.gyro_z_h, sample.gyro_z_l);
+}
+
+} // namespace FIFO
 } // namespace InvenSense_ICM56686
