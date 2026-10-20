@@ -110,10 +110,13 @@ void ICM56686::print_status()
 	PX4_INFO("Clock input: %s", _enable_clock_input ? "enabled" : "disabled");
 
 	// Diagnostic register read-backs
+
+	uint8_t config0 = RegisterRead(Register::BANK_0::FIFO_CONFIG0);
+	uint8_t config1 = RegisterRead(Register::BANK_0::FIFO_CONFIG1_1);
+	uint8_t config2 = RegisterRead(Register::BANK_0::FIFO_CONFIG2);
 	uint8_t config3 = RegisterRead(Register::BANK_0::FIFO_CONFIG3);
-	// uint8_t sreg = RegisterRead(Register::BANK_0::SREG_CTRL);
-	// PX4_INFO("Regs: FIFO_CONFIG3=0x%02x, SREG_CTRL=0x%02x", config3, sreg);
-	PX4_INFO("Regs: FIFO_CONFIG3=0x%02x", config3);
+
+	PX4_INFO("Regs: FIFO_CONFIG0=0x%02x, FIFO_CONFIG1=0x%02x, FIFO_CONFIG2=0x%02x, FIFO_CONFIG3=0x%02x", config0, config1, config2, config3);
 
 	perf_print_counter(_bad_transfer_perf);
 	perf_print_counter(_fifo_empty_perf);
@@ -143,25 +146,23 @@ void ICM56686::RunImpl()
 
 	switch (_state) {
 	case STATE::RESET:
-		// DEVICE_CONFIG: Software reset configuration
-		RegisterWrite(Register::BANK_0::REG_MISC2, REG_MISC2_BIT::SOFT_RST);
+		// Bypassing SOFT_RST to align with ArduPilot initialization and avoid wiping config.
 		_reset_timestamp = now;
 		_failure_count = 0;
 		_state = STATE::WAIT_FOR_RESET;
-		ScheduleDelayed(1_ms); // wait 1 ms for soft reset to be effective
+		ScheduleDelayed(1_ms); 
 		break;
 
 	case STATE::WAIT_FOR_RESET:
-		if ((RegisterRead(Register::BANK_0::WHO_AM_I) == WHOAMI)
-		    && ((RegisterRead(Register::BANK_0::REG_MISC2) & Bit1) == 0x0)) {
+		if ((RegisterRead(Register::BANK_0::WHO_AM_I) == WHOAMI)) {
 
 			RegisterWrite(Register::BANK_0::PWR_MGMT_AUX1, PWR_MGMT_AUX1_BIT::AUX1_DISABLE);
 
-			// Wakeup accel and gyro and schedule remaining configuration
+			// Wakeup accel and gyro
 			RegisterWrite(Register::BANK_0::PWR_MGMT0, PWR_MGMT0_BIT::GYRO_MODE_LOW_NOISE | PWR_MGMT0_BIT::ACCEL_MODE_LOW_NOISE);
 
 			_state = STATE::CONFIGURE;
-			ScheduleDelayed(70_ms); // 35 ms gyro startup time, 10 ms accel from sleep to valid data
+			ScheduleDelayed(100_ms); // Increased delay to ensure analog front-end stability
 
 		} else {
 			// RESET not complete
@@ -187,11 +188,11 @@ void ICM56686::RunImpl()
 		} else {
 			// CONFIGURE not complete
 			if (hrt_elapsed_time(&_reset_timestamp) > 1000_ms) {
-				PX4_DEBUG("Configure failed, resetting");
+				PX4_INFO("Configure failed, resetting");
 				_state = STATE::RESET;
 
 			} else {
-				PX4_DEBUG("Configure failed, retrying");
+				PX4_INFO("Configure failed, retrying");
 			}
 
 			ScheduleDelayed(100_ms);
@@ -273,29 +274,29 @@ void ICM56686::ConfigureSampleRate(int sample_rate)
 	// recompute FIFO empty interval (us) with actual gyro sample limit
 	_fifo_empty_interval_us = _fifo_gyro_samples * (1e6f / GYRO_RATE);
 
-	ConfigureFIFOWatermark(_fifo_gyro_samples);
+	// ConfigureFIFOWatermark(_fifo_gyro_samples);
 }
 
-void ICM56686::ConfigureFIFOWatermark(uint8_t samples)
-{
-	// FIFO watermark threshold is a FIFO frame count, unlike the ICM42688P where it counts bytes
-	const uint16_t fifo_watermark_threshold = samples;
-
-	for (auto &r : _register_bank0_cfg) {
-		if (r.reg == Register::BANK_0::FIFO_CONFIG1_0) {
-			// FIFO_WM[7:0]
-			const uint8_t value = fifo_watermark_threshold & 0xFF;
-			r.set_bits = value;
-			r.clear_bits = static_cast<uint8_t>(~value);
-
-		} else if (r.reg == Register::BANK_0::FIFO_CONFIG1_1) {
-			// FIFO_WM[15:8]
-			const uint8_t value = (fifo_watermark_threshold >> 8) & 0xFF;
-			r.set_bits = value;
-			r.clear_bits = static_cast<uint8_t>(~value);
-		}
-	}
-}
+// void ICM56686::ConfigureFIFOWatermark(uint8_t samples)
+// {
+// 	// FIFO watermark threshold is a FIFO frame count, unlike the ICM42688P where it counts bytes
+// 	const uint16_t fifo_watermark_threshold = samples;
+//
+// 	for (auto &r : _register_bank0_cfg) {
+// 		if (r.reg == Register::BANK_0::FIFO_CONFIG1_0) {
+// 			// FIFO_WM[7:0]
+// 			const uint8_t value = fifo_watermark_threshold & 0xFF;
+// 			r.set_bits = value;
+// 			r.clear_bits = static_cast<uint8_t>(~value);
+//
+// 		} else if (r.reg == Register::BANK_0::FIFO_CONFIG1_1) {
+// 			// FIFO_WM[15:8]
+// 			const uint8_t value = (fifo_watermark_threshold >> 8) & 0xFF;
+// 			r.set_bits = value;
+// 			r.clear_bits = static_cast<uint8_t>(~value);
+// 		}
+// 	}
+// }
 
 void ICM56686::ConfigureCLKIN()
 {
@@ -316,13 +317,12 @@ bool ICM56686::Configure()
 {
 	// Set it to little endian first.
 	// On some versions of this chip, SREG_CTRL must be written with specific timing.
-	// const uint8_t sreg = RegisterRead(Register::BANK_0:)
-	uint8_t cmd[3] {
-	   BANK_IPREG_TOP1,
-	       SREG_CTRL,
-	   SREG_CTRL_SREG_DATA_ENDIAN_SEL_BIT::SREG_CTRL_SREG_DATA_ENDIAN_SEL_BIG };
-	transfer(cmd, cmd, sizeof(cmd));
-	px4_udelay(100);
+	// uint8_t cmd[3] {
+	//    BANK_IPREG_TOP1,
+	//        SREG_CTRL,
+	//    SREG_CTRL_SREG_DATA_ENDIAN_SEL_BIT::SREG_CTRL_SREG_DATA_ENDIAN_SEL_BIG };
+	// transfer(cmd, cmd, sizeof(cmd));
+	// px4_udelay(100);
 
 	// first set and clear all configured register bits
 	for (const auto &reg_cfg : _register_ireg_cfg) {
@@ -333,33 +333,40 @@ bool ICM56686::Configure()
 		RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
 	}
 
+	// Disable FIFO.
+	RegisterClearBits(Register::BANK_0::FIFO_CONFIG3, 
+				  FIFO_CONFIG3_BIT::FIFO_GYRO_EN | FIFO_CONFIG3_BIT::FIFO_ACCEL_EN | FIFO_CONFIG3_BIT::FIFO_IF_EN);
+	// Enable interpolator and FIR anti-alias filter (ArduPilot reference)
+	RegisterWrite(Register::IREG::IPREG_SYS1_REG_166, 0x0C); // GYRO_SRC_CTRL bits[3:2] = 11 (Both on)
+	RegisterWrite(Register::IREG::IPREG_SYS2_REG_123, 0x03); // ACCEL_SRC_CTRL bits[1:0] = 11 (Both on)
+
 	// Explicitly ensure we are using the internal oscillator if external clock is disabled.
 	if (!_enable_clock_input) {
 		RegisterClearBits(Register::BANK_0::RTC_CONFIG, RTC_CONFIG_BIT::RTC_MODE);
 		RegisterClearBits(Register::BANK_0::IOC_PAD_SCENARIO_OVRD, PADS_INT2_CFG_OVRD | PADS_INT2_CFG_OVRD_CLKIN);
 	}
 
-	// The watermark latches only when FIFO_WM[15:8] is written.
-	RegisterWrite(Register::BANK_0::FIFO_CONFIG1_1, (uint8_t)((_fifo_gyro_samples >> 8) & 0xFF));
-	RegisterClearBits(Register::BANK_0::FIFO_CONFIG2, FIFO_CONFIG2_BIT::FIFO_FLUSH);
-	RegisterSetBits(Register::BANK_0::FIFO_CONFIG2,
-			  FIFO_CONFIG2_BIT::FIFO_RESET | FIFO_CONFIG2_BIT::FIFO_WR_WM_EQ_OR_GT_TH);
+	// FIFO flush and reset: trigger flush and reset.
+	// FIFO_FLUSH is auto-cleared by the hardware, but must be triggered for the FIFO
+	// to accept configuration.
+	RegisterWrite(Register::BANK_0::FIFO_CONFIG2, FIFO_CONFIG2_BIT::FIFO_FLUSH | FIFO_CONFIG2_BIT::FIFO_RESET);
+	px4_udelay(100);
 
-	// Set depth 2k
-	RegisterWrite(Register::BANK_0::FIFO_CONFIG0, FIFO_CONFIG0_BIT::FIFO_DEPTH_2K_SET);
+	// ArduPilot: FIFO_CONFIG2 reset keeps bit5 (fifo_addr_space_lock) set — value 0x20.
+	RegisterWrite(Register::BANK_0::FIFO_CONFIG2, FIFO_CONFIG2_BIT::FIFO_RESET);
+	
+	RegisterSetBits(Register::BANK_0::FIFO_CONFIG3,
+			FIFO_CONFIG3_BIT::FIFO_GYRO_EN |
+			FIFO_CONFIG3_BIT::FIFO_ACCEL_EN |
+			FIFO_CONFIG3_BIT::FIFO_IF_EN);
+	
+	// Force FIFO Interface enable.
+	RegisterWrite(Register::BANK_0::FIFO_CONFIG3, 
+				  FIFO_CONFIG3_BIT::FIFO_GYRO_EN | FIFO_CONFIG3_BIT::FIFO_ACCEL_EN | FIFO_CONFIG3_BIT::FIFO_IF_EN);
 
-	// Now verify that the critical FIFO configuration was accepted.
-	// If FIFO_CONFIG3 is 0x00, the chip is ignoring our writes.
-	int retry = 0;
-	while (RegisterRead(Register::BANK_0::FIFO_CONFIG3) == 0 && retry < 5) {
-		PX4_INFO("FIFO_CONFIG3 is 0x00, retrying configuration...");
-		RegisterSetBits(Register::BANK_0::FIFO_CONFIG3,
-				FIFO_CONFIG3_BIT::FIFO_GYRO_EN |
-				FIFO_CONFIG3_BIT::FIFO_ACCEL_EN |
-				FIFO_CONFIG3_BIT::FIFO_IF_EN);
-		px4_udelay(1000);
-		retry++;
-	}
+	// Set depth 2k AND stop-on-full. 
+	// ArduPilot uses 0x87 (FIFO_DEPTH_2K_SET | FIFO_MODE_STOP_ON_FULL_SET).
+	RegisterWrite(Register::BANK_0::FIFO_CONFIG0, FIFO_CONFIG0_BIT::FIFO_DEPTH_2K_SET | FIFO_CONFIG0_BIT::FIFO_MODE_STOP_ON_FULL_SET);
 
 	// now check that all are configured
 	bool success = true;
@@ -498,22 +505,16 @@ bool ICM56686::DataReadyInterruptDisable()
 uint16_t ICM56686::FIFOReadCount()
 {
 	// read FIFO count
-	// errata AN-000364 (2.2): the first read can return a stale value, use the second one
-	uint8_t fifo_count_buf[3] {};
+	uint8_t fifo_count_buf[3] { static_cast<uint8_t>(Register::BANK_0::FIFO_COUNT_0) | DIR_READ, 0, 0 };
 
-	for (int i = 0; i < 2; i++) {
-		fifo_count_buf[0] = static_cast<uint8_t>(Register::BANK_0::FIFO_COUNT_0) | DIR_READ;
-
-		if (transfer(fifo_count_buf, fifo_count_buf, sizeof(fifo_count_buf)) != PX4_OK) {
-			perf_count(_bad_transfer_perf);
-			return 0;
-		}
+	if (transfer(fifo_count_buf, fifo_count_buf, sizeof(fifo_count_buf)) != PX4_OK) {
+		perf_count(_bad_transfer_perf);
+		return 0;
 	}
 
-	// FIFO_COUNT_0 is supposed to contain the high bits and FIFO_COUNT_1 the low bits,
-	// according to the manual, however, the device is configured to little endianness
-	// which means FIFO and FIFO count are pre-swapped..
-	return combine(fifo_count_buf[2], fifo_count_buf[1]);
+	// FIFO_COUNT_0 is high bits, FIFO_COUNT_1 is low bits.
+	// Since the device is configured for Little Endian, they are swapped.
+	return combine_uint(fifo_count_buf[2], fifo_count_buf[1]);
 }
 
 bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
@@ -648,14 +649,12 @@ void ICM56686::FIFOReset()
 	perf_count(_fifo_reset_perf);
 	_drdy_timestamp_sample.store(0);
 
-	// Minimal FIFO flush sequence as seen in ArduPilot.
-	// Trigger the FIFO_FLUSH bit in FIFO_CONFIG2, then clear it.
-	// We avoid modifying FIFO_CONFIG0 or FIFO_CONFIG3 to maintain the 
-	// Interface Enable state and prevent static SPI read patterns.
+	// FIFO_FLUSH is auto cleared. Keep fifo_addr_space_lock (bit5) set
+	// reset value 0x20
 	RegisterSetBits(Register::BANK_0::FIFO_CONFIG2,
-			  FIFO_CONFIG2_BIT::FIFO_FLUSH | FIFO_CONFIG2_BIT::FIFO_RESET);
+			  FIFO_CONFIG2_BIT::FIFO_RESET | FIFO_CONFIG2_BIT::FIFO_FLUSH);
 	RegisterClearBits(Register::BANK_0::FIFO_CONFIG2,
-			  FIFO_CONFIG2_BIT::FIFO_FLUSH | FIFO_CONFIG2_BIT::FIFO_RESET);
+			  FIFO_CONFIG2_BIT::FIFO_RESET);
 }
 
 void ICM56686::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DATA fifo[], const uint8_t samples)

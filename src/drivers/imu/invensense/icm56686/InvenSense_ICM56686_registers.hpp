@@ -59,7 +59,6 @@ static constexpr uint32_t SPI_SPEED = 24 * 1000 * 1000; // 24 MHz SPI
 static constexpr uint8_t DIR_READ = 0x80;
 
 static constexpr uint8_t WHOAMI = 0x08;
-static constexpr uint8_t FIFO_CONFIG2_RESET = 0x20;
 static constexpr float TEMPERATURE_SENSITIVITY = 128.f; // LSB/C
 static constexpr float TEMPERATURE_OFFSET = 25.f; // C
 
@@ -213,9 +212,7 @@ enum FIFO_CONFIG0_BIT : uint8_t {
 
 enum FIFO_CONFIG2_BIT : uint8_t {
 	FIFO_FLUSH = Bit7,
-	FIFO_RESET = 0,
-	FIFO_WR_WM_EQ_TH = 0,        // watermark reached only when count == threshold
-	FIFO_WR_WM_EQ_OR_GT_TH = Bit3, // watermark reached when count >= threshold
+	FIFO_RESET = Bit5,
 };
 
 enum FIFO_CONFIG3_BIT : uint8_t {
