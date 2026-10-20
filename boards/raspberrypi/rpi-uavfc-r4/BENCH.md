@@ -424,3 +424,58 @@ Each marker below was counted in the fork tree with `git show`.
 Decision: the fork needs no further patch. The eleven `cdcacm.c` patches
 are not applied and are removed from the tree. Phase 6 below is the
 regression that shows the tree without them holds up.
+
+### Phase 7, 2026-10-20: ICM-56686 bring-up
+
+Branch `fix/imu-board`. Driver: upstream PX4 pull request #28677 version (coworker), ODR 1.6 kHz
+(`3ee091c562`). Board: `icm56686 -s -b 1 -R 0 -f 18750 start`, GPIO27 input, SPI0 18.75 MHz.
+Tools: OpenOCD + `ocd.py`, `mav_shell_cmd.py`, `uart_shell.py`. All pymavlink helpers need
+`MAVLINK20=1`: once sensor data flows the board switches the links to MAVLink 2 and a MAVLink 1
+parser sees nothing. Several hours went into a "USB stall" that was only this.
+
+#### SWD checks (bd95ccddd6 build, firmware running)
+
+| Read | Meaning | Expected | Read |
+| --- | --- | --- | --- |
+| IO_BANK0 GPIO26 CTRL | FUNCSEL | 5 (SIO) | 5 |
+| IO_BANK0 GPIO27 CTRL | FUNCSEL | 5 (SIO) | 5 |
+| IO_BANK0 GPIO27 STATUS bit 13 | output enable to pad | 0 | 0 |
+| PADS GPIO26 / GPIO27 | IE and pulls | 0x5a / 0x56 | 0x5a / 0x56 |
+| PROC0_INTE3 | GPIO26 edge-high | bit 11 | 0x800 |
+| NVIC ISER0 bit 21 | IO_IRQ_BANK0 | set | set |
+| SPI0 SSPCPSR | prescaler | 8 (18.75 MHz) | 8 |
+| SIO GPIO_OE bit 27 | GPIO27 output | 0 | 0 |
+
+INT1 pull test (pad pull-down then pull-up, 300 samples each): 0 high / 300 with both pulls after
+the INT1 fix, against 63 and 300 before it. INT1 is push-pull, idle low. INT1 pulses were seen as
+edge-high latches on GPIO26 while the driver ran.
+
+#### Driver on the bench (sensors module stopped)
+
+`icm56686 status`: FIFO empty interval 2500 us (400 Hz), DRDY interrupt enabled, bad register 0,
+bad transfer 0, FIFO empty 1, FIFO overflow 0, FIFO reset 1, DRDY missed 0 over several minutes.
+`listener sensor_accel_fifo`: dt 625 us, scale 0.00957, x 606 604 602 603, y 364 363 364 363,
+z -750 -753 -755 -750 (about 9.9 m/s^2, board tilted on the bench). `listener sensor_gyro_fifo`:
+dt 625 us, x -3 -3 -4 -4, y 2 2 2 3, z -1 0 1 0. `top`: wq:SPI1 15 to 25 %, stack 1784 of 2376
+(stack raised to 3072 in this phase).
+
+#### CPU budget (the open problem)
+
+`top once`, CPU(%) is the instantaneous share. Idle before the IMU starts: 29 to 33 %, with
+mavlink_if1 (USB) 30 to 33 % and mavlink_if0 (UART) 13 % on an idle link.
+
+| Configuration | Idle | Notes |
+| --- | --- | --- |
+| all modules + IMU | 0 % | MAVLink sends nothing: 0 messages in 8 s on USB, UART silent |
+| ekf2 and commander stopped + IMU (coworker's recipe) | 5.6 % | mavlink 36 %, wq:SPI1 15 %, nav_and_controllers 11 %, rate_ctrl 10 %, INS0 9 %; the shell answers once, then starves |
+| sensors stopped + IMU | 12 to 50 % | driver and shell fine |
+
+The accel "TIMEOUT" and "no valid data" messages seen under full load are this starvation, not the
+sensor: with the pipeline stopped the accel FIFO is valid. The CPU budget is a separate work item:
+mavlink's loop rate on USB (100 kB/s data rate on a 2 Mbaud link) and on TEL1, the sensors pipeline
+at 1.6 kHz raw with a 400 Hz loop, and the driver's 15 % all need a cut before the board flies.
+
+Board parameter state after this phase: `IMU_GYRO_RATEMAX` 400 (saved; `rc.mc_defaults` bumps the
+400 default to 800, so a board default line does nothing), `USB_MAV_MODE` 5 (config; did not lower
+mavlink's CPU share). Open: the UART MAVLink instance goes silent under load; the autostart of the
+IMU is commented out in `rc.board_sensors` for the bench (`00289627b0`), revert before flight.
