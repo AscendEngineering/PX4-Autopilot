@@ -108,6 +108,7 @@ void ICM56686::print_status()
 
 	PX4_INFO("FIFO empty interval: %d us (%.1f Hz)", _fifo_empty_interval_us, 1e6 / _fifo_empty_interval_us);
 	PX4_INFO("Clock input: %s", _enable_clock_input ? "enabled" : "disabled");
+	PX4_INFO("DRDY interrupt: %s", _data_ready_interrupt_enabled ? "enabled" : "disabled (polled)");
 
 	perf_print_counter(_bad_transfer_perf);
 	perf_print_counter(_fifo_empty_perf);
@@ -317,6 +318,10 @@ bool ICM56686::Configure()
 	// transfer(cmd, cmd, sizeof(cmd));
 	// px4_udelay(100);
 
+	// Disable every INT1 source first: the INT1 pin mode in the register table is only accepted
+	// while no source is enabled (datasheet 23.26). The table re-enables FIFO_THS in its last row.
+	RegisterWrite(Register::BANK_0::INT1_CONFIG0, 0);
+
 	// first set and clear all configured register bits
 	for (const auto &reg_cfg : _register_ireg_cfg) {
 		RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
@@ -463,36 +468,27 @@ int ICM56686::DataReadyInterruptCallback(int irq, void *context, void *arg)
 
 void ICM56686::DataReady()
 {
-#if 0
 	_drdy_timestamp_sample.store(hrt_absolute_time());
 	ScheduleNow();
-#endif
 }
 
 bool ICM56686::DataReadyInterruptConfigure()
 {
-# if 0
-
 	if (_drdy_gpio == 0) {
 		return false;
 	}
 
-	// Enable internal pull-up to prevent the pin from floating low (open-drain)
-	px4_arch_configgpio(_drdy_gpio | GPIO_PU_MASK);
-
-	// Setup data ready on falling edge (INT1 is configured pulsed, active low)
-	return px4_arch_gpiosetevent(_drdy_gpio, false, true, true, &DataReadyInterruptCallback, this) == 0;
-#endif
-	return false;
+	// INT1 is push-pull, pulsed, active-high: rising edge
+	return px4_arch_gpiosetevent(_drdy_gpio, true, false, true, &DataReadyInterruptCallback, this) == 0;
 }
 
 bool ICM56686::DataReadyInterruptDisable()
 {
-	// if (_drdy_gpio == 0) {
-	return false;
-	// }
-	//
-	// return px4_arch_gpiosetevent(_drdy_gpio, false, false, false, nullptr, nullptr) == 0;
+	if (_drdy_gpio == 0) {
+		return false;
+	}
+
+	return px4_arch_gpiosetevent(_drdy_gpio, false, false, false, nullptr, nullptr) == 0;
 }
 
 uint16_t ICM56686::FIFOReadCount()

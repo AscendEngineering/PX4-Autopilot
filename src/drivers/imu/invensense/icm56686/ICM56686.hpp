@@ -169,10 +169,10 @@ private:
 
 	static constexpr uint8_t size_register_bank0_cfg{14};
 	register_bank0_config_t _register_bank0_cfg[size_register_bank0_cfg] {
-		// route only the FIFO threshold (watermark) interrupt to INT1
-		{ Register::BANK_0::INT1_CONFIG0, INT1_CONFIG0_BIT::INT1_STATUS_EN_FIFO_THS, (uint8_t)~INT1_CONFIG0_BIT::INT1_STATUS_EN_FIFO_THS },
-		// INT1: push-pull, pulsed, active low
-		{ Register::BANK_0::INT1_CONFIG2, 0, INT1_CONFIG2_BIT::INT1_DRIVE | INT1_CONFIG2_BIT::INT1_MODE | INT1_CONFIG2_BIT::INT1_POLARITY },
+		// INT1 drive, mode and polarity change only while every INT1 source is disabled (datasheet
+		// 23.26); INT1_CONFIG0 is written to 0 in Configure() first and the FIFO_THS source is
+		// enabled by the last row. INT1: push-pull, pulsed, active-high (0x01)
+		{ Register::BANK_0::INT1_CONFIG2, INT1_CONFIG2_BIT::INT1_POLARITY, INT1_CONFIG2_BIT::INT1_DRIVE | INT1_CONFIG2_BIT::INT1_MODE },
 		{ Register::BANK_0::PWR_MGMT0, PWR_MGMT0_BIT::GYRO_MODE_LOW_NOISE | PWR_MGMT0_BIT::ACCEL_MODE_LOW_NOISE, 0 },
 		{ Register::BANK_0::PWR_MGMT_AUX1, 0,  PWR_MGMT_AUX1_BIT::AUX1_DISABLE},
 
@@ -187,6 +187,9 @@ private:
 
 		{ Register::BANK_0::RTC_CONFIG, 0, 0}, // RTC_MODE[5] set at runtime
 		{ Register::BANK_0::IOC_PAD_SCENARIO_OVRD, 0, 0}, // PADS_INT2_CFG_OVRD and PADS_INT2_CFG_OVRD_VAL set at runtime
+
+		// route only the FIFO threshold (watermark) interrupt to INT1, last so the pin mode above is accepted
+		{ Register::BANK_0::INT1_CONFIG0, INT1_CONFIG0_BIT::INT1_STATUS_EN_FIFO_THS, (uint8_t)~INT1_CONFIG0_BIT::INT1_STATUS_EN_FIFO_THS },
 	};
 
 	// The part resets with the FIR anti-alias filter and the interpolator off, so the UI ODR would be a
