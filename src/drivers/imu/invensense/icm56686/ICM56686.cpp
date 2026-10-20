@@ -831,7 +831,7 @@ bool ICM56686::DataReadyInterruptConfigure()
 		return false;
 	}
 
-	return px4_arch_gpiosetevent(_drdy_gpio, true, false, true, &DataReadyInterruptCallback, this) == 0;
+	return px4_arch_gpiosetevent(_drdy_gpio, true, true, true, &DataReadyInterruptCallback, this) == 0;
 }
 
 bool ICM56686::DataReadyInterruptDisable()

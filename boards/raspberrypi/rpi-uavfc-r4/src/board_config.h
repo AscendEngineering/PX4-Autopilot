@@ -72,6 +72,8 @@
 #define ADC_BATTERY_VOLTAGE_CHANNEL	6
 #define ADC_BATTERY_CURRENT_CHANNEL	7
 /* BOARD_NUMBER_BRICKS and BOARD_ADC_BRICK_VALID keep their board_common.h defaults (1 and always valid) */
+#define GPIO_DRDY_ICM56686	PX4_MAKE_GPIO_INPUT(26)
+#define GPIO_FSYNC_ICM56686	PX4_MAKE_GPIO_OUTPUT_CLEAR(27)
 
 /* Pins the board owns at boot, in init order */
 #define PX4_GPIO_INIT_LIST {		\
@@ -81,6 +83,8 @@
 		GPIO_VDD_9V_EN,		\
 		GPIO_VDD_5V_EN,		\
 		GPIO_ESC_TELEMETRY,	\
+		GPIO_DRDY_ICM56686,     \
+		GPIO_FSYNC_ICM56686,    \
 	}
 
 /* board_reset() calls board_on_reset() (init.c): PWM pins low before the reset */
