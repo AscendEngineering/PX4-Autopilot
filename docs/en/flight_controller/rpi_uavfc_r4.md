@@ -20,7 +20,7 @@ Availability: to be announced by Raspberry Pi.
 
 ## Sensors
 
-- TDK ICM-56686 accelerometer and gyroscope (SPI0, interrupt on GPIO26)
+- TDK ICM-56686 accelerometer and gyroscope (SPI0 at 18.75 MHz, `icm56686` driver, data-ready interrupt on GPIO26, INT2/FSYNC on GPIO27 unused)
 - Infineon DPS368 barometer (I2C0, address 0x76)
 - Battery voltage on ADC6 (22.1 kΩ / 2.2 kΩ divider, `BAT1_V_DIV` 11.045) and ESC current on ADC7 (`BAT1_A_PER_V` depends on the ESC)
 

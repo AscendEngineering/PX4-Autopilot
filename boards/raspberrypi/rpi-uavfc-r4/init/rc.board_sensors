@@ -1,13 +1,16 @@
 #!/bin/sh
 #
-# RPI-UAVFC-R4 sensors: ICM-56686 on SPI0 (driven by the icm45686 driver until
-# the bench confirms its WHO_AM_I), DPS368 on I2C0 at 0x76. Each start returns
-# on its own when the part is absent, which is the case on a bare Pico 2.
+# RPI-UAVFC-R4 sensors: ICM-56686 on SPI0, DPS368 on I2C0 at 0x76. Each start
+# returns on its own when the part is absent, which is the case on a bare Pico 2.
+#
+# The IMU runs SPI0 at 18.75 MHz. The RP2350 SPI prescaler cannot make the
+# driver's 24 MHz default: 150 MHz / 6 = 25 MHz, over the part's limit, so the
+# next step down, 150 MHz / 8, is requested here.
 #
 #------------------------------------------------------------------------------
 
 board_adc start
 
-icm45686 -s -b 1 -R 0 start
+icm56686 -s -b 1 -R 0 -f 18750 start
 
 dps310 -8 -I -b 1 -a 0x76 start
