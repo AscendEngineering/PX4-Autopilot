@@ -67,6 +67,11 @@
 /* ESC telemetry input, with pull-up */
 #define GPIO_ESC_TELEMETRY	PX4_MAKE_GPIO_INPUT(5)
 
+/* IMU pin 9 INT2/FSYNC/CLKIN through R3. Input with pull-down: the IMU keeps
+ * the pin as INT2 (push-pull output), so the board must not drive it; FSYNC
+ * would read deasserted. INT1 (GPIO26) is the SPI descriptor's DRDY (spi.cpp). */
+#define GPIO_IMU_INT2		(27 | GPIO_PD | GPIO_FUN(RPI_GPIO_FUNC_SIO))
+
 /* ADC: battery voltage and current (RP2350B ADC6 and ADC7) */
 #define ADC_CHANNELS			((1 << 6) | (1 << 7))
 #define ADC_BATTERY_VOLTAGE_CHANNEL	6
@@ -81,6 +86,7 @@
 		GPIO_VDD_9V_EN,		\
 		GPIO_VDD_5V_EN,		\
 		GPIO_ESC_TELEMETRY,	\
+		GPIO_IMU_INT2,		\
 	}
 
 /* board_reset() calls board_on_reset() (init.c): PWM pins low before the reset */
