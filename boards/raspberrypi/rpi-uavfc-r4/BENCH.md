@@ -479,3 +479,27 @@ Board parameter state after this phase: `IMU_GYRO_RATEMAX` 400 (saved; `rc.mc_de
 400 default to 800, so a board default line does nothing), `USB_MAV_MODE` 5 (config; did not lower
 mavlink's CPU share). Open: the UART MAVLink instance goes silent under load; the autostart of the
 IMU is commented out in `rc.board_sensors` for the bench (`00289627b0`), revert before flight.
+
+#### Phase 7b, 2026-10-21: review fixes verified on firmware a0213d15 + f078b353 + e94dfb8e
+
+Build flashed through the resident bootloader (watchdog scratch magic, `reset run`, px4_uploader).
+IMU started from `rc.board_sensors` with `-f 18750 -O 1600`.
+
+| Check | Read |
+| --- | --- |
+| `icm56686 status` (sensors module stopped for headroom) | interval 2500 us (400 Hz), DRDY interrupt enabled, bad register 0, bad transfer 0, FIFO empty 0, FIFO overflow 0, FIFO reset 1, DRDY missed 0 |
+| `listener sensor_accel_fifo` | dt 625 us, x -123 -126 -124 -124, z -1025 -1028 -1027 -1027 (scale 0.00957: -9.8 m/s^2, board flat), 4 samples per batch |
+| SWD rows (same table as Phase 7) | GPIO26 CTRL 5, GPIO27 CTRL 5, pads 0x5a / 0x56, PROC0_INTE3 0x800, NVIC ISER0 bit 21 set, SSPCPSR 8, SIO GPIO_OE bit 27 clear |
+| INT1 pull test, 150 samples per pull | pull-down 1 high, pull-up 1 high: push-pull, idle low, short pulses |
+| `top` over the UART | idle 55 %, wq:SPI1 11 %, stack 1780 of 3056 |
+
+Not captured: `uorb top` rates. The USB link stalled before the query and the 57600 UART link
+starves `SERIAL_CONTROL` replies; the rate follows from dt 625 us and the 2500 us interval.
+
+USB stall, this time real: after some minutes with the IMU running and the sensors module stopped,
+0 raw bytes arrived on the USB port while the device stayed enumerated, `mavlink status` instance #1
+still counted tx 2 kB/s, and `top` showed `mavlink_if1` at 0 % blocked in w:sem with 55 % idle. The
+UART instance kept working at that moment, then also went silent later. This is the rp23xx USB device
+driver in the NuttX fork (a transmit completion that never returns), not the IMU and not CPU load.
+Open item for the fork. Tell the two cases apart by raw bytes on the port: the MAVLink 2 parser
+artifact still delivers bytes, the stall delivers none.
