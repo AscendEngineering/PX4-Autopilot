@@ -44,6 +44,7 @@ void ICM56686::print_usage()
 	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(false, true);
 	PRINT_MODULE_USAGE_PARAM_INT('R', 0, 0, 35, "Rotation", true);
 	PRINT_MODULE_USAGE_PARAM_FLAG('2', "Route the FIFO interrupt to INT2 instead of INT1", true);
+	PRINT_MODULE_USAGE_PARAM_INT('O', 6400, 800, 6400, "ODR in Hz: 6400, 3200, 1600 or 800", true);
 	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
 }
 
@@ -54,7 +55,7 @@ extern "C" int icm56686_main(int argc, char *argv[])
 	BusCLIArguments cli{false, true};
 	cli.default_spi_frequency = SPI_SPEED;
 
-	while ((ch = cli.getOpt(argc, argv, "R:2")) != EOF) {
+	while ((ch = cli.getOpt(argc, argv, "R:2O:")) != EOF) {
 		switch (ch) {
 		case 'R':
 			cli.rotation = (enum Rotation)atoi(cli.optArg());
@@ -62,6 +63,10 @@ extern "C" int icm56686_main(int argc, char *argv[])
 
 		case '2':
 			cli.custom1 = 2;
+			break;
+
+		case 'O':
+			cli.custom2 = atoi(cli.optArg());
 			break;
 		}
 	}

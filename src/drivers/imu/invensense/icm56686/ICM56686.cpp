@@ -76,7 +76,50 @@ ICM56686::ICM56686(const I2CSPIDriverConfig &config) :
 		}
 	}
 
+	ConfigureODR(config.custom2 > 0 ? config.custom2 : DEFAULT_ODR_HZ);
 	ConfigureSampleRate(_px4_gyro.get_max_rate_hz());
+}
+
+void ICM56686::ConfigureODR(const int32_t odr_hz)
+{
+	uint8_t accel_odr = ACCEL_CONFIG0_BIT::ACCEL_ODR_6400_HZ;
+	uint8_t gyro_odr = GYRO_CONFIG0_BIT::GYRO_ODR_6400_HZ;
+	int32_t odr = 6400;
+
+	switch (odr_hz) {
+	case 3200:
+		accel_odr = ACCEL_CONFIG0_BIT::ACCEL_ODR_3200_HZ;
+		gyro_odr = GYRO_CONFIG0_BIT::GYRO_ODR_3200_HZ;
+		odr = 3200;
+		break;
+
+	case 1600:
+		accel_odr = ACCEL_CONFIG0_BIT::ACCEL_ODR_1600_HZ;
+		gyro_odr = GYRO_CONFIG0_BIT::GYRO_ODR_1600_HZ;
+		odr = 1600;
+		break;
+
+	case 800:
+		accel_odr = ACCEL_CONFIG0_BIT::ACCEL_ODR_800_HZ;
+		gyro_odr = GYRO_CONFIG0_BIT::GYRO_ODR_800_HZ;
+		odr = 800;
+		break;
+
+	default:
+		// 6400 Hz: the datasheet default and the rate the SRC/LPF settings were written for
+		break;
+	}
+
+	_fifo_sample_dt = 1e6f / odr;
+
+	for (auto &reg_cfg : _register_cfg) {
+		if (reg_cfg.reg == Register::BANK_0::ACCEL_CONFIG0) {
+			reg_cfg.value = (reg_cfg.value & ~ACCEL_CONFIG0_BIT::ACCEL_ODR_MASK) | accel_odr;
+
+		} else if (reg_cfg.reg == Register::BANK_0::GYRO_CONFIG0) {
+			reg_cfg.value = (reg_cfg.value & ~GYRO_CONFIG0_BIT::GYRO_ODR_MASK) | gyro_odr;
+		}
+	}
 }
 
 ICM56686::~ICM56686()
@@ -291,12 +334,12 @@ void ICM56686::RunImpl()
 
 void ICM56686::ConfigureSampleRate(const int sample_rate)
 {
-	const float minimum_interval = FIFO_SAMPLE_DT;
+	const float minimum_interval = _fifo_sample_dt;
 	_fifo_empty_interval_us = math::max(roundf((1e6f / sample_rate) / minimum_interval) * minimum_interval,
 					    minimum_interval);
-	_fifo_samples = roundf(math::min(_fifo_empty_interval_us / FIFO_SAMPLE_DT,
+	_fifo_samples = roundf(math::min(_fifo_empty_interval_us / _fifo_sample_dt,
 					 static_cast<float>(FIFO_MAX_SAMPLES)));
-	_fifo_empty_interval_us = roundf(_fifo_samples * FIFO_SAMPLE_DT);
+	_fifo_empty_interval_us = roundf(_fifo_samples * _fifo_sample_dt);
 	ConfigureFIFOWatermark(static_cast<uint8_t>(_fifo_samples));
 }
 
@@ -645,7 +688,9 @@ bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 		return false;
 	}
 
-	if (fifo_frames >= FIFO::MAX_FRAMES) {
+	// More frames queued than one transfer can publish: draining them would stamp stale samples
+	// with the current time, so reset for a clean restart instead (same rule as the ICM45686 driver).
+	if (fifo_frames > FIFO_MAX_SAMPLES) {
 		perf_count(_fifo_overflow_perf);
 
 		if (!FIFOReset()) {
@@ -705,7 +750,7 @@ void ICM56686::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DAT
 {
 	sensor_accel_fifo_s accel{};
 	accel.timestamp_sample = timestamp_sample;
-	accel.dt = FIFO_SAMPLE_DT;
+	accel.dt = _fifo_sample_dt;
 
 	for (int i = 0; i < samples; i++) {
 		// The 16 bit FIFO fields hold data[19:4] of the 20 bit high resolution sample, which always
@@ -736,7 +781,7 @@ void ICM56686::ProcessGyro(const hrt_abstime &timestamp_sample, const FIFO::DATA
 {
 	sensor_gyro_fifo_s gyro{};
 	gyro.timestamp_sample = timestamp_sample;
-	gyro.dt = FIFO_SAMPLE_DT;
+	gyro.dt = _fifo_sample_dt;
 
 	for (int i = 0; i < samples; i++) {
 		// The 16 bit FIFO fields hold data[19:4] of the 20 bit high resolution sample, which always

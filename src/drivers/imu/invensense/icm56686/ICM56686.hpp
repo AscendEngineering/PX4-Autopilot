@@ -68,11 +68,8 @@ public:
 private:
 	void exit_and_cleanup() override;
 
-	// 1.6 kHz ODR (datasheet code 0x05, as Betaflight uses for the accel). The RP2350 (150 MHz
-	// Cortex-M33 running from QSPI flash) saturates at the 6.4 kHz ODR: PX4 filters every raw
-	// sample, and with no idle time left the low-priority work queue never brought USB up on the
-	// RPI-UAVFC-R4. 6.4 kHz needs a faster MCU or a per-board ODR option.
-	static constexpr float FIFO_SAMPLE_DT{1e6f / 1600.f};
+	// Default ODR; the -O start option selects 6400, 3200, 1600 or 800 Hz per board.
+	static constexpr int32_t DEFAULT_ODR_HZ{6400};
 
 	static constexpr size_t GYRO_FIFO_MAX_SAMPLES{
 		sizeof(sensor_gyro_fifo_s::x) / sizeof(sensor_gyro_fifo_s::x[0])
@@ -105,6 +102,7 @@ private:
 	bool ConfigureFIFO();
 	bool FIFOBypass();
 	bool FIFOFlush();
+	void ConfigureODR(const int32_t odr_hz);
 	void ConfigureSampleRate(const int sample_rate);
 	void ConfigureFIFOWatermark(const uint8_t samples);
 
@@ -167,7 +165,8 @@ private:
 	} _state{STATE::RESET};
 
 	uint32_t _fifo_empty_interval_us{1250};
-	int32_t _fifo_samples{static_cast<int32_t>(_fifo_empty_interval_us / FIFO_SAMPLE_DT)};
+	float _fifo_sample_dt{1e6f / DEFAULT_ODR_HZ};
+	int32_t _fifo_samples{static_cast<int32_t>(_fifo_empty_interval_us / _fifo_sample_dt)};
 
 	uint8_t _checked_register{0};
 	static constexpr uint8_t REGISTER_CFG_COUNT{11};
@@ -183,12 +182,12 @@ private:
 		},
 		{
 			Register::BANK_0::ACCEL_CONFIG0,
-			ACCEL_CONFIG0_BIT::ACCEL_UI_FS_SEL_32_G | ACCEL_CONFIG0_BIT::ACCEL_ODR_1600_HZ,
+			ACCEL_CONFIG0_BIT::ACCEL_UI_FS_SEL_32_G | ACCEL_CONFIG0_BIT::ACCEL_ODR_6400_HZ,
 			ACCEL_CONFIG0_BIT::ACCEL_CONFIG0_MASK
 		},
 		{
 			Register::BANK_0::GYRO_CONFIG0,
-			GYRO_CONFIG0_BIT::GYRO_UI_FS_SEL_4000_DPS | GYRO_CONFIG0_BIT::GYRO_ODR_1600_HZ,
+			GYRO_CONFIG0_BIT::GYRO_UI_FS_SEL_4000_DPS | GYRO_CONFIG0_BIT::GYRO_ODR_6400_HZ,
 			GYRO_CONFIG0_BIT::GYRO_CONFIG0_MASK
 		},
 		{Register::BANK_0::FIFO_CONFIG0, FIFO_CONFIG0_BIT::FIFO_MODE_STOP_ON_FULL | FIFO_CONFIG0_BIT::FIFO_DEPTH_2K, 0xFF},
