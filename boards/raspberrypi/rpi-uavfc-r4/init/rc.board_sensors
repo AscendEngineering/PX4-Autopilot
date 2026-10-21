@@ -11,7 +11,6 @@
 
 board_adc start
 
-# BENCH: started by hand from the shell
-# icm56686 -s -b 1 -R 0 -f 18750 start
+icm56686 -s -b 1 -R 0 -f 18750 start
 
 dps310 -8 -I -b 1 -a 0x76 start
