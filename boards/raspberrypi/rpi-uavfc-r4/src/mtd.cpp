@@ -60,12 +60,15 @@ static ssize_t rpi_qspi_bwrite(struct mtd_dev_s *mtd, off_t startblock,
  * We define the structure without the invalid member.
  */
 static struct mtd_dev_s rpi_qspi_dev = {
-	.erase = rpi_qspi_erase,
-	.bread = rpi_qspi_bread,
-	.bwrite = rpi_qspi_bwrite,
-	.read = rpi_qspi_read,
-	.write = rpi_qspi_write,
-	.name = "rpi_qspi",
+		.erase = rpi_qspi_erase,
+		.bread = rpi_qspi_bread,
+		.bwrite = rpi_qspi_bwrite,
+		.read = rpi_qspi_read,
+	// #ifdef CONFIG_MTD_BYTE_WRITE
+	// 	.write = NULL,
+	// #endif
+		.write = rpi_qspi_write,
+		.name = "rpi_qspi",
 };
 
 // Physical bus devices
@@ -81,7 +84,7 @@ const px4_mtd_entry_t rpi_params_mtd = {
 	.partd = {
 		{
 			.type = MTD_PARAMETERS,
-			.path = "/fs/mtd_params",
+			.path = "/fs/nor/mtd_params",
 			.nblocks = BOARD_PARAMS_FLASH_SIZE / RPI_FLASH_SECTOR_SIZE,
 		}
 	},
@@ -112,3 +115,19 @@ const px4_mft_s *board_get_manifest(void)
 {
 	return g_manifest;
 }
+
+extern "C" {
+
+int rpi_qspi_storage_initialize(void) {
+	struct mtd_dev_s *mtd_dev = &rpi_qspi_dev;
+	int ret = -ENODEV;
+
+	ret = register_mtddriver("/fs/nor", mtd_dev, 0755, NULL);
+	if (ret < 0) {
+		syslog(LOG_ERR, "ERROR: failed to register mtd driver: %d\n", ret);
+	}
+
+	return ret;
+}
+
+} // extern "C"
