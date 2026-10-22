@@ -1,7 +1,7 @@
-#include <px4_platform_common/px4_manifest.h>
-#include <px4_platform_common/px4_mtd.h>
+#include <errno.h>
+#include <syslog.h>
 #include <px4_arch/rpi_flash.h>
-#include "board_config.h"
+#include <px4_arch/rpi_rom.h>
 
 #include <nuttx/mtd/mtd.h>
 #include <string.h>
@@ -10,7 +10,11 @@
  * RP2350 QSPI Flash MTD Driver Bridge
  *
  * This driver wraps the rpi_flash_* ROM helpers to provide a standard
- * NuttX MTD interface for the board's external QSPI flash.
+ * NuttX MTD interface for the board's external QSPI flash. It covers the
+ * whole part and is registered as the raw node /fs/nor. The parameters do
+ * not use it: with FLASH_BASED_PARAMS they live in the flashfs sectors
+ * (BOARD_PARAMS_FLASH_ADDRESS), so the board publishes no MTD manifest and
+ * the mft/mtd commands see no partitions.
  */
 
 static int rpi_qspi_read(struct mtd_dev_s *mtd, off_t offset, size_t len, uint8_t *buf)
@@ -66,57 +70,9 @@ static struct mtd_dev_s rpi_qspi_dev = {
 	.bread = rpi_qspi_bread,
 	.bwrite = rpi_qspi_bwrite,
 	.read = rpi_qspi_read,
-	// #ifdef CONFIG_MTD_BYTE_WRITE
-	// 	.write = NULL,
-	// #endif
 	.write = rpi_qspi_write,
 	.name = "rpi_qspi",
 };
-
-// Physical bus devices
-const px4_mft_device_t qspi_device = {
-	.bus_type = px4_mft_device_t::ONCHIP,
-	.devid = 0
-};
-
-// MTD partition entries
-const px4_mtd_entry_t rpi_params_mtd = {
-	.device = &qspi_device,
-	.npart = 1,
-	.partd = {
-		{
-			.type = MTD_PARAMETERS,
-			.path = "/fs/nor/mtd_params",
-			.nblocks = BOARD_PARAMS_FLASH_SIZE / RPI_FLASH_SECTOR_SIZE,
-		}
-	},
-};
-
-// MTD manifests
-static const px4_mtd_manifest_t mft = {
-	.nconfigs = 1,
-	.entries = {
-		&rpi_params_mtd,
-	}
-};
-
-// MFT entries
-static const px4_mft_entry_s mtd_mft_qspi = {
-	.type = MTD,
-	.pmft = (void *) &mft,
-};
-
-// Final manifset for QSPI flash
-static const px4_mft_s mft_qspi = {
-	.nmft = 1,
-	.mfts = {&mtd_mft_qspi}
-};
-
-static const px4_mft_s *g_manifest = &mft_qspi;
-const px4_mft_s *board_get_manifest(void)
-{
-	return g_manifest;
-}
 
 extern "C" {
 
