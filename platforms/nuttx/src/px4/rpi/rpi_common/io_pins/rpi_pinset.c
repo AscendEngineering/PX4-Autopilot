@@ -70,6 +70,16 @@ int rpi_setgpioevent(uint32_t pinset, bool risingedge, bool fallingedge, bool ev
 {
 	int ret = -ENOSYS;
 
+	// Configure the pad (function, direction, pulls, input enable) before the IRQ is enabled, as
+	// stm32_gpiosetevent() does, so a driver that only calls px4_arch_gpiosetevent() gets a live input.
+	if (func != NULL) {
+		ret = rpi_gpioconfig(pinset);
+
+		if (ret != OK) {
+			return ret;
+		}
+	}
+
 	if (fallingedge & event & (func != NULL)) {
 		ret = rpi_gpio_irq_attach(pinset & GPIO_NUM_MASK, RPI_GPIO_INTR_EDGE_LOW, func, arg);
 		rpi_gpio_enable_irq(pinset & GPIO_NUM_MASK);
