@@ -63,8 +63,6 @@
 #include <px4_platform_common/init.h>
 #include <px4_platform/board_dma_alloc.h>
 #include <px4_platform/gpio.h>
-#include <px4_platform_common/px4_manifest.h>
-#include <px4_platform_common/mtd_manifest.h>
 
 #if defined(FLASH_BASED_PARAMS)
 #  include <parameters/flashparams/flashfs.h>
@@ -76,8 +74,6 @@ extern void led_on(int led);
 extern void led_off(int led);
 extern int rpi_qspi_storage_initialize(void);
 __END_DECLS
-
-
 
 __EXPORT void board_peripheral_reset(int ms)
 {
@@ -151,7 +147,6 @@ void rp23xx_boardinitialize(void)
 	 * board does for GPIO26 to 29. */
 	const uint32_t adc_pins[] = { GPIO_ADC_VBAT, GPIO_ADC_CURRENT };
 
-
 	for (unsigned i = 0; i < arraySize(adc_pins); i++) {
 		rp23xx_gpio_set_function(adc_pins[i], RP23XX_GPIO_FUNC_NULL);
 		modbits_reg32(RP23XX_PADS_BANK0_GPIO_OD,
@@ -191,30 +186,12 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 			syslog(LOG_ERR, "[boot] FAILED to bind SPI1 to the MMC/SD driver: %d\n", ret);
 		}
 	}
-	int result = rpi_qspi_storage_initialize();
 
-	if (result < 0) {
-		syslog(LOG_ERR,
-		       "ERROR: QSPI storage initialize failed: %d\n", result);
+	/* Whole QSPI flash as a raw MTD node, /fs/nor, for the mtd tools. The
+	 * parameters do not use it; they live in the flashfs sectors below. */
+	if (rpi_qspi_storage_initialize() < 0) {
+		syslog(LOG_ERR, "[boot] FAILED to register the QSPI flash MTD node\n");
 	}
-	/* #ifdef CONFIG_MTD_W25 */
-	/**/
-	/* 			struct mtd_geometry_s geo; */
-	/* 		if (!flash_mtd) { */
-	/* 			flash_mtd = w25_initialize(spi1); */
-	/**/
-	/* 			if (mtd->ioctl(mtd, MTDIOC_GEOMETRY, (unsigned long)((uintptr_t)&geo)) == 0) { */
-	/* 				syslog(LOG_INFO, "[boot] W25N: %lu erase blocks, %lu bytes/block, %lu total bytes\n", */
-	/* 				       (unsigned long)geo.neraseblocks, */
-	/* 				       (unsigned long)geo.erasesize, */
-	/* 				       (unsigned long)geo.neraseblocks * (unsigned long)geo.erasesize); */
-	/* 				if (flash_mtd) { */
-	/* 					syslog(LOG_INFO, "[boot] W25 NOR flash detected on SPI1\n"); */
-	/* 				} */
-	/* 			} */
-	/* 		} */
-	/* #endif */
-
 
 #if defined(FLASH_BASED_PARAMS)
 	/* Two 32 KB pages at the top of flash; numbers are 4 kB sector indices
@@ -225,7 +202,7 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 		{0, 0, 0},
 	};
 
-	result |= parameter_flashfs_init(params_sector_map, NULL, 0);
+	int result = parameter_flashfs_init(params_sector_map, NULL, 0);
 
 	if (result != OK) {
 		syslog(LOG_ERR, "[boot] FAILED to init params in FLASH %d\n", result);
