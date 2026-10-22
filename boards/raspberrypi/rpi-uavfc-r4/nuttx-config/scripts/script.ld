@@ -44,7 +44,7 @@ MEMORY
 OUTPUT_ARCH(arm)
 EXTERN(_vectors)
 ENTRY(_stext)
-
+EXTERN(board_get_manifest)
 SECTIONS
 {
 	.text : {
