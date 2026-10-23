@@ -34,6 +34,7 @@
 
 px4_add_library(arch_flash
 	rpi_flash.c
+	rpi_flash_mtd.c
 	rpi_progmem.c
 )
 
