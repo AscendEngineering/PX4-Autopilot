@@ -56,6 +56,49 @@ static ssize_t rpi_qspi_bwrite(struct mtd_dev_s *mtd, off_t startblock,
 	return rpi_qspi_write(mtd, (uint32_t)startblock, (size_t)nblocks, buffer);
 }
 
+static int rpi_flash_mtd_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg)
+{
+	// struct mtd_dev_s *priv = (struct mtd_dev_s *)dev;
+
+	switch (cmd) {
+	case MTDIOC_GEOMETRY: {
+			struct mtd_geometry_s *geo = (struct mtd_geometry_s *)(uintptr_t)arg;
+
+			if (geo == NULL) {
+				return -EINVAL;
+			}
+
+			memset(geo, 0, sizeof(*geo));
+			geo->blocksize = RPI_FLASH_PAGE_SIZE;
+			geo->erasesize = RPI_FLASH_SECTOR_SIZE;
+			geo->neraseblocks = BOARD_PARAMS_FLASH_SIZE / RPI_FLASH_SECTOR_SIZE;
+			strlcpy(geo->model, "rp23xx-qspi", sizeof(geo->model));
+			return 0;
+		}
+
+	case MTDIOC_BULKERASE:
+		// if (rpi_flash_erase(priv->offset, ) != BOARDS_PARAM_FLASH_SIZE) {
+		// 	return -EIO;
+		// }
+
+		return 0;
+
+	case MTDIOC_ERASESTATE: {
+			uint8_t *state = (uint8_t *)(uintptr_t)arg;
+
+			if (state == NULL) {
+				return -EINVAL;
+			}
+
+			*state = 0xff;
+			return 0;
+		}
+
+	default:
+		return -ENOTTY;
+	}
+}
+
 /*
  * Note: struct mtd_dev_s in NuttX does not have a 'blocksize' member.
  * Geometry is handled via MTDIOC_GEOMETRY ioctl.
@@ -66,10 +109,8 @@ static struct mtd_dev_s rpi_qspi_dev = {
 	.bread = rpi_qspi_bread,
 	.bwrite = rpi_qspi_bwrite,
 	.read = rpi_qspi_read,
-	// #ifdef CONFIG_MTD_BYTE_WRITE
-	// 	.write = NULL,
-	// #endif
 	.write = rpi_qspi_write,
+	.ioctl = rpi_flash_mtd_ioctl,
 	.name = "rpi_qspi",
 };
 
@@ -123,6 +164,7 @@ extern "C" {
 
 	int rpi_qspi_storage_initialize(void)
 	{
+		// This might already attach
 		struct mtd_dev_s *mtd_dev = &rpi_qspi_dev;
 		int ret = -ENODEV;
 
@@ -134,17 +176,7 @@ extern "C" {
 
 		syslog(LOG_INFO, "[boot] W25N MTD registered at /fs/nor\n");
 
-		// unsigned int mtd_count = 0;
-		// mtd_instance_s **instances = px4_mtd_get_instances(&mtd_count);
-		// if (mtd_count > 0 && instances[0]->mtd_dev != NULL) {
-		// 	syslog(LOG_INFO,
-		//        	"MTD device instance detected");
-		//
-		// } else {
-		// 	syslog(LOG_ERR,
-		//        	"ERROR: MTD device registration failed");
-		//
-		// }
+
 		return ret;
 	}
 	int rpi_qspi_attach(mtd_instance_s *instance)
