@@ -116,8 +116,8 @@ static inline bool board_usb_connected(void)
  * part (hw_config.h APP_RESERVATION_SIZE): two 32 KB pages, numbered by
  * their first 4 kB sector (1008 and 1016), served by
  * platforms/nuttx/src/px4/rpi/rpi_common/flash/rpi_progmem.c. */
-#define FLASH_BASED_PARAMS
-#define BOARD_USE_EXTERNAL_FLASH
+// #define FLASH_BASED_PARAMS
+// #define BOARD_USE_EXTERNAL_FLASH
 #define BOARD_PARAMS_FLASH_ADDRESS	0x103f0000u
 #define BOARD_PARAMS_FLASH_SIZE		(64 * 1024)
 #define BOARD_PARAMS_FLASH_PAGE_SIZE	(32 * 1024)

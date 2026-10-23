@@ -67,11 +67,18 @@ typedef struct {
  */
 __EXPORT mtd_instance_s **px4_mtd_get_instances(unsigned int *count);
 
+
+/*
+ * Boards with an RP23XXQSPI device in their MTD manifest return it here, and the
+ * common code then partitions it and registers the FTL and character devices
+ * at the manifest paths. The default returns nullptr: the board registers the
+ * partitions itself and the manifest only answers queries.
+ */
+__EXPORT struct mtd_dev_s *board_mtd_rp23xx_initialize(uint32_t devid);
+
 /*
   Get device complete geometry or a device
  */
-
-
 __EXPORT int  px4_mtd_get_geometry(const mtd_instance_s *instance, unsigned long *blocksize, unsigned long *erasesize,
 				   unsigned long *neraseblocks, unsigned *blkpererase, unsigned *nblocks,
 				   unsigned *partsize);
@@ -91,7 +98,5 @@ int px4_at24c_set_npages(FAR struct mtd_dev_s *dev, uint16_t npages);
 void px4_at24c_deinitialize(void);
 
 int flexspi_attach(mtd_instance_s *instance);
-
-int rpi_qspi_attach(mtd_instance_s *instance);
 
 __END_DECLS

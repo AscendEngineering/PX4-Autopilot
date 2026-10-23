@@ -435,15 +435,16 @@ memoryout:
 #endif
 #if defined(HAS_RP23XXQSPI)
 
-
 		} else if (mtd_list->entries[num_entry]->device->bus_type == px4_mft_device_t::RP23XXQSPI) {
-			rv = rpi_qspi_attach(instances[i]);
-			PX4_INFO("QSP attach result: %d", rv);
-			/* The board registers this device externally.
-				* Populate the query table for all partitions and skip the MTD attach / geometry
-				* steps. */
-			instances[i]->n_partitions_current = nparts;
-			continue;
+			instances[i]->mtd_dev = board_mtd_rp23xx_initialize(instances[i]->devid);
+			rv = 0;
+			if (instances[i]->mtd_dev == nullptr) {
+				/* The board registers this device externally.
+				 * Populate the query table for all partitions and skip the MTD attach / geometry
+				 * steps. */
+				instances[i]->n_partitions_current = nparts;
+				continue;
+			}
 #endif
 
 		} else if (mtd_list->entries[num_entry]->device->bus_type == px4_mft_device_t::ONCHIP) {

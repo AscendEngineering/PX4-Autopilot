@@ -6,59 +6,98 @@
 #include <nuttx/mtd/mtd.h>
 #include <string.h>
 
+#define ERASE_SIZE RPI_FLASH_SECTOR_SIZE
+#define BLOCK_SIZE RPI_FLASH_PAGE_SIZE
+struct rpi_flash_mtd_s {
+	struct mtd_dev_s mtd;
+	uint32_t offset;
+	size_t size;
+};
 /**
  * RP2350 QSPI Flash MTD Driver Bridge
  *
  * This driver wraps the rpi_flash_* ROM helpers to provide a standard
  * NuttX MTD interface for the board's external QSPI flash.
  */
-
-static int rpi_qspi_read(struct mtd_dev_s *mtd, off_t offset, size_t len, uint8_t *buf)
+static bool in_region(const struct rpi_flash_mtd_s *priv, size_t start, size_t count)
 {
-	/* QSPI flash is mapped into the XIP window starting at RPI_FLASH_BASE */
-	const uint8_t *xip_ptr = (const uint8_t *)(RPI_FLASH_BASE + offset);
-	memcpy(buf, xip_ptr, len);
-	return 0;
+	return start <= priv->size && count <= priv->size - start;
 }
 
-static int rpi_qspi_erase(struct mtd_dev_s *mtd, off_t offset, size_t len)
+static int rpi_flash_mtd_erase(struct mtd_dev_s *mtd, off_t startblock, size_t nblocks)
 {
-	if (rpi_flash_erase(offset, len) != len) {
+	struct rpi_flash_mtd_s *priv = (struct rpi_flash_mtd_s *)mtd;
+	const size_t start = (size_t)startblock * ERASE_SIZE;
+	const size_t count = nblocks * ERASE_SIZE;
+
+	if (nblocks == 0) {
+		return 0;
+	}
+
+	if (!in_region(priv, start, count)) {
+		return -EINVAL;
+	}
+
+	if (rpi_flash_erase(priv->offset + start, count) != count) {
 		return -EIO;
 	}
 
-	return 0;
+	return (int)nblocks;
 }
 
-static int rpi_qspi_write(struct mtd_dev_s *mtd, off_t offset, size_t len, const uint8_t *buf)
-{
-	if (rpi_flash_program(offset, buf, len) != len) {
-		return -EIO;
-	}
-
-	return 0;
-}
-
-static ssize_t rpi_qspi_bread(struct mtd_dev_s *mtd, off_t startblock,
+static ssize_t rpi_flash_mtd_bread(struct mtd_dev_s *mtd, off_t startblock,
 			      size_t nblocks, uint8_t *buffer)
 {
-	/*
-	 * NuttX MTD bread expects offset in blocks.
-	 * Since we treat this as byte-addressable (blocksize=1),
-	 * startblock is the byte offset.
-	 */
-	return rpi_qspi_read(mtd, (uint32_t)startblock, (size_t)nblocks, buffer);
+	struct rpi_flash_mtd_s *priv = (struct rpi_flash_mtd_s *)mtd;
+	const size_t start = (size_t)startblock * BLOCK_SIZE;
+	const size_t count = nblocks * BLOCK_SIZE;
+
+	if (!in_region(priv, start, count)) {
+		return -EINVAL;
+	}
+
+	memcpy(buffer, (const void *)(RPI_FLASH_BASE + priv->offset + start), count);
+	return (ssize_t)nblocks;
 }
 
-static ssize_t rpi_qspi_bwrite(struct mtd_dev_s *mtd, off_t startblock,
+static ssize_t rpi_flash_mtd_bwrite(struct mtd_dev_s *mtd, off_t startblock,
 			       size_t nblocks, const uint8_t *buffer)
 {
-	return rpi_qspi_write(mtd, (uint32_t)startblock, (size_t)nblocks, buffer);
+	struct rpi_flash_mtd_s *priv = (struct rpi_flash_mtd_s *)mtd;
+	const size_t start = (size_t)startblock * BLOCK_SIZE;
+	const size_t count = nblocks * BLOCK_SIZE;
+
+	if (nblocks == 0) {
+		return 0;
+	}
+
+	if (!in_region(priv, start, count)) {
+		return -EINVAL;
+	}
+
+	if (rpi_flash_program(priv->offset + start, buffer, count) != count) {
+		return -EIO;
+	}
+
+	return (ssize_t)nblocks;
 }
 
-static int rpi_flash_mtd_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg)
+static ssize_t rpi_flash_mtd_read(struct mtd_dev_s *mtd, off_t offset, size_t nbytes, uint8_t *buffer)
 {
-	// struct mtd_dev_s *priv = (struct mtd_dev_s *)dev;
+	struct rpi_flash_mtd_s *priv = (struct rpi_flash_mtd_s *)mtd;
+
+	if (!in_region(priv, (size_t)offset, nbytes)) {
+		return -EINVAL;
+	}
+
+	memcpy(buffer, (const void *)(RPI_FLASH_BASE + priv->offset + (size_t)offset), nbytes);
+	return (ssize_t)nbytes;
+
+}
+
+static int rpi_flash_mtd_ioctl(struct mtd_dev_s *mtd, int cmd, unsigned long arg)
+{
+	struct rpi_flash_mtd_s *priv = (struct rpi_flash_mtd_s *)mtd;
 
 	switch (cmd) {
 	case MTDIOC_GEOMETRY: {
@@ -70,16 +109,16 @@ static int rpi_flash_mtd_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg
 
 			memset(geo, 0, sizeof(*geo));
 			geo->blocksize = RPI_FLASH_PAGE_SIZE;
-			geo->erasesize = RPI_FLASH_SECTOR_SIZE;
-			geo->neraseblocks = BOARD_PARAMS_FLASH_SIZE / RPI_FLASH_SECTOR_SIZE;
+			geo->erasesize = ERASE_SIZE;
+			geo->neraseblocks = priv->size / ERASE_SIZE;
 			strlcpy(geo->model, "rp23xx-qspi", sizeof(geo->model));
 			return 0;
 		}
 
 	case MTDIOC_BULKERASE:
-		// if (rpi_flash_erase(priv->offset, ) != BOARDS_PARAM_FLASH_SIZE) {
-		// 	return -EIO;
-		// }
+		if (rpi_flash_erase(priv->offset, priv->size) != BOARD_PARAMS_FLASH_SIZE) {
+			return -EIO;
+		}
 
 		return 0;
 
@@ -99,20 +138,6 @@ static int rpi_flash_mtd_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg
 	}
 }
 
-/*
- * Note: struct mtd_dev_s in NuttX does not have a 'blocksize' member.
- * Geometry is handled via MTDIOC_GEOMETRY ioctl.
- * We define the structure without the invalid member.
- */
-static struct mtd_dev_s rpi_qspi_dev = {
-	.erase = rpi_qspi_erase,
-	.bread = rpi_qspi_bread,
-	.bwrite = rpi_qspi_bwrite,
-	.read = rpi_qspi_read,
-	.write = rpi_qspi_write,
-	.ioctl = rpi_flash_mtd_ioctl,
-	.name = "rpi_qspi",
-};
 
 // Physical bus devices
 const px4_mft_device_t qspi_device = {
@@ -128,7 +153,7 @@ const px4_mtd_entry_t rpi_params_mtd = {
 		{
 			.type = MTD_PARAMETERS,
 			.path = "/fs/nor/mtd_params",
-			.nblocks = BOARD_PARAMS_FLASH_SIZE / RPI_FLASH_SECTOR_SIZE,
+			.nblocks = BOARD_PARAMS_FLASH_SIZE / RPI_FLASH_PAGE_SIZE,
 		}
 	},
 };
@@ -160,36 +185,36 @@ const px4_mft_s *board_get_manifest(void)
 	return g_manifest;
 }
 
-extern "C" {
 
-	int rpi_qspi_storage_initialize(void)
-	{
-		// This might already attach
-		struct mtd_dev_s *mtd_dev = &rpi_qspi_dev;
-		int ret = -ENODEV;
-
-		ret = register_mtddriver("/fs/nor", mtd_dev, 0755, NULL);
-
-		if (ret < 0) {
-			syslog(LOG_ERR, "ERROR: failed to register mtd driver: %d\n", ret);
-		}
-
-		syslog(LOG_INFO, "[boot] W25N MTD registered at /fs/nor\n");
-
-
-		return ret;
-	}
-	int rpi_qspi_attach(mtd_instance_s *instance)
-	{
-		int rv = rpi_qspi_storage_initialize();
-
-		if (rv != OK) {
-			syslog(LOG_ERR, "failed to initalize rpi qspi flash");
-			return -ENXIO;
-		}
-
-		instance->mtd_dev = &rpi_qspi_dev;
-		return OK;
+struct mtd_dev_s* rpi_flash_mtd_initialize(uint32_t offset, size_t size)
+{
+	if (size == 0 || (offset % ERASE_SIZE) != 0 || (size % ERASE_SIZE) != 0 || offset + size < offset) {
+		return NULL;
 	}
 
-} // extern "C"
+	if (!rpi_flash_init()) {
+		return NULL;
+	}
+
+	struct rpi_flash_mtd_s *priv = (rpi_flash_mtd_s*)kmm_zalloc(sizeof(*priv));
+
+	if (priv == NULL) {
+		return NULL;
+	}
+
+	priv->mtd.erase = rpi_flash_mtd_erase;
+	priv->mtd.bread = rpi_flash_mtd_bread;
+	priv->mtd.bwrite = rpi_flash_mtd_bwrite;
+	priv->mtd.read = rpi_flash_mtd_read;
+	priv->mtd.ioctl = rpi_flash_mtd_ioctl;
+	priv->mtd.name = "rpi_flash";
+	priv->offset = offset;
+	priv->size = size;
+
+	return &priv->mtd;
+}
+
+struct mtd_dev_s *board_mtd_rp23xx_initialize(uint32_t devid)
+{
+	return rpi_flash_mtd_initialize(BOARD_PARAMS_FLASH_ADDRESS - RPI_FLASH_BASE, BOARD_PARAMS_FLASH_SIZE);
+}
