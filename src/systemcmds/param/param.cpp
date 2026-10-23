@@ -602,7 +602,8 @@ do_load_or_init(const char *backup_file_name)
 
 	int fd = -1;
 
-	if (backup_file_name) {
+	/* rcS passes an empty name when the board has no storage for a backup */
+	if (backup_file_name && backup_file_name[0] != '\0') {
 		fd = open(backup_file_name, O_RDONLY);
 
 		if (fd < 0 && errno != ENOENT) {
