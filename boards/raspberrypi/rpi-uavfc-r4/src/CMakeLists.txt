@@ -53,6 +53,7 @@ else()
 		init.c
 		led.c
 		spi.cpp
+		mtd.cpp
 		timer_config.cpp
 		usb.c
 	)

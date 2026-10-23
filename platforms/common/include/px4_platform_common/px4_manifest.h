@@ -54,6 +54,7 @@ typedef struct  {
 		SPI = 1,
 		ONCHIP = 2,
 		FLEXSPI = 3,
+		RP23XXQSPI = 4,
 	} bus_type;
 
 	enum px4_spi_driver {

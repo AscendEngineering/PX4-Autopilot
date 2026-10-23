@@ -63,6 +63,9 @@
 #include <px4_platform_common/init.h>
 #include <px4_platform/board_dma_alloc.h>
 #include <px4_platform/gpio.h>
+#include <px4_platform_common/px4_manifest.h>
+#include <px4_platform_common/px4_mtd.h>
+#include <px4_platform_common/mtd_manifest.h>
 
 #if defined(FLASH_BASED_PARAMS)
 #  include <parameters/flashparams/flashfs.h>
@@ -73,6 +76,8 @@ extern void led_init(void);
 extern void led_on(int led);
 extern void led_off(int led);
 __END_DECLS
+
+
 
 __EXPORT void board_peripheral_reset(int ms)
 {
@@ -145,6 +150,7 @@ void rp23xx_boardinitialize(void)
 	 * backend (rpi_common/adc) assumes the board has done this, as the Pico
 	 * board does for GPIO26 to 29. */
 	const uint32_t adc_pins[] = { GPIO_ADC_VBAT, GPIO_ADC_CURRENT };
+
 
 	for (unsigned i = 0; i < arraySize(adc_pins); i++) {
 		rp23xx_gpio_set_function(adc_pins[i], RP23XX_GPIO_FUNC_NULL);

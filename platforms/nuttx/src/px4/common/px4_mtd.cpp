@@ -412,7 +412,6 @@ memoryout:
 				rv = spi_nor_attach<mx25l_initialize_spi>(*instances[i], CONFIG_MX25L_SPIFREQUENCY);
 				break;
 #endif
-
 			case px4_mft_device_t::SPI_DRIVER_DEFAULT:
 			default:
 				rv = ramtron_attach(*instances[i]);
@@ -423,6 +422,19 @@ memoryout:
 
 		} else if (mtd_list->entries[num_entry]->device->bus_type == px4_mft_device_t::FLEXSPI) {
 			rv = flexspi_attach(instances[i]);
+#endif
+#if defined(HAS_RP23XXQSPI)
+
+		} else if (mtd_list->entries[num_entry]->device->bus_type == px4_mft_device_t::RP23XXQSPI) {
+			instances[i]->mtd_dev = board_mtd_rp23xx_initialize(instances[i]->devid);
+			rv = 0;
+			if (instances[i]->mtd_dev == nullptr) {
+				/* The board registers this device externally.
+				 * Populate the query table for all partitions and skip the MTD attach / geometry
+				 * steps. */
+				instances[i]->n_partitions_current = nparts;
+				continue;
+			}
 #endif
 
 		} else if (mtd_list->entries[num_entry]->device->bus_type == px4_mft_device_t::ONCHIP) {
