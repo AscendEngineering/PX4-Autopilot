@@ -71,6 +71,14 @@ __EXPORT mtd_instance_s **px4_mtd_get_instances(unsigned int *count);
   Get device complete geometry or a device
  */
 
+/*
+ * Boards with an ONCHIP device in their MTD manifest return it here, and the
+ * common code then partitions it and registers the FTL and character devices
+ * at the manifest paths. The default returns nullptr: the board registers the
+ * partitions itself and the manifest only answers queries.
+ */
+__EXPORT struct mtd_dev_s *board_mtd_onchip_initialize(uint32_t devid);
+
 
 __EXPORT int  px4_mtd_get_geometry(const mtd_instance_s *instance, unsigned long *blocksize, unsigned long *erasesize,
 				   unsigned long *neraseblocks, unsigned *blkpererase, unsigned *nblocks,

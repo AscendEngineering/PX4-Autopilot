@@ -309,6 +309,13 @@ static const px4_mtd_manifest_t default_mtd_config = {
 };
 #endif
 
+__EXPORT struct mtd_dev_s *board_mtd_onchip_initialize(uint32_t devid) weak_function;
+
+struct mtd_dev_s *board_mtd_onchip_initialize(uint32_t devid)
+{
+	return nullptr;
+}
+
 int px4_mtd_config(const px4_mtd_manifest_t *mft_mtd)
 {
 	int rv = -EINVAL;
@@ -426,12 +433,16 @@ memoryout:
 #endif
 
 		} else if (mtd_list->entries[num_entry]->device->bus_type == px4_mft_device_t::ONCHIP) {
-			/* ONCHIP type is registered externally.
-			 * Populate the query table for all partitions and skip the MTD attach / geometry
-			 * steps. */
-			instances[i]->n_partitions_current = nparts;
+			instances[i]->mtd_dev = board_mtd_onchip_initialize(instances[i]->devid);
 			rv = 0;
-			continue;
+
+			if (instances[i]->mtd_dev == nullptr) {
+				/* The board registers this device externally.
+				 * Populate the query table for all partitions and skip the MTD attach / geometry
+				 * steps. */
+				instances[i]->n_partitions_current = nparts;
+				continue;
+			}
 		}
 
 		if (rv != 0) {
