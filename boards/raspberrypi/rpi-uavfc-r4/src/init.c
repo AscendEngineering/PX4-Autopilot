@@ -64,6 +64,7 @@
 #include <px4_platform/board_dma_alloc.h>
 #include <px4_platform/gpio.h>
 #include <px4_platform_common/px4_manifest.h>
+#include <px4_platform_common/px4_mtd.h>
 #include <px4_platform_common/mtd_manifest.h>
 
 #if defined(FLASH_BASED_PARAMS)
@@ -74,7 +75,6 @@ __BEGIN_DECLS
 extern void led_init(void);
 extern void led_on(int led);
 extern void led_off(int led);
-extern int rpi_qspi_storage_initialize(void);
 __END_DECLS
 
 
@@ -191,30 +191,6 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 			syslog(LOG_ERR, "[boot] FAILED to bind SPI1 to the MMC/SD driver: %d\n", ret);
 		}
 	}
-	int result = rpi_qspi_storage_initialize();
-
-	if (result < 0) {
-		syslog(LOG_ERR,
-		       "ERROR: QSPI storage initialize failed: %d\n", result);
-	}
-	/* #ifdef CONFIG_MTD_W25 */
-	/**/
-	/* 			struct mtd_geometry_s geo; */
-	/* 		if (!flash_mtd) { */
-	/* 			flash_mtd = w25_initialize(spi1); */
-	/**/
-	/* 			if (mtd->ioctl(mtd, MTDIOC_GEOMETRY, (unsigned long)((uintptr_t)&geo)) == 0) { */
-	/* 				syslog(LOG_INFO, "[boot] W25N: %lu erase blocks, %lu bytes/block, %lu total bytes\n", */
-	/* 				       (unsigned long)geo.neraseblocks, */
-	/* 				       (unsigned long)geo.erasesize, */
-	/* 				       (unsigned long)geo.neraseblocks * (unsigned long)geo.erasesize); */
-	/* 				if (flash_mtd) { */
-	/* 					syslog(LOG_INFO, "[boot] W25 NOR flash detected on SPI1\n"); */
-	/* 				} */
-	/* 			} */
-	/* 		} */
-	/* #endif */
-
 
 #if defined(FLASH_BASED_PARAMS)
 	/* Two 32 KB pages at the top of flash; numbers are 4 kB sector indices
@@ -225,7 +201,7 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 		{0, 0, 0},
 	};
 
-	result |= parameter_flashfs_init(params_sector_map, NULL, 0);
+	int result = parameter_flashfs_init(params_sector_map, NULL, 0);
 
 	if (result != OK) {
 		syslog(LOG_ERR, "[boot] FAILED to init params in FLASH %d\n", result);

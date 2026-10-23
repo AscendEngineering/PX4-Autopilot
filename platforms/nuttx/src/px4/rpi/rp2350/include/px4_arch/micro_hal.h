@@ -155,4 +155,5 @@ struct spi_dev_s *rp23xx_spibus_initialize(int port);
 #  define PX4_ADC_INTERNAL_TEMP_SENSOR_CHANNEL 4
 #endif
 
+#define HAS_RP23XXQSPI
 __END_DECLS

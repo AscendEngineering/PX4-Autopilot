@@ -433,6 +433,13 @@ memoryout:
 		} else if (mtd_list->entries[num_entry]->device->bus_type == px4_mft_device_t::FLEXSPI) {
 			rv = flexspi_attach(instances[i]);
 #endif
+#if defined(HAS_RP23XXQSPI)
+
+
+		} else if (mtd_list->entries[num_entry]->device->bus_type == px4_mft_device_t::RP23XXQSPI) {
+			rv = rpi_qspi_attach(instances[i]);
+			PX4_INFO("QSP attach result: %d", rv);
+#endif
 
 		} else if (mtd_list->entries[num_entry]->device->bus_type == px4_mft_device_t::ONCHIP) {
 			/* ONCHIP type is registered externally.

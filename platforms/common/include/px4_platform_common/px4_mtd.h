@@ -92,4 +92,6 @@ void px4_at24c_deinitialize(void);
 
 int flexspi_attach(mtd_instance_s *instance);
 
+int rpi_qspi_attach(mtd_instance_s *instance);
+
 __END_DECLS

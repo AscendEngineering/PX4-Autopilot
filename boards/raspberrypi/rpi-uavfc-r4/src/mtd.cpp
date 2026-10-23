@@ -75,7 +75,7 @@ static struct mtd_dev_s rpi_qspi_dev = {
 
 // Physical bus devices
 const px4_mft_device_t qspi_device = {
-	.bus_type = px4_mft_device_t::ONCHIP,
+	.bus_type = px4_mft_device_t::RP23XXQSPI,
 	.devid = 0
 };
 
@@ -113,6 +113,7 @@ static const px4_mft_s mft_qspi = {
 };
 
 static const px4_mft_s *g_manifest = &mft_qspi;
+
 const px4_mft_s *board_get_manifest(void)
 {
 	return g_manifest;
@@ -131,7 +132,32 @@ extern "C" {
 			syslog(LOG_ERR, "ERROR: failed to register mtd driver: %d\n", ret);
 		}
 
+		syslog(LOG_INFO, "[boot] W25N MTD registered at /fs/nor\n");
+
+		// unsigned int mtd_count = 0;
+		// mtd_instance_s **instances = px4_mtd_get_instances(&mtd_count);
+		// if (mtd_count > 0 && instances[0]->mtd_dev != NULL) {
+		// 	syslog(LOG_INFO,
+		//        	"MTD device instance detected");
+		//
+		// } else {
+		// 	syslog(LOG_ERR,
+		//        	"ERROR: MTD device registration failed");
+		//
+		// }
 		return ret;
+	}
+	int rpi_qspi_attach(mtd_instance_s *instance)
+	{
+		int rv = rpi_qspi_storage_initialize();
+
+		if (rv != OK) {
+			syslog(LOG_ERR, "failed to initalize rpi qspi flash");
+			return -ENXIO;
+		}
+
+		instance->mtd_dev = &rpi_qspi_dev;
+		return OK;
 	}
 
 } // extern "C"
