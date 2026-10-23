@@ -60,7 +60,7 @@ else()
 
 	target_link_libraries(drivers_board
 		PRIVATE
-			arch_flash		# up_progmem_ext_* for flash-based parameters
+			arch_flash		# MTD device for the parameter store (mtd.cpp)
 			arch_io_pins
 			arch_spi
 			drivers__led		# drv_led_start

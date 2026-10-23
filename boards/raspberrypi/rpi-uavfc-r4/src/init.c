@@ -64,15 +64,10 @@
 #include <px4_platform/board_dma_alloc.h>
 #include <px4_platform/gpio.h>
 
-#if defined(FLASH_BASED_PARAMS)
-#  include <parameters/flashparams/flashfs.h>
-#endif
-
 __BEGIN_DECLS
 extern void led_init(void);
 extern void led_on(int led);
 extern void led_off(int led);
-extern int rpi_qspi_storage_initialize(void);
 __END_DECLS
 
 __EXPORT void board_peripheral_reset(int ms)
@@ -187,30 +182,8 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 		}
 	}
 
-	/* Whole QSPI flash as a raw MTD node, /fs/nor, for the mtd tools. The
-	 * parameters do not use it; they live in the flashfs sectors below. */
-	if (rpi_qspi_storage_initialize() < 0) {
-		syslog(LOG_ERR, "[boot] FAILED to register the QSPI flash MTD node\n");
-	}
-
-#if defined(FLASH_BASED_PARAMS)
-	/* Two 32 KB pages at the top of flash; numbers are 4 kB sector indices
-	 * (rpi_progmem.c, hw_config.h APP_RESERVATION_SIZE). */
-	static sector_descriptor_t params_sector_map[] = {
-		{1008, BOARD_PARAMS_FLASH_PAGE_SIZE, BOARD_PARAMS_FLASH_ADDRESS},
-		{1016, BOARD_PARAMS_FLASH_PAGE_SIZE, BOARD_PARAMS_FLASH_ADDRESS + BOARD_PARAMS_FLASH_PAGE_SIZE},
-		{0, 0, 0},
-	};
-
-	int result = parameter_flashfs_init(params_sector_map, NULL, 0);
-
-	if (result != OK) {
-		syslog(LOG_ERR, "[boot] FAILED to init params in FLASH %d\n", result);
-		led_off(LED_BLUE);
-	}
-
-#endif
-
+	/* The parameter store on the QSPI flash is set up from the MTD manifest
+	 * (mtd.cpp) by px4_platform_configure(). */
 	px4_platform_configure();
 	return OK;
 }

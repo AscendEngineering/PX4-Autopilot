@@ -112,15 +112,11 @@ static inline bool board_usb_connected(void)
 }
 #define BOARD_ADC_USB_CONNECTED	board_usb_connected()
 
-/* Flash-based parameters in the 64 KB reservation at the top of the 4 MB
- * part (hw_config.h APP_RESERVATION_SIZE): two 32 KB pages, numbered by
- * their first 4 kB sector (1008 and 1016), served by
- * platforms/nuttx/src/px4/rpi/rpi_common/flash/rpi_progmem.c. */
-#define FLASH_BASED_PARAMS
-#define BOARD_USE_EXTERNAL_FLASH
+/* Parameter store: the 64 KB reservation at the top of the 4 MB part
+ * (hw_config.h APP_RESERVATION_SIZE), an MTD device over the ROM flash
+ * library (src/mtd.cpp) with the file /fs/nor/mtd_params on it. */
 #define BOARD_PARAMS_FLASH_ADDRESS	0x103f0000u
 #define BOARD_PARAMS_FLASH_SIZE		(64 * 1024)
-#define BOARD_PARAMS_FLASH_PAGE_SIZE	(32 * 1024)
 
 /* High-resolution timer */
 #define HRT_TIMER		1
@@ -142,11 +138,6 @@ __BEGIN_DECLS
 extern void rpi_spiinitialize(void);
 extern void rp23xx_usbinitialize(void);
 extern void board_peripheral_reset(int ms);
-
-/* rpi_progmem.c, for src/lib/parameters/flashparams/flashfs.c */
-ssize_t up_progmem_ext_getpage(size_t addr);
-ssize_t up_progmem_ext_eraseblock(size_t block);
-ssize_t up_progmem_ext_write(size_t addr, const void *buf, size_t count);
 
 #include <px4_platform_common/board_common.h>
 
