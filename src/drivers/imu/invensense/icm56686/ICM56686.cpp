@@ -104,6 +104,11 @@ void ICM56686::ConfigureODR(const int32_t odr_hz)
 		gyro_odr = GYRO_CONFIG0_BIT::GYRO_ODR_800_HZ;
 		odr = 800;
 		break;
+	case 400:
+		accel_odr = ACCEL_CONFIG0_BIT::ACCEL_ODR_400_HZ;
+		gyro_odr = GYRO_CONFIG0_BIT::GYRO_ODR_400_HZ;
+		odr = 400;
+		break;
 
 	default:
 		// 6400 Hz: the datasheet default and the rate the SRC/LPF settings were written for
@@ -336,9 +341,11 @@ void ICM56686::ConfigureSampleRate(const int sample_rate)
 {
 	const float minimum_interval = _fifo_sample_dt;
 	_fifo_empty_interval_us = math::max(roundf((1e6f / sample_rate) / minimum_interval) * minimum_interval,
-					    minimum_interval);
+						    minimum_interval);
 	_fifo_samples = roundf(math::min(_fifo_empty_interval_us / _fifo_sample_dt,
-					 static_cast<float>(FIFO_MAX_SAMPLES)));
+						 static_cast<float>(FIFO_MAX_SAMPLES)));
+	// Enforce a minimum watermark to prevent interrupt storms.
+	// _fifo_samples = math::max(_fifo_samples, 20);
 	_fifo_empty_interval_us = roundf(_fifo_samples * _fifo_sample_dt);
 	ConfigureFIFOWatermark(static_cast<uint8_t>(_fifo_samples));
 }
@@ -389,10 +396,10 @@ bool ICM56686::Configure()
 
 	// ODRs at or above 4 kHz require an 8 us interrupt pulse.
 	success &= IregSetAndClearBits(IREG::INT_PULSE_MIN_ON_INTF0,
-				       INTF0_PULSE_BIT::DURATION_8_US,
+				       INTF0_PULSE_BIT::DURATION_100_US,
 				       INTF0_PULSE_BIT::DURATION_MASK);
 	success &= IregSetAndClearBits(IREG::INT_PULSE_MIN_OFF_INTF0,
-				       INTF0_PULSE_BIT::DURATION_8_US,
+				       INTF0_PULSE_BIT::DURATION_100_US,
 				       INTF0_PULSE_BIT::DURATION_MASK);
 
 	// Run both UI paths with the sample rate converter and the pre-filter enabled, and with the
@@ -660,7 +667,7 @@ bool ICM56686::IregSetAndClearBits(const uint16_t reg, const uint8_t set_bits, c
 	return IregRead(reg, check) && check == new_value;
 }
 
-uint16_t ICM56686::FIFOReadCount()
+uint16_t RAMFUNC ICM56686::FIFOReadCount()
 {
 	uint8_t fifo_count[3] {
 		static_cast<uint8_t>(static_cast<uint8_t>(Register::BANK_0::FIFO_COUNT_0) | DIR_READ), 0, 0
@@ -808,7 +815,7 @@ void ICM56686::ProcessGyro(const hrt_abstime &timestamp_sample, const FIFO::DATA
 	}
 }
 
-bool ICM56686::ProcessTemperature(const FIFO::DATA fifo[], const uint8_t samples)
+bool RAMFUNC ICM56686::ProcessTemperature(const FIFO::DATA fifo[], const uint8_t samples)
 {
 	int16_t temperature_samples[FIFO_MAX_SAMPLES] {};
 	float temperature_sum{0};

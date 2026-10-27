@@ -140,6 +140,7 @@ enum ACCEL_CONFIG0_BIT : uint8_t {
 	ACCEL_ODR_3200_HZ = Bit2,
 	ACCEL_ODR_1600_HZ = Bit2 | Bit0,
 	ACCEL_ODR_800_HZ = Bit2 | Bit1,
+	ACCEL_ODR_400_HZ = Bit3 | Bit2 | Bit1,
 	ACCEL_ODR_MASK = Bit3 | Bit2 | Bit1 | Bit0,
 	ACCEL_CONFIG0_MASK = Bit6 | Bit5 | Bit4 | Bit3 | Bit2 | Bit1 | Bit0,
 };
@@ -150,6 +151,7 @@ enum GYRO_CONFIG0_BIT : uint8_t {
 	GYRO_ODR_3200_HZ = Bit2,
 	GYRO_ODR_1600_HZ = Bit2 | Bit0,
 	GYRO_ODR_800_HZ = Bit2 | Bit1,
+	GYRO_ODR_400_HZ = Bit3 | Bit2 | Bit1,
 	GYRO_ODR_MASK = Bit3 | Bit2 | Bit1 | Bit0,
 	GYRO_CONFIG0_MASK = 0xFF,
 };
@@ -192,6 +194,7 @@ enum REG_MISC2_BIT : uint8_t {
 
 enum INTF0_PULSE_BIT : uint8_t {
 	DURATION_8_US = Bit0,
+	DURATION_100_US = Bit1,
 	DURATION_MASK = Bit2 | Bit1 | Bit0,
 };
 
