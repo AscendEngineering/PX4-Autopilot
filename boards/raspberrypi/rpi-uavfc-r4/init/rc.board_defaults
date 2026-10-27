@@ -2,7 +2,8 @@
 #
 # RPI-UAVFC-R4 defaults. Generic quad X airframe so the startup script finds
 # an airframe and starts the flight stack. Battery divider from the
-# schematic: 22.1 k over 2.2 k. The current scale depends on the ESC.
+# schematic: 22.1 k over 2.2 k. Current scale is for the T-Motor F55A Pro II
+# current output (15.2 mV/A); calibrate the current offset for the installed ESC.
 # Both circuit breakers are set for bench use; review them before flight.
 # Missions stay in RAM, as on other FPV boards; the SD card holds logs.
 #
@@ -10,5 +11,6 @@
 
 param set-default SYS_AUTOSTART 4001
 param set-default BAT1_V_DIV 11.045
+param set-default BAT1_A_PER_V 65.7895
 param set-default CBRK_SUPPLY_CHK 894281
 param set-default CBRK_IO_SAFETY 22027
