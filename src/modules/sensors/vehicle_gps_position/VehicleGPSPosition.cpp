@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "VehicleGPSPosition.hpp"
+#include <px4_arch/rpi_flash.h>
 
 #include <px4_platform_common/log.h>
 #include <lib/geo/geo.h>
@@ -189,7 +190,7 @@ void VehicleGPSPosition::ParametersUpdate(bool force)
 	}
 }
 
-void VehicleGPSPosition::Run()
+void RAMFUNC VehicleGPSPosition::Run()
 {
 	perf_begin(_cycle_perf);
 	ParametersUpdate();

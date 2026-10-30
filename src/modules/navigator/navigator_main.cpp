@@ -45,6 +45,7 @@
  */
 
 #include "navigator.h"
+#include <px4_arch/rpi_flash.h>
 
 #include <float.h>
 #include <sys/stat.h>
@@ -213,7 +214,7 @@ Navigator::~Navigator()
 #endif // CONFIG_NAVIGATOR_ADSB
 }
 
-void Navigator::params_update()
+void RAMFUNC Navigator::params_update()
 {
 	updateParams();
 
@@ -232,7 +233,7 @@ void Navigator::params_update()
 	_mission.set_command_timeout(_param_mis_command_tout.get());
 }
 
-void Navigator::run()
+void RAMFUNC Navigator::run()
 {
 
 	/* Try to load the geofence file if it exists. */
@@ -1210,7 +1211,7 @@ void Navigator::run()
 	}
 }
 
-void Navigator::geofence_breach_check()
+void RAMFUNC Navigator::geofence_breach_check()
 {
 	static constexpr hrt_abstime GEOFENCE_CHECK_INTERVAL_US = 200_ms;
 
@@ -1313,14 +1314,14 @@ void Navigator::geofence_breach_check()
 	}
 }
 
-int Navigator::run_trampoline(int argc, char *argv[])
+int RAMFUNC Navigator::run_trampoline(int argc, char *argv[])
 {
 	return ModuleBase::run_trampoline_impl(desc, [](int ac, char *av[]) -> ModuleBase * {
 		return Navigator::instantiate(ac, av);
 	}, argc, argv);
 }
 
-int Navigator::task_spawn(int argc, char *argv[])
+int RAMFUNC Navigator::task_spawn(int argc, char *argv[])
 {
 	desc.task_id = px4_task_spawn_cmd("navigator",
 					  SCHED_DEFAULT,
@@ -1337,7 +1338,7 @@ int Navigator::task_spawn(int argc, char *argv[])
 	return 0;
 }
 
-Navigator *Navigator::instantiate(int argc, char *argv[])
+Navigator * RAMFUNC Navigator::instantiate(int argc, char *argv[])
 {
 	Navigator *instance = new Navigator();
 
@@ -1348,7 +1349,7 @@ Navigator *Navigator::instantiate(int argc, char *argv[])
 	return instance;
 }
 
-int Navigator::print_status()
+int RAMFUNC Navigator::print_status()
 {
 	PX4_INFO("Running");
 
@@ -1359,19 +1360,19 @@ int Navigator::print_status()
 	return 0;
 }
 
-void Navigator::publish_position_setpoint_triplet()
+void RAMFUNC Navigator::publish_position_setpoint_triplet()
 {
 	_pos_sp_triplet.timestamp = hrt_absolute_time();
 	_pos_sp_triplet_pub.publish(_pos_sp_triplet);
 	_pos_sp_triplet_updated = false;
 }
 
-float Navigator::get_default_acceptance_radius() const
+float RAMFUNC Navigator::get_default_acceptance_radius() const
 {
 	return _param_nav_acc_rad.get();
 }
 
-float Navigator::get_altitude_acceptance_radius()
+float RAMFUNC Navigator::get_altitude_acceptance_radius()
 {
 	if (get_vstatus()->vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING) {
 
@@ -1405,7 +1406,7 @@ float Navigator::get_altitude_acceptance_radius()
 	}
 }
 
-void Navigator::reset_triplets()
+void RAMFUNC Navigator::reset_triplets()
 {
 	reset_position_setpoint(_pos_sp_triplet.previous);
 	reset_position_setpoint(_pos_sp_triplet.current);
@@ -1414,7 +1415,7 @@ void Navigator::reset_triplets()
 	_pos_sp_triplet_updated = true;
 }
 
-void Navigator::reset_position_setpoint(position_setpoint_s &sp)
+void RAMFUNC Navigator::reset_position_setpoint(position_setpoint_s &sp)
 {
 	sp = position_setpoint_s{};
 	sp.timestamp = hrt_absolute_time();
@@ -1431,7 +1432,7 @@ void Navigator::reset_position_setpoint(position_setpoint_s &sp)
 	sp.loiter_direction_counter_clockwise = false;
 }
 
-float Navigator::get_cruising_throttle()
+float RAMFUNC Navigator::get_cruising_throttle()
 {
 	/* Return the mission-requested cruise speed, or default FW_THR_TRIM value */
 	if (_mission_throttle > FLT_EPSILON) {
@@ -1442,7 +1443,7 @@ float Navigator::get_cruising_throttle()
 	}
 }
 
-float Navigator::get_acceptance_radius() const
+float RAMFUNC Navigator::get_acceptance_radius() const
 {
 	float acceptance_radius = get_default_acceptance_radius(); // the value specified in the parameter NAV_ACC_RAD
 
@@ -1467,7 +1468,7 @@ float Navigator::get_acceptance_radius() const
 	return acceptance_radius;
 }
 
-bool Navigator::is_established_on_loiter(const position_setpoint_s &sp) const
+bool RAMFUNC Navigator::is_established_on_loiter(const position_setpoint_s &sp) const
 {
 	if (!sp.valid
 	    || sp.type != position_setpoint_s::SETPOINT_TYPE_LOITER
@@ -1480,39 +1481,39 @@ bool Navigator::is_established_on_loiter(const position_setpoint_s &sp) const
 	return dist_to_center <= (get_acceptance_radius() + fabsf(sp.loiter_radius));
 }
 
-bool Navigator::get_yaw_to_be_accepted(float mission_item_yaw)
+bool RAMFUNC Navigator::get_yaw_to_be_accepted(float mission_item_yaw)
 {
 	float yaw = mission_item_yaw;
 
 	return PX4_ISFINITE(yaw);
 }
 
-void Navigator::load_fence_from_file(const char *filename)
+void RAMFUNC Navigator::load_fence_from_file(const char *filename)
 {
 	_geofence.loadFromFile(filename);
 }
 
 #if CONFIG_NAVIGATOR_ADSB_FAKE_TRAFFIC
-void Navigator::run_fake_traffic(DetectAndAvoid::FakeTraffMode mode)
+void RAMFUNC Navigator::run_fake_traffic(DetectAndAvoid::FakeTraffMode mode)
 {
 	_detect_and_avoid.run_fake_traffic(mode, get_global_position()->lat, get_global_position()->lon,
 					   get_global_position()->alt);
 }
 
-void Navigator::stop_fake_traffic()
+void RAMFUNC Navigator::stop_fake_traffic()
 {
 	_detect_and_avoid.stop_fake_traffic();
 }
 #endif // CONFIG_NAVIGATOR_ADSB_FAKE_TRAFFIC
 
 #if CONFIG_NAVIGATOR_ADSB
-void Navigator::check_traffic()
+void RAMFUNC Navigator::check_traffic()
 {
 	_detect_and_avoid.on_active();
 }
 #endif // CONFIG_NAVIGATOR_ADSB
 
-bool Navigator::fw_climbout_completed(float fallback_altitude_amsl)
+bool RAMFUNC Navigator::fw_climbout_completed(float fallback_altitude_amsl)
 {
 	if (_pos_sp_triplet.current.type != position_setpoint_s::SETPOINT_TYPE_TAKEOFF) {
 		// no takeoff is being flown, for example because the mode was entered while already in air,
@@ -1531,7 +1532,7 @@ bool Navigator::fw_climbout_completed(float fallback_altitude_amsl)
 	return false;
 }
 
-bool Navigator::abort_landing()
+bool RAMFUNC Navigator::abort_landing()
 {
 	// only abort if currently landing and position controller status updated
 	bool should_abort = false;
@@ -1554,14 +1555,14 @@ bool Navigator::abort_landing()
 	return should_abort;
 }
 
-bool Navigator::force_vtol()
+bool RAMFUNC Navigator::force_vtol()
 {
 	return _vstatus.is_vtol &&
 	       (_vstatus.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING || _vstatus.in_transition_to_fw)
 	       && _param_nav_force_vt.get();
 }
 
-int Navigator::custom_command(int argc, char *argv[])
+int RAMFUNC Navigator::custom_command(int argc, char *argv[])
 {
 	if (!is_running(desc)) {
 		print_usage("not running");
@@ -1610,7 +1611,7 @@ int Navigator::custom_command(int argc, char *argv[])
 	return print_usage("unknown command");
 }
 
-void Navigator::publish_mission_result()
+void RAMFUNC Navigator::publish_mission_result()
 {
 	_mission_result.timestamp = hrt_absolute_time();
 
@@ -1625,7 +1626,7 @@ void Navigator::publish_mission_result()
 	_mission_result_updated = false;
 }
 
-void Navigator::set_mission_failure_heading_timeout()
+void RAMFUNC Navigator::set_mission_failure_heading_timeout()
 {
 	if (!_mission_result.failure) {
 		_mission_result.failure = true;
@@ -1636,7 +1637,7 @@ void Navigator::set_mission_failure_heading_timeout()
 	}
 }
 
-void Navigator::trigger_hagl_failsafe(const uint8_t nav_state)
+void RAMFUNC Navigator::trigger_hagl_failsafe(const uint8_t nav_state)
 {
 	if ((_navigator_status.failure != navigator_status_s::FAILURE_HAGL) || _navigator_status.nav_state != nav_state) {
 		_navigator_status.failure = navigator_status_s::FAILURE_HAGL;
@@ -1646,7 +1647,7 @@ void Navigator::trigger_hagl_failsafe(const uint8_t nav_state)
 	}
 }
 
-void Navigator::publish_navigator_status()
+void RAMFUNC Navigator::publish_navigator_status()
 {
 	uint8_t current_nav_state = _vstatus.nav_state;
 
@@ -1670,7 +1671,7 @@ void Navigator::publish_navigator_status()
 	}
 }
 
-void Navigator::publish_vehicle_command(vehicle_command_s &vehicle_command)
+void RAMFUNC Navigator::publish_vehicle_command(vehicle_command_s &vehicle_command)
 {
 	vehicle_command.timestamp = hrt_absolute_time();
 	vehicle_command.source_system = _vstatus.system_id;
@@ -1764,7 +1765,7 @@ void Navigator::publish_vehicle_command(vehicle_command_s &vehicle_command)
 	_vehicle_cmd_pub.publish(vehicle_command);
 }
 
-void Navigator::publish_distance_sensor_mode_request()
+void RAMFUNC Navigator::publish_distance_sensor_mode_request()
 {
 	// Send request to enable distance sensor when in the landing phase of a mission or Return
 	if (((_navigation_mode == &_rtl) && _rtl.isLanding()) || ((_navigation_mode == &_mission) && _mission.isLanding())) {
@@ -1788,7 +1789,7 @@ void Navigator::publish_distance_sensor_mode_request()
 	}
 }
 
-void Navigator::publish_vehicle_command_ack(const vehicle_command_s &cmd, uint8_t result)
+void RAMFUNC Navigator::publish_vehicle_command_ack(const vehicle_command_s &cmd, uint8_t result)
 {
 	vehicle_command_ack_s command_ack = {};
 
@@ -1805,7 +1806,7 @@ void Navigator::publish_vehicle_command_ack(const vehicle_command_s &cmd, uint8_
 	_vehicle_cmd_ack_pub.publish(command_ack);
 }
 
-void Navigator::acquire_gimbal_control()
+void RAMFUNC Navigator::acquire_gimbal_control()
 {
 	vehicle_command_s vehicle_command{};
 	vehicle_command.command = vehicle_command_s::VEHICLE_CMD_DO_GIMBAL_MANAGER_CONFIGURE;
@@ -1816,7 +1817,7 @@ void Navigator::acquire_gimbal_control()
 	publish_vehicle_command(vehicle_command);
 }
 
-void Navigator::release_gimbal_control()
+void RAMFUNC Navigator::release_gimbal_control()
 {
 	vehicle_command_s vehicle_command{};
 	vehicle_command.command = vehicle_command_s::VEHICLE_CMD_DO_GIMBAL_MANAGER_CONFIGURE;
@@ -1841,7 +1842,7 @@ Navigator::stop_capturing_images()
 	}
 }
 
-bool Navigator::geofence_allows_position(const vehicle_global_position_s &pos)
+bool RAMFUNC Navigator::geofence_allows_position(const vehicle_global_position_s &pos)
 {
 	if ((_geofence.getGeofenceAction() != geofence_result_s::GF_ACTION_NONE) &&
 	    (_geofence.getGeofenceAction() != geofence_result_s::GF_ACTION_WARN)) {
@@ -1855,7 +1856,7 @@ bool Navigator::geofence_allows_position(const vehicle_global_position_s &pos)
 }
 
 #if CONFIG_NAVIGATOR_GEOFENCE_AVOIDANCE
-float Navigator::geofence_avoidance_margin() const
+float RAMFUNC Navigator::geofence_avoidance_margin() const
 {
 	// These margins should be above the horizontal tracking error that can be expected for each vehicle type.
 	// If re-using the enlarged polygons for a predictive geofence failsafe feature, additionally ensure
@@ -1874,7 +1875,7 @@ float Navigator::geofence_avoidance_margin() const
 }
 #endif // CONFIG_NAVIGATOR_GEOFENCE_AVOIDANCE
 
-void Navigator::preproject_stop_point(double &lat, double &lon)
+void RAMFUNC Navigator::preproject_stop_point(double &lat, double &lon)
 {
 	// For multirotors we need to account for the braking distance, otherwise the vehicle will overshoot and go back
 	const float course_over_ground = atan2f(_local_pos.vy, _local_pos.vx);
@@ -1890,7 +1891,7 @@ void Navigator::preproject_stop_point(double &lat, double &lon)
 					   multirotor_braking_distance, &lat, &lon);
 }
 
-void Navigator::mode_completed(uint8_t nav_state, uint8_t result)
+void RAMFUNC Navigator::mode_completed(uint8_t nav_state, uint8_t result)
 {
 	mode_completed_s mode_completed{};
 	mode_completed.timestamp = hrt_absolute_time();
@@ -1900,7 +1901,7 @@ void Navigator::mode_completed(uint8_t nav_state, uint8_t result)
 }
 
 
-void Navigator::disable_camera_trigger()
+void RAMFUNC Navigator::disable_camera_trigger()
 {
 	// Disable camera trigger
 	vehicle_command_s vehicle_command{};
@@ -1911,7 +1912,7 @@ void Navigator::disable_camera_trigger()
 	publish_vehicle_command(vehicle_command);
 }
 
-void Navigator::set_gimbal_neutral()
+void RAMFUNC Navigator::set_gimbal_neutral()
 {
 	vehicle_command_s vehicle_command{};
 	vehicle_command.command = vehicle_command_s::VEHICLE_CMD_DO_GIMBAL_MANAGER_PITCHYAW;
@@ -1923,14 +1924,14 @@ void Navigator::set_gimbal_neutral()
 	publish_vehicle_command(vehicle_command);
 }
 
-void Navigator::activate_set_gimbal_neutral_timer(const hrt_abstime timestamp)
+void RAMFUNC Navigator::activate_set_gimbal_neutral_timer(const hrt_abstime timestamp)
 {
 	if (_gimbal_neutral_activation_time == UINT64_MAX) {
 		_gimbal_neutral_activation_time = timestamp;
 	}
 }
 
-void Navigator::neutralize_gimbal_if_control_activated()
+void RAMFUNC Navigator::neutralize_gimbal_if_control_activated()
 {
 	const hrt_abstime now{hrt_absolute_time()};
 
@@ -1944,14 +1945,14 @@ void Navigator::neutralize_gimbal_if_control_activated()
 	}
 }
 
-void Navigator::sendWarningDescentStoppedDueToTerrain()
+void RAMFUNC Navigator::sendWarningDescentStoppedDueToTerrain()
 {
 	mavlink_log_critical(&_mavlink_log_pub, "Terrain collision risk, descent is stopped\t");
 	events::send(events::ID("navigator_terrain_collision_risk"), events::Log::Critical,
 		     "Terrain collision risk, descent is stopped");
 }
 
-int Navigator::print_usage(const char *reason)
+int RAMFUNC Navigator::print_usage(const char *reason)
 {
 	if (reason) {
 		PX4_WARN("%s\n", reason);

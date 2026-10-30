@@ -38,6 +38,7 @@
 #include <mathlib/math/Limits.hpp>
 #include <mathlib/math/Functions.hpp>
 #include <px4_platform_common/events.h>
+#include <px4_arch/rpi_flash.h>
 
 using namespace matrix;
 using namespace time_literals;
@@ -105,7 +106,7 @@ MulticopterRateControl::parameters_updated()
 }
 
 void
-MulticopterRateControl::Run()
+SCRATCHX MulticopterRateControl::Run()
 {
 	if (should_exit()) {
 		_vehicle_angular_velocity_sub.unregisterCallback();

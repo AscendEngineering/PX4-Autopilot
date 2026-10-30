@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "VehicleIMU.hpp"
+#include <px4_arch/rpi_flash.h>
 
 #include <px4_platform_common/log.h>
 #include <px4_platform_common/events.h>
@@ -278,7 +279,7 @@ void VehicleIMU::Run()
 	}
 }
 
-bool VehicleIMU::UpdateAccel()
+bool RAMFUNC VehicleIMU::UpdateAccel()
 {
 	bool updated = false;
 
@@ -407,7 +408,7 @@ bool VehicleIMU::UpdateAccel()
 	return updated;
 }
 
-bool VehicleIMU::UpdateGyro()
+bool RAMFUNC VehicleIMU::UpdateGyro()
 {
 	bool updated = false;
 

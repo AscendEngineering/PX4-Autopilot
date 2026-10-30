@@ -431,6 +431,41 @@ parameters:
         6: Disarm
         7: Hold mode (no failsafe)
       default: 2
+    GF_ACTION:
+      description:
+        short: Geofence action
+        long: Action to take when geofence is violated.
+      type: enum
+      values:
+        0: None
+        1: Warning
+        2: Hold mode
+        3: Return mode
+        4: Terminate
+        5: Land mode
+      default: 0
+      increment: 1
+    MIS_YAW_ERR:
+      description:
+        short: Max yaw error in degrees needed for waypoint heading acceptance
+      type: float
+      default: 12.0
+      unit: deg
+      min: 0
+      max: 90
+      decimal: 1
+      increment: 1
+    NAV_MC_ALT_RAD:
+      description:
+        short: MC Altitude acceptance radius
+      type: float
+      default: 0.8
+      unit: m
+      min: 0.05
+      max: 200.0
+      decimal: 1
+      increment: 0.5
+
     COM_RCL_EXCEPT:
       description:
         short: Manual control loss exceptions

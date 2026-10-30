@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "VehicleAngularVelocity.hpp"
+#include <px4_arch/rpi_flash.h>
 
 #include <px4_platform_common/log.h>
 
@@ -788,7 +789,7 @@ float VehicleAngularVelocity::FilterAngularAcceleration(int axis, float inverse_
 	return angular_acceleration_filtered;
 }
 
-void VehicleAngularVelocity::Run()
+void RAMFUNC VehicleAngularVelocity::Run()
 {
 	perf_begin(_cycle_perf);
 

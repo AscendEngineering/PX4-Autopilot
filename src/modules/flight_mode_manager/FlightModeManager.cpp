@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "FlightModeManager.hpp"
+#include <px4_arch/rpi_flash.h>
 
 #include <cmath>
 #include <lib/mathlib/mathlib.h>
@@ -79,7 +80,7 @@ bool FlightModeManager::init()
 	return true;
 }
 
-void FlightModeManager::Run()
+void RAMFUNC FlightModeManager::Run()
 {
 	if (should_exit()) {
 		_vehicle_local_position_sub.unregisterCallback();

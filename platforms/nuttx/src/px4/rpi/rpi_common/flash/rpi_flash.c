@@ -42,7 +42,6 @@
 #include <px4_arch/rpi_rom.h>
 #include "rpi_flash_hooks.h"
 
-#define RAMFUNC				__attribute__((section(".ramfunc"), noinline))
 #define XIP_SETUP_WORDS			(RPI_XIP_SETUP_BYTES / sizeof(uint32_t))
 
 typedef void (*rom_void_fn)(void);

@@ -17,7 +17,7 @@ board_adc start
 # The IMU is not started at boot for now: at 1.6 kHz the sensors pipeline
 # takes all the CPU time of the RP2350 and the MAVLink links stop. Start it
 # by hand from the shell when it is needed:
-#   icm56686 -s -b 1 -R 0 -f 18750 -O 1600 start
+  icm56686 -s -b 1 -R 0 -f 18750 -O 1600 start
 
 dps310 -8 -I -b 1 -a 0x76 start
 

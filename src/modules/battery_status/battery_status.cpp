@@ -55,6 +55,7 @@
 #include <lib/parameters/param.h>
 #include <lib/perf/perf_counter.h>
 #include <lib/battery/battery.h>
+#include <px4_arch/rpi_flash.h>
 #include <lib/conversion/rotation.h>
 #include <uORB/SubscriptionInterval.hpp>
 #include <uORB/SubscriptionCallback.hpp>
@@ -238,7 +239,7 @@ BatteryStatus::adc_poll()
 }
 
 void
-BatteryStatus::Run()
+RAMFUNC BatteryStatus::Run()
 {
 	if (should_exit()) {
 		exit_and_cleanup(desc);

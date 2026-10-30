@@ -46,14 +46,14 @@ class StickYaw : public ModuleParams
 {
 public:
 	StickYaw(ModuleParams *parent);
-	~StickYaw() = default;
+	~StickYaw() override = default;
 
 	void reset(float yaw, float unaided_yaw = NAN);
 
 	void resetYawspeed() { _yawspeed_filter.reset(0.f); }
 	void ekfResetHandler(float delta_yaw);
 	void generateYawSetpoint(float &yawspeed_setpoint, float &yaw_setpoint, float stick_yaw, float yaw, float deltatime,
-				 float unaided_yaw = NAN);
+		 float unaided_yaw = NAN);
 	void setYawspeedConstraint(float yawspeed) { _yawspeed_constraint = yawspeed; };
 
 private:
@@ -71,21 +71,19 @@ private:
 
 	/**
 	 * Lock yaw when not currently turning
-	 * When applying a yawspeed the vehicle is turning, when the speed is
+	 * When applying a yawspeed the vehicle is turning, and when the speed is
 	 * set to zero the vehicle needs to slow down and then lock at the yaw
 	 * it stops at to not drift over time.
 	 * @param yawspeed current yaw rotational rate state
 	 * @param yaw current yaw rotational rate state
 	 * @param yawspeed_setpoint rotation rate at which to turn around yaw axis
-	 * @param yaw current yaw setpoint which then will be overwritten by the return value
+	 * @param yaw current yaw setpoint which will then be overwritten by the return value
 	 * @return yaw setpoint to execute to have a yaw lock at the correct moment in time
 	 */
 	float updateYawLock(float yaw, float yawspeed_setpoint, float yaw_setpoint, float yaw_correction_prev) const;
 
 	float _yawspeed_constraint{INFINITY};
 
-	DEFINE_PARAMETERS(
-		(ParamFloat<px4::params::MPC_MAN_Y_MAX>) _param_mpc_man_y_max, ///< Maximum yaw speed with full stick deflection
-		(ParamFloat<px4::params::MPC_MAN_Y_TAU>) _param_mpc_man_y_tau ///< time constant for yaw speed filtering
-	)
+	float _param_mpc_man_y_max{150.0f}; ///< Maximum yaw speed with full stick deflection
+	float _param_mpc_man_y_tau{0.08f}; ///< time constant for yaw speed filtering
 };

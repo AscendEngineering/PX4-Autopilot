@@ -85,4 +85,7 @@ bool rpi_flash_is_blank(uint32_t offset, size_t count);
 bool rpi_flash_init_fresh(void);
 #endif
 
+#define RAMFUNC __attribute__((section(".ramfunc"), noinline))
+#define SCRATCHX __attribute__((section(".scratchx"), noinline))
+
 __END_DECLS

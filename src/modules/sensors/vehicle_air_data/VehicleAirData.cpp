@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "VehicleAirData.hpp"
+#include <px4_arch/rpi_flash.h>
 
 #include <px4_platform_common/log.h>
 #include <px4_platform_common/events.h>
@@ -136,7 +137,7 @@ bool VehicleAirData::ParametersUpdate(bool force)
 	return false;
 }
 
-void VehicleAirData::Run()
+void RAMFUNC VehicleAirData::Run()
 {
 	perf_begin(_cycle_perf);
 

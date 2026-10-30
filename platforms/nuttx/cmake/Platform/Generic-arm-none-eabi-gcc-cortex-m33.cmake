@@ -8,7 +8,7 @@ if(CONFIG_ARCH_FPU AND CONFIG_ARM_FPU_ABI_SOFT)
 elseif(CONFIG_ARCH_FPU)
 	set(cpu_flags "-mcpu=cortex-m33 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard")
 else()
-	set(cpu_flags "-mcpu=cortex-m33 -mthumb -mfloat-abi=soft")
+	set(cpu_flags "-mcpu=cortex-m33 -mthumb -mfloat-abi=hard -march=armv8-m.main+fp+dsp -mfpu=fpv5-sp-d16")
 endif()
 
 set(CMAKE_C_FLAGS "${cpu_flags}" CACHE STRING "" FORCE)

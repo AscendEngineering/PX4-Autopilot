@@ -38,8 +38,9 @@
  */
 
 #include "bias_estimator.hpp"
+#include <px4_arch/rpi_flash.h>
 
-void BiasEstimator::predict(const float dt)
+void RAMFUNC BiasEstimator::predict(const float dt)
 {
 	// State is constant
 	// Predict state covariance only

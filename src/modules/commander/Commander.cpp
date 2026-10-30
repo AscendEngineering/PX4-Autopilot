@@ -39,6 +39,7 @@
  */
 
 #include "Commander.hpp"
+#include <px4_arch/rpi_flash.h>
 
 /* commander module headers */
 #include "Arming/ArmAuthorization/ArmAuthorization.h"
@@ -597,7 +598,7 @@ int Commander::custom_command(int argc, char *argv[])
 	return print_usage("unknown command");
 }
 
-int Commander::print_status()
+int RAMFUNC Commander::print_status()
 {
 	PX4_INFO("%s", isArmed() ? "Armed" : "Disarmed");
 	PX4_INFO("prearm safety: %s", _safety.isSafetyOff() ? "Off" : "On");
@@ -859,7 +860,7 @@ Commander::~Commander()
 }
 
 bool
-Commander::handle_command(const vehicle_command_s &cmd)
+RAMFUNC Commander::handle_command(const vehicle_command_s &cmd)
 {
 	/* only handle commands that are meant to be handled by this system and component, or broadcast */
 	if (((cmd.target_system != _vehicle_status.system_id) && (cmd.target_system != 0))
@@ -1758,13 +1759,13 @@ Commander::handle_command(const vehicle_command_s &cmd)
 	return true;
 }
 
-ModeChangeSource Commander::getSourceFromCommand(const vehicle_command_s &cmd)
+ModeChangeSource RAMFUNC Commander::getSourceFromCommand(const vehicle_command_s &cmd)
 {
 	return cmd.source_component >= vehicle_command_s::COMPONENT_MODE_EXECUTOR_START ? ModeChangeSource::ModeExecutor :
 	       ModeChangeSource::User;
 }
 
-void Commander::handleCommandsFromModeExecutors()
+void RAMFUNC Commander::handleCommandsFromModeExecutors()
 {
 	if (_vehicle_command_mode_executor_sub.updated()) {
 		const unsigned last_generation = _vehicle_command_mode_executor_sub.get_last_generation();
@@ -1795,7 +1796,7 @@ void Commander::handleCommandsFromModeExecutors()
 	}
 }
 
-unsigned Commander::handleCommandActuatorTest(const vehicle_command_s &cmd)
+unsigned RAMFUNC Commander::handleCommandActuatorTest(const vehicle_command_s &cmd)
 {
 	if (isArmed() || (_safety.isButtonAvailable() && !_safety.isSafetyOff())) {
 		return vehicle_command_ack_s::VEHICLE_CMD_RESULT_DENIED;
@@ -1846,7 +1847,7 @@ unsigned Commander::handleCommandActuatorTest(const vehicle_command_s &cmd)
 	return vehicle_command_ack_s::VEHICLE_CMD_RESULT_ACCEPTED;
 }
 
-void Commander::executeActionRequest(const action_request_s &action_request)
+void RAMFUNC Commander::executeActionRequest(const action_request_s &action_request)
 {
 	arm_disarm_reason_t arm_disarm_reason{};
 
@@ -1929,7 +1930,7 @@ void Commander::executeActionRequest(const action_request_s &action_request)
 }
 
 
-void Commander::updateParameters()
+void RAMFUNC Commander::updateParameters()
 {
 	// update parameters from storage
 	updateParams();
@@ -1968,7 +1969,7 @@ void Commander::updateParameters()
 
 }
 
-void Commander::run()
+void RAMFUNC Commander::run()
 {
 	/* initialize */
 	led_init();
@@ -2189,7 +2190,7 @@ void Commander::run()
 	buzzer_deinit();
 }
 
-void Commander::checkForMissionUpdate()
+void RAMFUNC Commander::checkForMissionUpdate()
 {
 	if (_mission_result_sub.updated()) {
 		const mission_result_s &mission_result = _mission_result_sub.get();
@@ -2245,7 +2246,7 @@ void Commander::checkForMissionUpdate()
 	}
 }
 
-bool Commander::getPrearmState() const
+bool RAMFUNC Commander::getPrearmState() const
 {
 	if (_vehicle_status.calibration_enabled) {
 		return false;
@@ -2276,7 +2277,7 @@ bool Commander::getPrearmState() const
 	return false;
 }
 
-void Commander::handlePowerButtonState()
+void RAMFUNC Commander::handlePowerButtonState()
 {
 #if defined(BOARD_HAS_POWER_CONTROL)
 
@@ -2296,7 +2297,7 @@ void Commander::handlePowerButtonState()
 #endif // BOARD_HAS_POWER_CONTROL
 }
 
-void Commander::systemPowerUpdate()
+void RAMFUNC Commander::systemPowerUpdate()
 {
 	system_power_s system_power;
 
@@ -2316,7 +2317,7 @@ void Commander::systemPowerUpdate()
 	}
 }
 
-void Commander::landDetectorUpdate()
+void RAMFUNC Commander::landDetectorUpdate()
 {
 	if (_vehicle_land_detected_sub.updated()) {
 		const bool was_landed = _vehicle_land_detected.landed;
@@ -2352,7 +2353,7 @@ void Commander::landDetectorUpdate()
 	}
 }
 
-void Commander::safetyButtonUpdate()
+void RAMFUNC Commander::safetyButtonUpdate()
 {
 	const bool safety_changed = _safety.safetyButtonHandler();
 	_vehicle_status.safety_button_available = _safety.isButtonAvailable();
@@ -2373,7 +2374,7 @@ void Commander::safetyButtonUpdate()
 	}
 }
 
-void Commander::vtolStatusUpdate()
+void RAMFUNC Commander::vtolStatusUpdate()
 {
 	// Make sure that this is only adjusted if vehicle really is of type vtol
 	if (_vtol_vehicle_status_sub.update(&_vtol_vehicle_status) && is_vtol(_vehicle_status)) {
@@ -2408,7 +2409,7 @@ void Commander::vtolStatusUpdate()
 	}
 }
 
-void Commander::updateTunes()
+void RAMFUNC Commander::updateTunes()
 {
 	// play arming and battery warning tunes
 	if (!_arm_tune_played && isArmed()) {
@@ -2451,7 +2452,7 @@ void Commander::updateTunes()
 	}
 }
 
-void Commander::checkWorkerThread()
+void RAMFUNC Commander::checkWorkerThread()
 {
 	// check if the worker has finished
 	if (_worker_thread.hasResult()) {
@@ -2471,7 +2472,7 @@ void Commander::checkWorkerThread()
 	}
 }
 
-void Commander::handleAutoDisarm()
+void RAMFUNC Commander::handleAutoDisarm()
 {
 	// Auto disarm when landed or kill switch engaged
 	if (isArmed()) {
@@ -2515,7 +2516,7 @@ void Commander::handleAutoDisarm()
 	}
 }
 
-bool Commander::handleModeIntentionAndFailsafe()
+bool RAMFUNC Commander::handleModeIntentionAndFailsafe()
 {
 	const uint8_t prev_nav_state = _vehicle_status.nav_state;
 	const FailsafeBase::Action prev_failsafe_action = _failsafe.selectedAction();
@@ -2592,7 +2593,7 @@ bool Commander::handleModeIntentionAndFailsafe()
 	       prev_failsafe_defer_state != _vehicle_status.failsafe_defer_state;
 }
 
-void Commander::checkAndInformReadyForTakeoff()
+void RAMFUNC Commander::checkAndInformReadyForTakeoff()
 {
 #ifdef CONFIG_ARCH_BOARD_PX4_SITL
 	static bool ready_for_takeoff_printed = false;
@@ -2609,7 +2610,7 @@ void Commander::checkAndInformReadyForTakeoff()
 #endif // CONFIG_ARCH_BOARD_PX4_SITL
 }
 
-void Commander::modeManagementUpdate()
+void RAMFUNC Commander::modeManagementUpdate()
 {
 	ModeManagement::UpdateRequest mode_management_update{};
 	_mode_management.update(_vehicle_status.vehicle_type, _vehicle_status.is_vtol, isArmed(),
@@ -2624,7 +2625,7 @@ void Commander::modeManagementUpdate()
 	}
 }
 
-void Commander::control_status_leds(bool changed, const uint8_t battery_warning)
+void RAMFUNC Commander::control_status_leds(bool changed, const uint8_t battery_warning)
 {
 	switch (blink_msg_state()) {
 	case 1:
@@ -2777,7 +2778,7 @@ void Commander::control_status_leds(bool changed, const uint8_t battery_warning)
 	}
 }
 
-void Commander::updateControlMode()
+void RAMFUNC Commander::updateControlMode()
 {
 	_vehicle_control_mode = {};
 
@@ -2796,7 +2797,7 @@ void Commander::updateControlMode()
 	_vehicle_control_mode_pub.publish(_vehicle_control_mode);
 }
 
-void Commander::printRejectMode(uint8_t nav_state)
+void RAMFUNC Commander::printRejectMode(uint8_t nav_state)
 {
 	if (hrt_elapsed_time(&_last_print_mode_reject_time) > 1_s) {
 
@@ -2818,7 +2819,7 @@ void Commander::printRejectMode(uint8_t nav_state)
 	}
 }
 
-void Commander::answer_command(const vehicle_command_s &cmd, uint8_t result)
+void RAMFUNC Commander::answer_command(const vehicle_command_s &cmd, uint8_t result)
 {
 	switch (result) {
 	case vehicle_command_ack_s::VEHICLE_CMD_RESULT_ACCEPTED:
@@ -2859,14 +2860,14 @@ void Commander::answer_command(const vehicle_command_s &cmd, uint8_t result)
 	_vehicle_command_ack_pub.publish(command_ack);
 }
 
-int Commander::run_trampoline(int argc, char *argv[])
+int RAMFUNC Commander::run_trampoline(int argc, char *argv[])
 {
 	return ModuleBase::run_trampoline_impl(desc, [](int ac, char *av[]) -> ModuleBase * {
 		return Commander::instantiate(ac, av);
 	}, argc, argv);
 }
 
-int Commander::task_spawn(int argc, char *argv[])
+int RAMFUNC Commander::task_spawn(int argc, char *argv[])
 {
 	desc.task_id = px4_task_spawn_cmd("commander",
 					  SCHED_DEFAULT,
@@ -2889,7 +2890,7 @@ int Commander::task_spawn(int argc, char *argv[])
 	return 0;
 }
 
-Commander *Commander::instantiate(int argc, char *argv[])
+Commander RAMFUNC *Commander::instantiate(int argc, char *argv[])
 {
 	Commander *instance = new Commander();
 
@@ -2902,12 +2903,12 @@ Commander *Commander::instantiate(int argc, char *argv[])
 	return instance;
 }
 
-void Commander::enable_hil()
+void RAMFUNC Commander::enable_hil()
 {
 	_vehicle_status.hil_state = vehicle_status_s::HIL_STATE_ON;
 }
 
-void Commander::dataLinkCheck()
+void RAMFUNC Commander::dataLinkCheck()
 {
 	// high latency data link
 	iridiumsbd_status_s iridium_status;
@@ -3101,7 +3102,7 @@ void Commander::dataLinkCheck()
 	}
 }
 
-void Commander::battery_status_check()
+void RAMFUNC Commander::battery_status_check()
 {
 	// Handle shutdown request from emergency battery action
 	if (_battery_warning != _failsafe_flags.battery_warning) {
@@ -3132,7 +3133,7 @@ void Commander::battery_status_check()
 	_battery_warning = _failsafe_flags.battery_warning;
 }
 
-void Commander::manualControlCheck()
+void RAMFUNC Commander::manualControlCheck()
 {
 	manual_control_setpoint_s manual_control_setpoint;
 	const bool manual_control_updated = _manual_control_setpoint_sub.update(&manual_control_setpoint);
@@ -3165,7 +3166,7 @@ void Commander::manualControlCheck()
 	}
 }
 
-void Commander::manualControlLossModeSwitch()
+void RAMFUNC Commander::manualControlLossModeSwitch()
 {
 	// NAV_RCL_ACT value that switches to Hold as a regular mode change instead of triggering the failsafe.
 	// Kept in sync with gcs_connection_loss_failsafe_mode::Hold_mode_no_failsafe (private to the failsafe).
@@ -3193,7 +3194,7 @@ void Commander::manualControlLossModeSwitch()
 	_manual_control_lost_prev = manual_control_lost;
 }
 
-void Commander::offboardControlCheck()
+void RAMFUNC Commander::offboardControlCheck()
 {
 	if (_offboard_control_mode_sub.update()) {
 		if (_failsafe_flags.offboard_control_signal_lost) {
@@ -3203,7 +3204,7 @@ void Commander::offboardControlCheck()
 	}
 }
 
-void Commander::send_parachute_command()
+void RAMFUNC Commander::send_parachute_command()
 {
 	vehicle_command_s vcmd{};
 	vcmd.command = vehicle_command_s::VEHICLE_CMD_DO_PARACHUTE;
@@ -3221,13 +3222,13 @@ void Commander::send_parachute_command()
 	set_tune_override(tune_control_s::TUNE_ID_PARACHUTE_RELEASE);
 }
 
-void Commander::onFailsafeNotifyUserTrampoline(void *arg)
+void RAMFUNC Commander::onFailsafeNotifyUserTrampoline(void *arg)
 {
 	Commander *commander = static_cast<Commander *>(arg);
 	commander->onFailsafeNotifyUser();
 }
 
-void Commander::onFailsafeNotifyUser()
+void RAMFUNC Commander::onFailsafeNotifyUser()
 {
 	// If we are about to inform about a failsafe, we need to ensure any pending health report is sent out first,
 	// as the failsafe message might reference that. This is only needed in case the report is currently rate-limited,
@@ -3235,7 +3236,7 @@ void Commander::onFailsafeNotifyUser()
 	_health_and_arming_checks.reportIfUnreportedDifferences();
 }
 
-int Commander::print_usage(const char *reason)
+int RAMFUNC Commander::print_usage(const char *reason)
 {
 	if (reason) {
 		PX4_INFO("%s", reason);

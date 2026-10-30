@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "VehicleAcceleration.hpp"
+#include <px4_arch/rpi_flash.h>
 
 #include <px4_platform_common/log.h>
 
@@ -207,7 +208,7 @@ void VehicleAcceleration::ParametersUpdate(bool force)
 	}
 }
 
-void VehicleAcceleration::Run()
+void RAMFUNC VehicleAcceleration::Run()
 {
 	// backup schedule
 	ScheduleDelayed(10_ms);

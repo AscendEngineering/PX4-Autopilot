@@ -40,6 +40,7 @@
  */
 
 #include "ekf.h"
+#include <px4_arch/rpi_flash.h>
 
 #include <mathlib/mathlib.h>
 
@@ -231,7 +232,7 @@ bool Ekf::initialiseTilt()
 	return true;
 }
 
-void Ekf::predictState(const imuSample &imu_delayed)
+void RAMFUNC Ekf::predictState(const imuSample &imu_delayed)
 {
 	if (std::fabs(_gpos.latitude_rad() - _earth_rate_lat_ref_rad) > math::radians(1.0)) {
 		_earth_rate_lat_ref_rad = _gpos.latitude_rad();

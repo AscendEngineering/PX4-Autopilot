@@ -51,6 +51,7 @@
 #include <Sticks.hpp>
 
 #include "AttitudeControl/AttitudeControlMath.hpp"
+#include <px4_arch/rpi_flash.h>
 
 using namespace matrix;
 
@@ -213,7 +214,7 @@ MulticopterAttitudeControl::generate_attitude_setpoint(const Quatf &q, float dt)
 }
 
 void
-MulticopterAttitudeControl::Run()
+SCRATCHX MulticopterAttitudeControl::Run()
 {
 	if (should_exit()) {
 		_vehicle_attitude_sub.unregisterCallback();

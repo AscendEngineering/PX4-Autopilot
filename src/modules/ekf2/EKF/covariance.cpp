@@ -42,6 +42,7 @@
  */
 
 #include "ekf.h"
+#include <px4_arch/rpi_flash.h>
 #include <ekf_derivation/generated/predict_covariance.h>
 
 #include <math.h>
@@ -110,7 +111,7 @@ void Ekf::initialiseCovariance()
 #endif // CONFIG_EKF2_TERRAIN
 }
 
-void Ekf::predictCovariance(const imuSample &imu_delayed)
+void RAMFUNC Ekf::predictCovariance(const imuSample &imu_delayed)
 {
 	// predict the covariance
 	const float dt = 0.5f * (imu_delayed.delta_vel_dt + imu_delayed.delta_ang_dt);

@@ -42,6 +42,7 @@
  */
 
 #include "sensors.hpp"
+#include <px4_arch/rpi_flash.h>
 
 ModuleBase::Descriptor Sensors::desc{task_spawn, custom_command, print_usage};
 
@@ -499,7 +500,7 @@ void Sensors::InitializeVehicleOpticalFlow()
 }
 #endif // CONFIG_SENSORS_VEHICLE_OPTICAL_FLOW
 
-void Sensors::Run()
+void RAMFUNC Sensors::Run()
 {
 	if (should_exit()) {
 		// clear all registered callbacks

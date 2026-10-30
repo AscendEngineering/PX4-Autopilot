@@ -24,9 +24,9 @@
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
  * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
  * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS, SERVICES; LOSS
  * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
  * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
@@ -37,8 +37,9 @@
 
 MEMORY
 {
-	flash (rx)  : ORIGIN = 0x10020000, LENGTH = 3904K  /* after the 128 KB bootloader, before the 64 KB params */
-	sram  (rwx) : ORIGIN = 0x20000000, LENGTH = 512K   /* SRAM0-7, striped */
+	flash (rx)  : ORIGIN = 0x10020000, LENGTH = 3904K
+	sram  (rwx) : ORIGIN = 0x20000000, LENGTH = 512K
+	sram8 (rwx) : ORIGIN = 0x20080000, LENGTH = 4K
 }
 
 OUTPUT_ARCH(arm)
@@ -95,14 +96,96 @@ SECTIONS
 	 * px4/rpi/rpi_common/flash/rpi_flash.c runs from SRAM (flash-based
 	 * parameters). rp23xx_start.c copies _eronly to _sdata.._edata first. */
 	.data : {
-		_sdata = ABSOLUTE(.);
-		*(.data .data.*)
-		*(.ramfunc .ramfunc.*)
-		*(.gnu.linkonce.d.*)
-		CONSTRUCTORS
-		. = ALIGN(4);
-		_edata = ABSOLUTE(.);
+	_sdata = ABSOLUTE(.);
+	*(.data .data.*)
+	. = ALIGN(4);
+	_edata = ABSOLUTE(.);
 	} > sram AT > flash
+	_eronly = LOADADDR(.data);
+
+	/* Hot functions copied to SRAM at boot */
+	.ramfunc : {
+	_sramfunc = ABSOLUTE(.);
+	*(.ramfunc .ramfunc.*)
+		*(.text._ZN12EKF2Selector17UpdateErrorScoresEv)
+		*(.ramfunc._ZN12EKF2Selector17UpdateErrorScoresEv)
+		*(.text._ZN12EKF2Selector3RunEv)
+		*(.ramfunc._ZN12EKF2Selector3RunEv)
+		*(.text._ZN12EKF2SelectorC1Ev)
+		*(.ramfunc._ZN12EKF2SelectorC1Ev)
+		*(.text._ZN12EKF2SelectorC2Ev)
+		*(.ramfunc._ZN12EKF2SelectorC2Ev)
+		*(.text._ZN3Ekf16controlMagFusionERKN9estimator9imuSampleE)
+		*(.ramfunc._ZN3Ekf16controlMagFusionERKN9estimator9imuSampleE)
+		*(.text._ZN3Ekf18controlEvPosFusionERKN9estimator9imuSampleERKNS0_15extVisionSampleEbbbR24estimator_aid_source2d_s)
+		*(.ramfunc._ZN3Ekf18controlEvPosFusionERKN9estimator9imuSampleERKNS0_15extVisionSampleEbbbR24estimator_aid_source2d_s)
+		*(.text._ZN3Ekf20controlGravityFusionERKN9estimator9imuSampleE)
+		*(.ramfunc._ZN3Ekf20controlGravityFusionERKN9estimator9imuSampleE)
+		*(.text._ZN3Ekf21controlEvHeightFusionERKN9estimator9imuSampleERKNS0_15extVisionSampleEbbbR24estimator_aid_source1d_s)
+		*(.ramfunc._ZN3Ekf21controlEvHeightFusionERKN9estimator9imuSampleERKNS0_15extVisionSampleEbbbR24estimator_aid_source1d_s)
+		*(.text._ZN3Ekf22controlRangeHaglFusionERKN9estimator9imuSampleE)
+		*(.ramfunc._ZN3Ekf22controlRangeHaglFusionERKN9estimator9imuSampleE)
+		*(.text._ZN3Ekf23controlBaroHeightFusionERKN9estimator9imuSampleE)
+		*(.ramfunc._ZN3Ekf23controlBaroHeightFusionERKN9estimator9imuSampleE)
+		*(.text._ZN3Ekf24controlOpticalFlowFusionERKN9estimator9imuSampleE)
+		*(.ramfunc._ZN3Ekf24controlOpticalFlowFusionERKN9estimator9imuSampleE)
+		*(.text._ZN3Ekf27controlExternalVisionFusionERKN9estimator9imuSampleE)
+		*(.ramfunc._ZN3Ekf27controlExternalVisionFusionERKN9estimator9imuSampleE)
+		*(.text._ZN4EKF216updateParamsImplEv)
+		*(.ramfunc._ZN4EKF216updateParamsImplEv)
+		*(.text._ZN4EKF220PublishLocalPositionERKy)
+		*(.ramfunc._ZN4EKF220PublishLocalPositionERKy)
+		*(.text._ZN4EKF222PublishAidSourceStatusERKy)
+		*(.ramfunc._ZN4EKF222PublishAidSourceStatusERKy)
+		*(.text._ZN4EKF23RunEv)
+		*(.ramfunc._ZN4EKF23RunEv)
+		*(.text._ZN4EKF2C1EbRKN3px411wq_config_tEb)
+		*(.ramfunc._ZN4EKF2C1EbRKN3px411wq_config_tEb)
+		*(.text._ZN4EKF2C2EbRKN3px411wq_config_tEb)
+		*(.ramfunc._ZN4EKF2C2EbRKN3px411wq_config_tEb)
+		*(.text._ZN7sensors10VehicleIMU7PublishEv)
+		*(.ramfunc._ZN7sensors10VehicleIMU7PublishEv)
+		*(.text._ZN7sensors14VehicleAirData3RunEv)
+		*(.ramfunc._ZN7sensors14VehicleAirData3RunEv)
+		*(.text._ZN7sensors18VehicleOpticalFlow3RunEv)
+		*(.ramfunc._ZN7sensors18VehicleOpticalFlow3RunEv)
+		*(.text._ZN7sensors19VehicleMagnetometer3RunEv)
+		*(.ramfunc._ZN7sensors19VehicleMagnetometer3RunEv)
+		*(.text._ZN7sensors22VehicleAngularVelocity16ParametersUpdateEb)
+		*(.ramfunc._ZN7sensors22VehicleAngularVelocity16ParametersUpdateEb)
+		*(.text._ZN9Navigator3runEv)
+		*(.ramfunc._ZN9Navigator3runEv)
+		*(.text._ZN9NavigatorC1Ev)
+		*(.ramfunc._ZN9NavigatorC1Ev)
+		*(.text._ZN9NavigatorC2Ev)
+		*(.ramfunc._ZN9NavigatorC2Ev)
+		*(.text._ZNK15AttitudeControl6updateERKN6matrix10QuaternionIfEE)
+		*(.ramfunc._ZNK15AttitudeControl6updateERKN6matrix10QuaternionIfEE)
+	. = ALIGN(4);
+	_eramfunc = ABSOLUTE(.);
+	} > sram AT > flash
+	_lramfunc = LOADADDR(.ramfunc);
+
+	/* Critical functions in SRAM8 (Scratch X) for zero-contention I-CODE fetch */
+	.scratchx : {
+	_sscratchx = ABSOLUTE(.);
+		*(.scratchx)
+		*(.text._ZN22MulticopterRateControl3RunEv.part.0)
+		*(.ramfunc._ZN22MulticopterRateControl3RunEv.part.0)
+		*(.text._ZN26MulticopterAttitudeControl3RunEv.part.0)
+		*(.ramfunc._ZN26MulticopterAttitudeControl3RunEv.part.0)
+		*(.text._ZN3Ekf12predictStateERKN9estimator9imuSampleE)
+		*(.ramfunc._ZN3Ekf12predictStateERKN9estimator9imuSampleE)
+		*(.text._ZN3Ekf17predictCovarianceERKN9estimator9imuSampleE)
+		*(.ramfunc._ZN3Ekf17predictCovarianceERKN9estimator9imuSampleE)
+		*(.text._ZN7sensors10VehicleIMU10UpdateGyroEv)
+		*(.ramfunc._ZN7sensors10VehicleIMU10UpdateGyroEv)
+		*(.text._ZN7sensors10VehicleIMU11UpdateAccelEv)
+		*(.ramfunc._ZN7sensors10VehicleIMU11UpdateAccelEv)
+	. = ALIGN(4);
+	_escratchx = ABSOLUTE(.);
+	} > sram8 AT > flash
+	_lscratchx = LOADADDR(.scratchx);
 
 	/* Where rp23xx_start.c copies .data from. Taken from the section's load
 	 * address rather than from '.' before it: ld aligns the LMA to the
@@ -131,9 +214,9 @@ SECTIONS
 	.debug_line 0 : { *(.debug_line) }
 	.debug_pubnames 0 : { *(.debug_pubnames) }
 	.debug_aranges 0 : { *(.debug_aranges) }
-}
 
-ASSERT(_image_def_end - _image_def_start == 20, "IMAGE_DEF block must be five words")
-ASSERT(_image_def_end - ORIGIN(flash) <= 4096, "IMAGE_DEF block must end inside the first 4 KB")
-ASSERT(_eronly == LOADADDR(.data), "_eronly must be the .data load address")
-ASSERT(LOADADDR(.data) + SIZEOF(.data) <= ORIGIN(flash) + LENGTH(flash), "application image overflows its 3904 KB window")
+	ASSERT(_image_def_end - _image_def_start == 20, "IMAGE_DEF block must be five words")
+	ASSERT(_image_def_end - ORIGIN(flash) <= 4096, "IMAGE_DEF block must end inside the first 4 KB")
+	ASSERT(_eronly == LOADADDR(.data), "_eronly must be LOADADDR(.data)")
+	ASSERT(LOADADDR(.data) + SIZEOF(.data) <= ORIGIN(flash) + LENGTH(flash), "application image overflows its 3904 KB window")
+}

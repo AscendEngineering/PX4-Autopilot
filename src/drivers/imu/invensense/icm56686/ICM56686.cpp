@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "ICM56686.hpp"
+#include <px4_arch/rpi_flash.h>
 
 using namespace time_literals;
 
@@ -80,7 +81,7 @@ ICM56686::ICM56686(const I2CSPIDriverConfig &config) :
 	ConfigureSampleRate(_px4_gyro.get_max_rate_hz());
 }
 
-void ICM56686::ConfigureODR(const int32_t odr_hz)
+void RAMFUNC ICM56686::ConfigureODR(const int32_t odr_hz)
 {
 	uint8_t accel_odr = ACCEL_CONFIG0_BIT::ACCEL_ODR_6400_HZ;
 	uint8_t gyro_odr = GYRO_CONFIG0_BIT::GYRO_ODR_6400_HZ;
@@ -138,7 +139,7 @@ ICM56686::~ICM56686()
 	perf_free(_drdy_missed_perf);
 }
 
-int ICM56686::init()
+int RAMFUNC ICM56686::init()
 {
 	const int ret = SPI::init();
 
@@ -150,7 +151,7 @@ int ICM56686::init()
 	return Reset() ? PX4_OK : PX4_ERROR;
 }
 
-bool ICM56686::Reset()
+bool RAMFUNC ICM56686::Reset()
 {
 	_state = STATE::RESET;
 	ScheduleClear();
@@ -158,13 +159,13 @@ bool ICM56686::Reset()
 	return true;
 }
 
-void ICM56686::exit_and_cleanup()
+void RAMFUNC ICM56686::exit_and_cleanup()
 {
 	DataReadyInterruptDisable();
 	I2CSPIDriverBase::exit_and_cleanup();
 }
 
-void ICM56686::print_status()
+void RAMFUNC ICM56686::print_status()
 {
 	I2CSPIDriverBase::print_status();
 
@@ -180,7 +181,7 @@ void ICM56686::print_status()
 	perf_print_counter(_drdy_missed_perf);
 }
 
-int ICM56686::probe()
+int RAMFUNC ICM56686::probe()
 {
 	for (int i = 0; i < 3; i++) {
 		uint8_t whoami{0};
@@ -195,12 +196,13 @@ int ICM56686::probe()
 	return PX4_ERROR;
 }
 
-void ICM56686::RunImpl()
+void RAMFUNC ICM56686::RunImpl()
 {
 	const hrt_abstime now = hrt_absolute_time();
 
 	switch (_state) {
 	case STATE::RESET:
+		PX4_INFO("State: RESET");
 		DataReadyInterruptDisable();
 		_data_ready_interrupt_enabled = false;
 
@@ -230,6 +232,7 @@ void ICM56686::RunImpl()
 		break;
 
 	case STATE::WAIT_FOR_RESET: {
+			PX4_INFO("State: WAIT_FOR_RESET");
 			uint8_t whoami{0};
 			uint8_t status{0};
 
@@ -259,6 +262,7 @@ void ICM56686::RunImpl()
 		break;
 
 	case STATE::CONFIGURE:
+		PX4_INFO("State: CONFIGURE");
 		if (Configure()) {
 			_state = STATE::FIFO_RESET;
 			// 35 ms gyro start-up time, 10 ms accel from sleep to valid data
@@ -277,6 +281,7 @@ void ICM56686::RunImpl()
 		break;
 
 	case STATE::FIFO_RESET:
+		PX4_INFO("State: FIFO_RESET");
 		if (!FIFOReset()) {
 			_state = STATE::RESET;
 			ScheduleDelayed(100_ms);
@@ -308,8 +313,6 @@ void ICM56686::RunImpl()
 				} else {
 					perf_count(_drdy_missed_perf);
 				}
-
-				ScheduleDelayed(_fifo_empty_interval_us * 2);
 			}
 
 			if (FIFORead(timestamp_sample)) {
@@ -317,8 +320,9 @@ void ICM56686::RunImpl()
 					_failure_count--;
 				}
 
-			} else if (++_failure_count > 10) {
-				Reset();
+			} else if (++_failure_count > 50) {
+				PX4_ERR("FIFO read failed %i times, resetting", _failure_count);
+			Reset();
 				return;
 			}
 
@@ -329,15 +333,17 @@ void ICM56686::RunImpl()
 
 				} else {
 					perf_count(_bad_register_perf);
-					Reset();
+					PX4_ERR("FIFO read failed %i times, resetting", _failure_count);
+			Reset();
 				}
 			}
+			ScheduleDelayed(_fifo_empty_interval_us);
 		}
 		break;
 	}
 }
 
-void ICM56686::ConfigureSampleRate(const int sample_rate)
+void RAMFUNC ICM56686::ConfigureSampleRate(const int sample_rate)
 {
 	const float minimum_interval = _fifo_sample_dt;
 	_fifo_empty_interval_us = math::max(roundf((1e6f / sample_rate) / minimum_interval) * minimum_interval,
@@ -350,7 +356,7 @@ void ICM56686::ConfigureSampleRate(const int sample_rate)
 	ConfigureFIFOWatermark(static_cast<uint8_t>(_fifo_samples));
 }
 
-void ICM56686::ConfigureFIFOWatermark(const uint8_t samples)
+void RAMFUNC ICM56686::ConfigureFIFOWatermark(const uint8_t samples)
 {
 	for (auto &config : _register_cfg) {
 		if (config.reg == Register::BANK_0::FIFO_CONFIG1_0) {
@@ -362,7 +368,7 @@ void ICM56686::ConfigureFIFOWatermark(const uint8_t samples)
 	}
 }
 
-bool ICM56686::Configure()
+bool RAMFUNC ICM56686::Configure()
 {
 	bool success = true;
 
@@ -431,7 +437,7 @@ bool ICM56686::Configure()
 	return success;
 }
 
-bool ICM56686::FIFOBypass()
+bool RAMFUNC ICM56686::FIFOBypass()
 {
 	// Disable the SREG-FIFO interface before the FIFO itself, then switch to bypass mode.
 	bool success = RegisterSetAndClearBits(Register::BANK_0::FIFO_CONFIG3, 0, FIFO_CONFIG3_BIT::FIFO_IF_EN);
@@ -445,7 +451,7 @@ bool ICM56686::FIFOBypass()
 	return success;
 }
 
-bool ICM56686::ConfigureFIFO()
+bool RAMFUNC ICM56686::ConfigureFIFO()
 {
 	bool success = FIFOBypass();
 
@@ -473,7 +479,7 @@ bool ICM56686::ConfigureFIFO()
 	return success;
 }
 
-bool ICM56686::FIFOFlush()
+bool RAMFUNC ICM56686::FIFOFlush()
 {
 	uint8_t fifo_config2{0};
 
@@ -499,7 +505,7 @@ bool ICM56686::FIFOFlush()
 	return false;
 }
 
-bool ICM56686::RegisterCheck(const register_config_t &reg_cfg)
+bool RAMFUNC ICM56686::RegisterCheck(const register_config_t &reg_cfg)
 {
 	uint8_t value{0};
 
@@ -510,13 +516,13 @@ bool ICM56686::RegisterCheck(const register_config_t &reg_cfg)
 	return (value & reg_cfg.mask) == (reg_cfg.value & reg_cfg.mask);
 }
 
-bool ICM56686::RegisterConfigure(const register_config_t &reg_cfg)
+bool RAMFUNC ICM56686::RegisterConfigure(const register_config_t &reg_cfg)
 {
 	return RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.value & reg_cfg.mask,
 				       static_cast<uint8_t>(~reg_cfg.value) & reg_cfg.mask);
 }
 
-bool ICM56686::RegisterConfigure(const Register::BANK_0 reg)
+bool RAMFUNC ICM56686::RegisterConfigure(const Register::BANK_0 reg)
 {
 	for (const auto &config : _register_cfg) {
 		if (config.reg == reg) {
@@ -527,7 +533,7 @@ bool ICM56686::RegisterConfigure(const Register::BANK_0 reg)
 	return false;
 }
 
-bool ICM56686::RegisterForceWrite(const Register::BANK_0 reg)
+bool RAMFUNC ICM56686::RegisterForceWrite(const Register::BANK_0 reg)
 {
 	for (const auto &config : _register_cfg) {
 		if (config.reg == reg) {
@@ -538,7 +544,7 @@ bool ICM56686::RegisterForceWrite(const Register::BANK_0 reg)
 	return false;
 }
 
-bool ICM56686::RegisterRead(const Register::BANK_0 reg, uint8_t &value)
+bool RAMFUNC ICM56686::RegisterRead(const Register::BANK_0 reg, uint8_t &value)
 {
 	uint8_t cmd[2] {static_cast<uint8_t>(static_cast<uint8_t>(reg) | DIR_READ), 0};
 
@@ -551,7 +557,7 @@ bool ICM56686::RegisterRead(const Register::BANK_0 reg, uint8_t &value)
 	return true;
 }
 
-bool ICM56686::RegisterWrite(const Register::BANK_0 reg, const uint8_t value)
+bool RAMFUNC ICM56686::RegisterWrite(const Register::BANK_0 reg, const uint8_t value)
 {
 	uint8_t cmd[2] {static_cast<uint8_t>(reg), value};
 
@@ -563,7 +569,7 @@ bool ICM56686::RegisterWrite(const Register::BANK_0 reg, const uint8_t value)
 	return true;
 }
 
-bool ICM56686::RegisterSetAndClearBits(const Register::BANK_0 reg, const uint8_t set_bits,
+bool RAMFUNC ICM56686::RegisterSetAndClearBits(const Register::BANK_0 reg, const uint8_t set_bits,
 				       const uint8_t clear_bits)
 {
 	uint8_t value{0};
@@ -576,7 +582,7 @@ bool ICM56686::RegisterSetAndClearBits(const Register::BANK_0 reg, const uint8_t
 	return value == new_value || RegisterWrite(reg, new_value);
 }
 
-bool ICM56686::WaitForIregReady()
+bool RAMFUNC ICM56686::WaitForIregReady()
 {
 	// IREG_DONE reads 1 at idle. Honour the datasheet 4 us gap first or a poll can
 	// observe a stale "done" from the previous access.
@@ -599,7 +605,7 @@ bool ICM56686::WaitForIregReady()
 	return false;
 }
 
-bool ICM56686::IregRead(const uint16_t reg, uint8_t &value)
+bool RAMFUNC ICM56686::IregRead(const uint16_t reg, uint8_t &value)
 {
 	if (!WaitForIregReady()) {
 		return false;
@@ -627,7 +633,7 @@ bool ICM56686::IregRead(const uint16_t reg, uint8_t &value)
 	return WaitForIregReady();
 }
 
-bool ICM56686::IregWrite(const uint16_t reg, const uint8_t value)
+bool RAMFUNC ICM56686::IregWrite(const uint16_t reg, const uint8_t value)
 {
 	if (!WaitForIregReady()) {
 		return false;
@@ -649,7 +655,7 @@ bool ICM56686::IregWrite(const uint16_t reg, const uint8_t value)
 	return WaitForIregReady();
 }
 
-bool ICM56686::IregSetAndClearBits(const uint16_t reg, const uint8_t set_bits, const uint8_t clear_bits)
+bool RAMFUNC ICM56686::IregSetAndClearBits(const uint16_t reg, const uint8_t set_bits, const uint8_t clear_bits)
 {
 	uint8_t value{0};
 
@@ -686,7 +692,7 @@ uint16_t RAMFUNC ICM56686::FIFOReadCount()
 	return combineUnsigned(fifo_count[2], fifo_count[1]);
 }
 
-bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
+bool RAMFUNC ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 {
 	const uint16_t fifo_frames = FIFOReadCount();
 
@@ -698,6 +704,7 @@ bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 	// More frames queued than one transfer can publish: draining them would stamp stale samples
 	// with the current time, so reset for a clean restart instead (same rule as the ICM45686 driver).
 	if (fifo_frames > FIFO_MAX_SAMPLES) {
+		PX4_WARN("FIFO overflow: %u frames", fifo_frames);
 		perf_count(_fifo_overflow_perf);
 
 		if (!FIFOReset()) {
@@ -730,6 +737,7 @@ bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 	}
 
 	if (samples == 0) {
+		PX4_WARN("FIFO header mismatch: 0 valid samples in %u frames", frames);
 		if (!FIFOReset()) {
 			PX4_DEBUG("FIFO reset failed");
 		}
@@ -746,14 +754,14 @@ bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 	return true;
 }
 
-bool ICM56686::FIFOReset()
+bool RAMFUNC ICM56686::FIFOReset()
 {
 	perf_count(_fifo_reset_perf);
 	_drdy_timestamp_sample.store(0);
 	return ConfigureFIFO();
 }
 
-void ICM56686::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DATA fifo[], const uint8_t samples)
+void RAMFUNC ICM56686::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DATA fifo[], const uint8_t samples)
 {
 	sensor_accel_fifo_s accel{};
 	accel.timestamp_sample = timestamp_sample;
@@ -784,7 +792,7 @@ void ICM56686::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DAT
 	}
 }
 
-void ICM56686::ProcessGyro(const hrt_abstime &timestamp_sample, const FIFO::DATA fifo[], const uint8_t samples)
+void RAMFUNC ICM56686::ProcessGyro(const hrt_abstime &timestamp_sample, const FIFO::DATA fifo[], const uint8_t samples)
 {
 	sensor_gyro_fifo_s gyro{};
 	gyro.timestamp_sample = timestamp_sample;
@@ -858,31 +866,41 @@ bool RAMFUNC ICM56686::ProcessTemperature(const FIFO::DATA fifo[], const uint8_t
 	return true;
 }
 
-int ICM56686::DataReadyInterruptCallback(int irq, void *context, void *arg)
+int RAMFUNC ICM56686::DataReadyInterruptCallback(int irq, void *context, void *arg)
 {
 	static_cast<ICM56686 *>(arg)->DataReady();
 	return 0;
 }
 
-void ICM56686::DataReady()
+void RAMFUNC ICM56686::DataReady()
 {
 	_drdy_timestamp_sample.store(hrt_absolute_time());
-	ScheduleNow();
 }
 
-bool ICM56686::DataReadyInterruptConfigure()
+bool RAMFUNC ICM56686::DataReadyInterruptConfigure()
 {
 	if (_drdy_gpio == 0) {
+		PX4_INFO("Configuring DRDY interrupt...");
+		if (_drdy_gpio == 0) {
+			PX4_ERR("DRDY GPIO not configured");
+			return false;
+		}
+	}
+
+	int ret = px4_arch_gpiosetevent(_drdy_gpio, true, false, true, &DataReadyInterruptCallback, this);
+	if (ret != 0) {
+		PX4_ERR("px4_arch_gpiosetevent failed with %i", ret);
 		return false;
 	}
 
-	return px4_arch_gpiosetevent(_drdy_gpio, true, false, true, &DataReadyInterruptCallback, this) == 0;
+	return true;
 }
 
-bool ICM56686::DataReadyInterruptDisable()
+bool RAMFUNC ICM56686::DataReadyInterruptDisable()
 {
 	if (_drdy_gpio == 0) {
-		return false;
+		PX4_INFO("Configuring DRDY interrupt...");
+		if (_drdy_gpio == 0) 	{return false;}
 	}
 
 	return px4_arch_gpiosetevent(_drdy_gpio, false, false, false, nullptr, nullptr) == 0;

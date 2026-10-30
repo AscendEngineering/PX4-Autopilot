@@ -51,6 +51,10 @@ __BEGIN_DECLS
 #define px4_udelay(usec) up_udelay(usec)
 #define px4_mdelay(msec) up_mdelay(msec)
 
+#ifndef RAMFUNC
+#define RAMFUNC __attribute__((section(".ramfunc"), noinline))
+#endif
+
 #include <arch/board/board.h>
 
 __END_DECLS

@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "EKFGSF_yaw.h"
+#include <px4_arch/rpi_flash.h>
 
 #include <cstdlib>
 
@@ -64,7 +65,7 @@ void EKFGSF_yaw::reset()
 	_gsf_yaw_variance = INFINITY;
 }
 
-void EKFGSF_yaw::predict(const matrix::Vector3f &delta_ang, const float delta_ang_dt, const matrix::Vector3f &delta_vel,
+void RAMFUNC EKFGSF_yaw::predict(const matrix::Vector3f &delta_ang, const float delta_ang_dt, const matrix::Vector3f &delta_vel,
 			 const float delta_vel_dt, bool in_air)
 {
 	const Vector3f accel = delta_vel / delta_vel_dt;
@@ -269,7 +270,7 @@ void EKFGSF_yaw::ahrsAlignYaw()
 	}
 }
 
-void EKFGSF_yaw::predictEKF(const uint8_t model_index, const Vector3f &delta_ang, const float delta_ang_dt,
+void RAMFUNC EKFGSF_yaw::predictEKF(const uint8_t model_index, const Vector3f &delta_ang, const float delta_ang_dt,
 			    const Vector3f &delta_vel, const float delta_vel_dt, bool in_air)
 {
 	// generate an attitude reference using IMU data

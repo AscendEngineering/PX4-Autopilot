@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "VehicleMagnetometer.hpp"
+#include <px4_arch/rpi_flash.h>
 
 #include <px4_platform_common/log.h>
 #include <px4_platform_common/events.h>
@@ -440,7 +441,7 @@ void VehicleMagnetometer::UpdatePowerCompensation()
 	}
 }
 
-void VehicleMagnetometer::Run()
+void RAMFUNC VehicleMagnetometer::Run()
 {
 	perf_begin(_cycle_perf);
 

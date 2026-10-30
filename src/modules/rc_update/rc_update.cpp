@@ -38,6 +38,7 @@
  */
 
 #include "rc_update.h"
+#include <px4_arch/rpi_flash.h>
 
 using namespace time_literals;
 
@@ -334,7 +335,7 @@ RCUpdate::map_flight_modes_buttons()
 	}
 }
 
-void RCUpdate::Run()
+void RAMFUNC RCUpdate::Run()
 {
 	if (should_exit()) {
 		_input_rc_sub.unregisterCallback();
