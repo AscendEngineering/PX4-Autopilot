@@ -49,6 +49,12 @@
 #include <lib/perf/perf_counter.h>
 #include <px4_platform_common/atomic.h>
 #include <px4_platform_common/i2c_spi_buses.h>
+#include <px4_arch/micro_hal.h>
+
+/* RAMFUNC puts a hot function in SRAM on platforms that define it (RP2350). */
+#ifndef RAMFUNC
+#define RAMFUNC
+#endif
 
 using namespace InvenSense_ICM56686;
 

@@ -1,8 +1,8 @@
 /****************************************************************************
- * boards/raspberrypi/rpi-uavfc-r4/nuttx-config/scripts/bootloader_script.ld
+ * boards/raspberrypi/rpi-uavfc-r4/nuttx-config/scripts/script.ld
  *
- * PX4 bootloader image for the RP2350. Numbers repeat src/hw_config.h:
- * BOOTLOADER_RESERVATION_SIZE 128 KB at the XIP base, striped SRAM0-7.
+ * PX4 application image for the RP2350, after the 128 KB bootloader.
+ * Numbers repeat src/hw_config.h. Hot code runs from SRAM: see .ramfunc.
  *
  *   Copyright (c) 2026 PX4 Development Team. All rights reserved.
  *
@@ -47,7 +47,7 @@ ENTRY(_stext)
 EXTERN(board_get_manifest)
 SECTIONS
 {
-	.text : {
+	.vectors : {
 		_stext = ABSOLUTE(.);
 		KEEP(*(.vectors))
 
@@ -61,7 +61,27 @@ SECTIONS
 		LONG(0x00000000)	/* link to self */
 		LONG(0xab123579)	/* PICOBIN_BLOCK_MARKER_END */
 		_image_def_end = ABSOLUTE(.);
+	} > flash
 
+	/* Code that runs from SRAM. Before .text on purpose: ld gives an input
+	 * section to the first rule that matches it, so these rules must come
+	 * before the .text catch-all. The load image sits in flash between the
+	 * vectors and .text; rp23xx_boardearlyinitialize() in src/init.c copies
+	 * it before anything placed here can run. Everything that executes
+	 * before that copy (__start, rp23xx_clockconfig, the board early init
+	 * and its copy loop) must stay in flash; tools/check_ramfunc.py proves
+	 * it after every link. */
+	.ramfunc : {
+		. = ALIGN(4);
+		_sramfunc = ABSOLUTE(.);
+		/* 1. anything that asks explicitly: the ROM flash wrapper, the IMU driver */
+		*(.ramfunc .ramfunc.*)
+		. = ALIGN(4);
+		_eramfunc = ABSOLUTE(.);
+	} > sram AT > flash
+	_lramfunc = LOADADDR(.ramfunc);
+
+	.text : {
 		*(.text .text.*)
 		*(.fixup)
 		*(.gnu.warning)
@@ -91,13 +111,10 @@ SECTIONS
 	} > flash
 	__exidx_end = ABSOLUTE(.);
 
-	/* .ramfunc rides along with .data so the ROM flash wrapper in
-	 * px4/rpi/rpi_common/flash/rpi_flash.c runs from SRAM (flash-based
-	 * parameters). rp23xx_start.c copies _eronly to _sdata.._edata first. */
+	/* rp23xx_start.c copies _eronly to _sdata.._edata before the board init. */
 	.data : {
 		_sdata = ABSOLUTE(.);
 		*(.data .data.*)
-		*(.ramfunc .ramfunc.*)
 		*(.gnu.linkonce.d.*)
 		CONSTRUCTORS
 		. = ALIGN(4);
@@ -112,6 +129,10 @@ SECTIONS
 
 	.bss : {
 		_sbss = ABSOLUTE(.);
+		/* NuttX's RAM vector table (CONFIG_ARCH_RAMVECTORS); VTOR needs the
+		 * alignment of the next power of two above the table size. */
+		. = ALIGN(512);
+		*(.ram_vectors)
 		*(.bss .bss.*)
 		*(.gnu.linkonce.b.*)
 		*(COMMON)
@@ -136,4 +157,6 @@ SECTIONS
 ASSERT(_image_def_end - _image_def_start == 20, "IMAGE_DEF block must be five words")
 ASSERT(_image_def_end - ORIGIN(flash) <= 4096, "IMAGE_DEF block must end inside the first 4 KB")
 ASSERT(_eronly == LOADADDR(.data), "_eronly must be the .data load address")
+ASSERT(SIZEOF(.ramfunc) <= 208K, ".ramfunc exceeds the 208 KB SRAM code budget")
+ASSERT(_eramfunc <= _sdata, ".ramfunc must precede .data in SRAM")
 ASSERT(LOADADDR(.data) + SIZEOF(.data) <= ORIGIN(flash) + LENGTH(flash), "application image overflows its 3904 KB window")
