@@ -39,6 +39,39 @@
 #include <stdint.h>
 
 #if defined(__ARM_ARCH)
+# if defined(CONFIG_SMP)
+/* SMP: the park handshake needs the scheduler, the SMP call queue, a mutex
+ * and a clock. Only the firmware builds with CONFIG_SMP; the bootloader and
+ * the host tests take the other branches. */
+#  include <sched.h>
+#  include <nuttx/arch.h>
+#  include <nuttx/sched.h>
+#  include <nuttx/mutex.h>
+#  include <drivers/drv_hrt.h>
+
+struct rpi_flash_call_s {
+	struct smp_call_data_s data;
+};
+
+static mutex_t g_rpi_flash_mutex = NXMUTEX_INITIALIZER;
+
+static inline int rpi_flash_this_cpu(void) { return up_cpu_index(); }
+static inline void rpi_flash_sched_lock(void) { sched_lock(); }
+static inline void rpi_flash_sched_unlock(void) { sched_unlock(); }
+static inline void rpi_flash_mutex_lock(void) { nxmutex_lock(&g_rpi_flash_mutex); }
+static inline void rpi_flash_mutex_unlock(void) { nxmutex_unlock(&g_rpi_flash_mutex); }
+static inline void rpi_flash_call_init(struct rpi_flash_call_s *c, int (*func)(void *), void *arg)
+{
+	nxsched_smp_call_init(&c->data, func, arg);
+}
+static inline int rpi_flash_smp_call_async(int cpu, struct rpi_flash_call_s *c)
+{
+	return nxsched_smp_call_single_async(cpu, &c->data);
+}
+/* Only called while XIP is up (the waits before and after the ROM operation). */
+static inline uint64_t rpi_flash_time_us(void) { return hrt_absolute_time(); }
+# endif
+
 static inline __attribute__((always_inline)) uint32_t rpi_flash_irq_save(void)
 {
 	uint32_t primask;
@@ -62,8 +95,29 @@ static inline __attribute__((always_inline)) void rpi_flash_xip_restore(const ui
 	((void (*)(void))((uintptr_t)copy | 1u))();
 }
 #else /* host test build */
+# if defined(CONFIG_SMP)
+/* The SMP host test implements these with a fake scheduler and SMP call queue. */
+struct rpi_flash_call_s {
+	int (*func)(void *);
+	void *arg;
+	int queued;
+};
+int rpi_flash_this_cpu(void);
+void rpi_flash_sched_lock(void);
+void rpi_flash_sched_unlock(void);
+void rpi_flash_mutex_lock(void);
+void rpi_flash_mutex_unlock(void);
+void rpi_flash_call_init(struct rpi_flash_call_s *c, int (*func)(void *), void *arg);
+int rpi_flash_smp_call_async(int cpu, struct rpi_flash_call_s *c);
+uint64_t rpi_flash_time_us(void);
+uint32_t rpi_flash_test_irq_save(void);
+void rpi_flash_test_irq_restore(uint32_t primask);
+static inline uint32_t rpi_flash_irq_save(void) { return rpi_flash_test_irq_save(); }
+static inline void rpi_flash_irq_restore(uint32_t primask) { rpi_flash_test_irq_restore(primask); }
+# else
 static inline uint32_t rpi_flash_irq_save(void) { return 0; }
 static inline void rpi_flash_irq_restore(uint32_t primask) { (void)primask; }
+# endif
 static inline void rpi_flash_barrier(void) {}
 void rpi_flash_xip_restore(const uint32_t *copy);
 #endif

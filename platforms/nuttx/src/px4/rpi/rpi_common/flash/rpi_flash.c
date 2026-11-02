@@ -45,6 +45,147 @@
 #define RAMFUNC				__attribute__((section(".ramfunc"), noinline))
 #define XIP_SETUP_WORDS			(RPI_XIP_SETUP_BYTES / sizeof(uint32_t))
 
+#if defined(CONFIG_SMP)
+/* Park the other core while XIP is down.
+ *
+ * The other core keeps fetching from flash on its own; with XIP down that is
+ * a bus fault or garbage. So before every ROM erase or program the calling
+ * core posts rpi_flash_park_handler() to the other core through NuttX's SMP
+ * call queue and waits for it to acknowledge. The handler runs in the other
+ * core's inter-core FIFO interrupt, masks PRIMASK (NuttX runs handlers with
+ * BASEPRI, so a higher-priority interrupt would otherwise fetch from flash),
+ * acknowledges, and spins in SRAM until the caller publishes RELEASE after
+ * XIP is restored. The caller holds sched_lock() from before it reads its CPU
+ * number until after the release: a task that holds the scheduler lock cannot
+ * be switched out, so it cannot migrate to the core it is about to park, and
+ * nxsched_smp_call_single_async() runs the callback inline on the current
+ * CPU, which would spin forever. A mutex serialises callers from both cores.
+ *
+ * Descriptor lifetime, audited in sched/sched/sched_smp.c:
+ * nxsched_smp_call_handler() removes the node from the per-CPU queue under
+ * g_smp_call_lock before it calls the callback, and after the callback
+ * returns it reads only data->cookie, which is NULL for an async call. So the
+ * static descriptor may be resubmitted as soon as the handler has run (DONE
+ * observed). The one unsafe case is resubmitting a descriptor whose node is
+ * still queued because the handler never ran: that is the acknowledgment
+ * timeout, so a timeout latches `faulted` and every later erase or program
+ * returns 0 without entering the ROM until reboot. A late callback for a
+ * cancelled request finds the state CANCELLED and returns without parking.
+ *
+ * The state is a single word with acquire/release ordering; on Cortex-M33 the
+ * atomic builtins are inline ldrex/strex and dmb, so the handler's spin and
+ * the release inside flash_op() touch no code outside SRAM. */
+enum {
+	PARK_ACK_TIMEOUT_US = 10000,	/* the other core answers its FIFO interrupt within this */
+	PARK_DONE_TIMEOUT_US = 10000,	/* and leaves the handler within this after RELEASE */
+};
+
+static struct {
+	uint32_t state;			/* enum rpi_flash_park_state_e, atomic */
+	bool faulted;			/* sticky until reboot */
+	bool call_ready;
+	struct rpi_flash_call_s call;
+} park;
+
+RAMFUNC static int rpi_flash_park_handler(void *arg)
+{
+	(void)arg;
+	uint32_t primask = rpi_flash_irq_save();
+	uint32_t expected = RPI_FLASH_PARK_REQUESTED;
+
+	if (!__atomic_compare_exchange_n(&park.state, &expected, RPI_FLASH_PARK_PARKED, false,
+					 __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+		/* cancelled, or a stale delivery: nothing to park for */
+		rpi_flash_irq_restore(primask);
+		return 0;
+	}
+
+	/* SRAM only from here until RELEASE: XIP goes down once the caller sees PARKED */
+	while (__atomic_load_n(&park.state, __ATOMIC_ACQUIRE) == RPI_FLASH_PARK_PARKED) {
+	}
+
+	__atomic_store_n(&park.state, RPI_FLASH_PARK_DONE, __ATOMIC_RELEASE);
+	rpi_flash_irq_restore(primask);
+	return 0;
+}
+
+/* Called with the mutex and the scheduler lock held, interrupts enabled, XIP up. */
+static bool rpi_flash_park_other_core(void)
+{
+	if (park.faulted) {
+		return false;
+	}
+
+	if (!park.call_ready) {
+		rpi_flash_call_init(&park.call, rpi_flash_park_handler, NULL);
+		park.call_ready = true;
+	}
+
+	__atomic_store_n(&park.state, RPI_FLASH_PARK_REQUESTED, __ATOMIC_RELEASE);
+	const int other = 1 - rpi_flash_this_cpu();
+
+	if (rpi_flash_smp_call_async(other, &park.call) < 0) {
+		/* not queued, or queued on an unknown core: do not reuse the descriptor */
+		park.faulted = true;
+		return false;
+	}
+
+	const uint64_t deadline = rpi_flash_time_us() + PARK_ACK_TIMEOUT_US;
+
+	while (__atomic_load_n(&park.state, __ATOMIC_ACQUIRE) != RPI_FLASH_PARK_PARKED) {
+		if (rpi_flash_time_us() > deadline) {
+			uint32_t expected = RPI_FLASH_PARK_REQUESTED;
+
+			if (__atomic_compare_exchange_n(&park.state, &expected, RPI_FLASH_PARK_CANCELLED, false,
+							__ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+				park.faulted = true;	/* the call may still be queued: never resubmit */
+				return false;
+			}
+
+			break;	/* the handler parked at the deadline: a valid park, carry on */
+		}
+	}
+
+	return true;
+}
+
+/* The release word, inline so flash_op() can publish it from SRAM before it
+ * restores interrupts. Idempotent: a second call after DONE changes nothing. */
+static inline __attribute__((always_inline)) void rpi_flash_publish_release(void)
+{
+	uint32_t expected = RPI_FLASH_PARK_PARKED;
+	__atomic_compare_exchange_n(&park.state, &expected, RPI_FLASH_PARK_RELEASE, false,
+				    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+
+/* Called after flash_op() returned with XIP up; waits for the other core to leave. */
+static bool rpi_flash_release_other_core(void)
+{
+	rpi_flash_publish_release();
+	const uint64_t deadline = rpi_flash_time_us() + PARK_DONE_TIMEOUT_US;
+
+	while (__atomic_load_n(&park.state, __ATOMIC_ACQUIRE) != RPI_FLASH_PARK_DONE) {
+		if (rpi_flash_time_us() > deadline) {
+			park.faulted = true;	/* the handler is still referenced: never resubmit */
+			return false;
+		}
+	}
+
+	__atomic_store_n(&park.state, RPI_FLASH_PARK_IDLE, __ATOMIC_RELEASE);
+	return true;
+}
+
+#if !defined(__ARM_ARCH)
+uint32_t rpi_flash_park_state(void) { return __atomic_load_n(&park.state, __ATOMIC_ACQUIRE); }
+bool rpi_flash_park_faulted(void) { return park.faulted; }
+void rpi_flash_park_reset(void)
+{
+	park.faulted = false;
+	__atomic_store_n(&park.state, RPI_FLASH_PARK_IDLE, __ATOMIC_RELEASE);
+}
+#endif
+#endif /* CONFIG_SMP */
+
 typedef void (*rom_void_fn)(void);
 typedef void (*rom_flash_range_erase_fn)(uint32_t addr, size_t count, uint32_t block_size, uint8_t block_cmd);
 typedef void (*rom_flash_range_program_fn)(uint32_t addr, const uint8_t *data, size_t count);
@@ -131,7 +272,41 @@ RAMFUNC static void flash_op(bool erase, uint32_t offset, const uint8_t *data, s
 	rpi_flash_xip_restore(xip_setup);
 	rpi_flash_barrier();
 
+#if defined(CONFIG_SMP)
+	/* XIP is back: let the other core go before this core takes interrupts again */
+	rpi_flash_publish_release();
+#endif
 	rpi_flash_irq_restore(primask);
+}
+
+/* One erase or program as a transaction: under SMP, serialised by the mutex,
+ * pinned to this core by the scheduler lock, with the other core parked for
+ * the ROM operation. Returns false when the other core could not be parked
+ * or released; nothing is erased or programmed on a park failure. */
+static bool flash_transaction(bool erase, uint32_t offset, const uint8_t *data, size_t count,
+			      uint32_t block_size, uint8_t block_cmd)
+{
+#if defined(CONFIG_SMP)
+	if (park.faulted) {
+		return false;
+	}
+
+	rpi_flash_mutex_lock();
+	rpi_flash_sched_lock();
+	bool ok = rpi_flash_park_other_core();
+
+	if (ok) {
+		flash_op(erase, offset, data, count, block_size, block_cmd);
+		ok = rpi_flash_release_other_core();
+	}
+
+	rpi_flash_sched_unlock();
+	rpi_flash_mutex_unlock();
+	return ok;
+#else
+	flash_op(erase, offset, data, count, block_size, block_cmd);
+	return true;
+#endif
 }
 
 bool rpi_flash_is_blank(uint32_t offset, size_t count)
@@ -164,15 +339,17 @@ size_t rpi_flash_erase(uint32_t offset, size_t count)
 		/* W25Q32: a 64 kB block erase is about 150 ms against 45 ms per 4 kB
 		 * sector, so an aligned block is one command, not sixteen. */
 		if ((o % RPI_FLASH_BLOCK_SIZE) == 0 && o + RPI_FLASH_BLOCK_SIZE <= end) {
-			if (!rpi_flash_is_blank(o, RPI_FLASH_BLOCK_SIZE)) {
-				flash_op(true, o, NULL, RPI_FLASH_BLOCK_SIZE, RPI_FLASH_BLOCK_SIZE, RPI_FLASH_BLOCK_ERASE_CMD);
+			if (!rpi_flash_is_blank(o, RPI_FLASH_BLOCK_SIZE)
+			    && !flash_transaction(true, o, NULL, RPI_FLASH_BLOCK_SIZE, RPI_FLASH_BLOCK_SIZE, RPI_FLASH_BLOCK_ERASE_CMD)) {
+				return 0;
 			}
 
 			o += RPI_FLASH_BLOCK_SIZE;
 
 		} else {
-			if (!rpi_flash_is_blank(o, RPI_FLASH_SECTOR_SIZE)) {
-				flash_op(true, o, NULL, RPI_FLASH_SECTOR_SIZE, RPI_FLASH_SECTOR_SIZE, RPI_FLASH_SECTOR_ERASE_CMD);
+			if (!rpi_flash_is_blank(o, RPI_FLASH_SECTOR_SIZE)
+			    && !flash_transaction(true, o, NULL, RPI_FLASH_SECTOR_SIZE, RPI_FLASH_SECTOR_SIZE, RPI_FLASH_SECTOR_ERASE_CMD)) {
+				return 0;
 			}
 
 			o += RPI_FLASH_SECTOR_SIZE;
@@ -193,6 +370,9 @@ size_t rpi_flash_program(uint32_t offset, const void *data, size_t count)
 		return 0;
 	}
 
-	flash_op(false, offset, (const uint8_t *)data, count, 0, 0);
+	if (!flash_transaction(false, offset, (const uint8_t *)data, count, 0, 0)) {
+		return 0;
+	}
+
 	return count;
 }
