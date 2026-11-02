@@ -77,12 +77,24 @@ void init_print_load(struct print_load_s *s)
 	s->new_time = system_load.start_time;
 	s->interval_start_time = system_load.start_time;
 
+#ifdef CONFIG_SMP
+	// idle slots, one per core, including the interval open on a core idle right now
+	irqstate_t flags = enter_critical_section();
+	const hrt_abstime now = hrt_absolute_time();
+
+	for (int i = 0; i < CPULOAD_NCPUS; i++) {
+		s->last_times[i] = cpuload_idle_runtime(i, now);
+	}
+
+	leave_critical_section(flags);
+#else
 	sched_lock();
 	// special case for IDLE thread
 	s->last_times[0] = system_load.tasks[0].total_runtime;
 	sched_unlock();
+#endif
 
-	for (int i = 1; i < CONFIG_FS_PROCFS_MAX_TASKS; i++) {
+	for (int i = CPULOAD_NCPUS; i < CONFIG_FS_PROCFS_MAX_TASKS; i++) {
 		s->last_times[i] = 0;
 	}
 
@@ -146,21 +158,38 @@ void print_load_buffer(char *buffer, int buffer_length, print_load_callback_f cb
 #pragma GCC diagnostic ignored "-Wformat" // NuttX uses a different printf format
 #pragma GCC diagnostic ignored "-Wformat-extra-args"
 
-	float idle_load = 0.f;
+	float idle_load = 0.f;			// mean over the cores
+#ifdef CONFIG_SMP
+	float idle_core[CPULOAD_NCPUS] {};	// per core, printed under SMP
+#endif
 
 	// create a copy of the runtimes because this could be updated during the print output
 	uint64_t total_runtime[CONFIG_FS_PROCFS_MAX_TASKS] {};
+#ifdef CONFIG_SMP
+	// the chip-wide lock excludes the switch-path writers on the other core
+	irqstate_t snap_flags = enter_critical_section();
+#else
 	sched_lock();
+#endif
 
 	print_state->new_time = hrt_absolute_time();
 
 	for (int i = 0; i < CONFIG_FS_PROCFS_MAX_TASKS; i++) {
 		if (system_load.tasks[i].valid) {
+#ifdef CONFIG_SMP
+			total_runtime[i] = (i < CPULOAD_NCPUS) ? cpuload_idle_runtime(i, print_state->new_time)
+					   : system_load.tasks[i].total_runtime;
+#else
 			total_runtime[i] = system_load.tasks[i].total_runtime;
+#endif
 		}
 	}
 
+#ifdef CONFIG_SMP
+	leave_critical_section(snap_flags);
+#else
 	sched_unlock();
+#endif
 
 	if (print_state->new_time > print_state->interval_start_time) {
 		print_state->interval_time_us = print_state->new_time - print_state->interval_start_time;
@@ -190,11 +219,21 @@ void print_load_buffer(char *buffer, int buffer_length, print_load_callback_f cb
 
 
 	for (int i = 0; i < CONFIG_FS_PROCFS_MAX_TASKS; i++) {
-
+#ifdef CONFIG_SMP
+		// the critical section is what keeps the TCB and its stack alive for
+		// this whole read: see sched_note_stop() in cpuload.cpp
+		const hrt_abstime cs_start = hrt_absolute_time();
+		irqstate_t flags = enter_critical_section();
+#else
 		sched_lock(); // need to lock the tcb access (but make it as short as possible)
+#endif
 
 		if (!system_load.tasks[i].valid) {
+#ifdef CONFIG_SMP
+			leave_critical_section(flags);
+#else
 			sched_unlock();
+#endif
 			continue;
 		}
 
@@ -231,17 +270,37 @@ void print_load_buffer(char *buffer, int buffer_length, print_load_callback_f cb
 		uint8_t tcb_sched_priority = system_load.tasks[i].tcb->sched_priority;
 
 		unsigned int tcb_num_used_fds = 0; // number of used file descriptors
-		struct fdlist *fdlist = &system_load.tasks[i].tcb->group->tg_fdlist;
 
-		for (int fdr = 0; fdr < fdlist->fl_rows; fdr++) {
-			for (int fdc = 0; fdc < CONFIG_NFILE_DESCRIPTORS_PER_BLOCK; fdc++) {
-				if (fdlist->fl_fds[fdr][fdc].f_file) {
-					++tcb_num_used_fds;
+#ifdef CONFIG_SMP
+
+		// the group is torn down before the slot is invalidated: skip it for an exiting task
+		if ((system_load.tasks[i].tcb->flags & TCB_FLAG_EXIT_PROCESSING) == 0
+		    && system_load.tasks[i].tcb->group != nullptr) {
+#else
+		{
+#endif
+			struct fdlist *fdlist = &system_load.tasks[i].tcb->group->tg_fdlist;
+
+			for (int fdr = 0; fdr < fdlist->fl_rows; fdr++) {
+				for (int fdc = 0; fdc < CONFIG_NFILE_DESCRIPTORS_PER_BLOCK; fdc++) {
+					if (fdlist->fl_fds[fdr][fdc].f_file) {
+						++tcb_num_used_fds;
+					}
 				}
 			}
 		}
 
+#ifdef CONFIG_SMP
+		leave_critical_section(flags);
+		const hrt_abstime cs_us = hrt_absolute_time() - cs_start;
+
+		if (cs_us > print_state->longest_cs_us) {
+			print_state->longest_cs_us = cs_us;	// the stack scan of the largest task
+		}
+
+#else
 		sched_unlock();
+#endif
 
 		switch (tcb_task_state) {
 		case TSTATE_TASK_PENDING:
@@ -286,8 +345,11 @@ void print_load_buffer(char *buffer, int buffer_length, print_load_callback_f cb
 
 			current_load = interval_runtime / print_state->interval_time_us;
 
-			if (tcb_pid == 0) {
-				idle_load = current_load;
+			if (tcb_pid < CPULOAD_NCPUS) {
+#ifdef CONFIG_SMP
+				idle_core[tcb_pid] = current_load;
+#endif
+				idle_load += current_load / CPULOAD_NCPUS;
 
 			} else {
 				print_state->total_user_time += interval_runtime;
@@ -334,7 +396,8 @@ void print_load_buffer(char *buffer, int buffer_length, print_load_callback_f cb
 	buffer[0] = 0;
 	cb(user);
 
-	float task_load = (float)(print_state->total_user_time) / print_state->interval_time_us;
+	// aggregate task time over the capacity of all cores; task rows above are relative to one core
+	float task_load = (float)(print_state->total_user_time) / (CPULOAD_NCPUS * print_state->interval_time_us);
 
 	/* this can happen if one tasks total runtime was not computed
 	   correctly by the scheduler instrumentation TODO */
@@ -354,6 +417,21 @@ void print_load_buffer(char *buffer, int buffer_length, print_load_callback_f cb
 		 (double)(sched_load * 100.f),
 		 (double)(idle_load * 100.f));
 	cb(user);
+#ifdef CONFIG_SMP
+	snprintf(buffer, buffer_length, "Idle per core:");
+
+	for (int cpu = 0; cpu < CPULOAD_NCPUS; cpu++) {
+		size_t len = strlen(buffer);
+		snprintf(buffer + len, buffer_length - len, " cpu%d %.2f%%", cpu, (double)(idle_core[cpu] * 100.f));
+	}
+
+	{
+		size_t len = strlen(buffer);
+		snprintf(buffer + len, buffer_length - len, ", longest lock %llu us", (unsigned long long)print_state->longest_cs_us);
+	}
+
+	cb(user);
+#endif
 #if defined(BOARD_DMA_ALLOC_POOL_SIZE)
 	uint16_t dma_total;
 	uint16_t dma_used;

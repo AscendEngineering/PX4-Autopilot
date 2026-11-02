@@ -89,18 +89,41 @@ static px4::atomic_int cpuload_monitor_all_count{0};
 void cpuload_monitor_start()
 {
 	if (cpuload_monitor_all_count.fetch_add(1) == 0) {
-		// if the count was previously 0 (idle thread only) then clear any existing runtime data
+		// if the count was previously 0 (idle threads only) then clear any existing runtime data
+#ifdef CONFIG_SMP
+		// the chip-wide lock: sched_lock() does not exclude the other core
+		irqstate_t flags = enter_critical_section();
+#else
 		sched_lock();
+#endif
 
 		system_load.start_time = hrt_absolute_time();
 
-		for (int i = 1; i < CONFIG_FS_PROCFS_MAX_TASKS; i++) {
+		// never the idle slots: their counters run from boot
+		for (int i = CPULOAD_NCPUS; i < CONFIG_FS_PROCFS_MAX_TASKS; i++) {
 			system_load.tasks[i].total_runtime = 0;
 			system_load.tasks[i].curr_start_time = 0;
 		}
 
+#ifdef CONFIG_SMP
+		leave_critical_section(flags);
+#else
 		sched_unlock();
+#endif
 	}
+}
+
+uint64_t cpuload_idle_runtime(int cpu, uint64_t now)
+{
+	const system_load_taskinfo_s &idle = system_load.tasks[cpu];
+	uint64_t runtime = idle.total_runtime;
+
+	if (idle.valid && idle.tcb != nullptr && idle.tcb->task_state == TSTATE_TASK_RUNNING
+	    && now > idle.curr_start_time) {
+		runtime += now - idle.curr_start_time;	// the interval still open on that core
+	}
+
+	return runtime;
 }
 
 void cpuload_monitor_stop()
@@ -117,7 +140,9 @@ void cpuload_initialize_once()
 		task.valid = false;
 	}
 
-	int static_tasks_count = 2;	// there are at least 2 threads that should be initialized statically - "idle" and "init"
+	// threads that exist before this runs, with consecutive PIDs: one idle per
+	// core, then init
+	int static_tasks_count = CPULOAD_NCPUS + 1;
 
 #ifdef CONFIG_PAGING
 	static_tasks_count++;	// include paging thread in initialization
@@ -145,6 +170,10 @@ void sched_note_start(FAR struct tcb_s *tcb)
 {
 	// find first free slot
 	if (system_load.initialized) {
+#ifdef CONFIG_SMP
+		irqstate_t flags = enter_critical_section();
+#endif
+
 		for (auto &task : system_load.tasks) {
 			if (!task.valid) {
 				// slot is available
@@ -156,6 +185,10 @@ void sched_note_start(FAR struct tcb_s *tcb)
 				break;
 			}
 		}
+
+#ifdef CONFIG_SMP
+		leave_critical_section(flags);
+#endif
 	}
 
 #ifdef CONFIG_SEGGER_SYSVIEW
@@ -163,9 +196,24 @@ void sched_note_start(FAR struct tcb_s *tcb)
 #endif
 }
 
+/* Lifetime of what readers of the table dereference, under SMP. Both exit
+ * paths (task_exit.c, task_terminate.c) call this hook before
+ * nxsched_release_tcb() frees the stack and the TCB, so a reader that checks
+ * `valid` and finishes its whole read, stack scan included, inside one
+ * critical section can never have them freed underneath: this hook takes
+ * the same critical section to invalidate the slot. The task group is torn
+ * down earlier, in nxtask_exithook before this hook, so readers must not
+ * touch tcb->group once TCB_FLAG_EXIT_PROCESSING is set. The callers: task
+ * exit holds the lock through the exiting task and bumped the incoming
+ * task's nesting count first, task_terminate calls from outside the lock,
+ * so taking it here nests or acquires, never spins on itself. */
 void sched_note_stop(FAR struct tcb_s *tcb)
 {
 	if (system_load.initialized) {
+#ifdef CONFIG_SMP
+		irqstate_t flags = enter_critical_section();
+#endif
+
 		for (auto &task : system_load.tasks) {
 			if (task.tcb && task.tcb->pid == tcb->pid) {
 				// mark slot as free
@@ -177,6 +225,10 @@ void sched_note_stop(FAR struct tcb_s *tcb)
 				break;
 			}
 		}
+
+#ifdef CONFIG_SMP
+		leave_critical_section(flags);
+#endif
 	}
 
 #ifdef CONFIG_SEGGER_SYSVIEW
@@ -187,8 +239,9 @@ void sched_note_stop(FAR struct tcb_s *tcb)
 void sched_note_suspend(FAR struct tcb_s *tcb)
 {
 	if (system_load.initialized) {
-		if (tcb->pid == 0) {
-			system_load.tasks[0].total_runtime += hrt_elapsed_time(&system_load.tasks[0].curr_start_time);
+		if (cpuload_is_idle(tcb)) {
+			// one slot per core; the switch path runs under the critical section, which readers take
+			system_load.tasks[tcb->pid].total_runtime += hrt_elapsed_time(&system_load.tasks[tcb->pid].curr_start_time);
 			return;
 
 		} else {
@@ -216,8 +269,8 @@ void sched_note_suspend(FAR struct tcb_s *tcb)
 void sched_note_resume(FAR struct tcb_s *tcb)
 {
 	if (system_load.initialized) {
-		if (tcb->pid == 0) {
-			cpuload_store_time(&system_load.tasks[0].curr_start_time);
+		if (cpuload_is_idle(tcb)) {
+			cpuload_store_time(&system_load.tasks[tcb->pid].curr_start_time);
 			return;
 
 		} else {
