@@ -70,6 +70,27 @@ static inline int rpi_flash_smp_call_async(int cpu, struct rpi_flash_call_s *c)
 }
 /* Only called while XIP is up (the waits before and after the ROM operation). */
 static inline uint64_t rpi_flash_time_us(void) { return hrt_absolute_time(); }
+
+/* The park state word is shared by both cores. LDREX/STREX are not atomic
+ * across the RP2350's cores (no global exclusive monitor), so every
+ * read-modify-write of that word is done under a SIO hardware spinlock:
+ * a read claims it (non-zero when it was free), a write releases it. Register
+ * access only, so the handler stays SRAM-resident. Lock 10 is on the
+ * errata RP2350-E2 safe list and NuttX uses only lock 7. */
+#  include <hardware/rp23xx_memorymap.h>
+#  define RPI_FLASH_PARK_SPINLOCK	(RP23XX_SIO_BASE + 0x100 + 4 * 10)
+static inline __attribute__((always_inline)) void rpi_flash_park_lock(void)
+{
+	while (*(volatile uint32_t *)RPI_FLASH_PARK_SPINLOCK == 0) {
+	}
+
+	__asm__ volatile("dmb sy" ::: "memory");
+}
+static inline __attribute__((always_inline)) void rpi_flash_park_unlock(void)
+{
+	__asm__ volatile("dmb sy" ::: "memory");
+	*(volatile uint32_t *)RPI_FLASH_PARK_SPINLOCK = 0;
+}
 # endif
 
 static inline __attribute__((always_inline)) uint32_t rpi_flash_irq_save(void)
@@ -112,6 +133,8 @@ int rpi_flash_smp_call_async(int cpu, struct rpi_flash_call_s *c);
 uint64_t rpi_flash_time_us(void);
 uint32_t rpi_flash_test_irq_save(void);
 void rpi_flash_test_irq_restore(uint32_t primask);
+void rpi_flash_park_lock(void);
+void rpi_flash_park_unlock(void);
 static inline uint32_t rpi_flash_irq_save(void) { return rpi_flash_test_irq_save(); }
 static inline void rpi_flash_irq_restore(uint32_t primask) { rpi_flash_test_irq_restore(primask); }
 # else

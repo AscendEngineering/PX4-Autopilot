@@ -72,44 +72,76 @@
  * returns 0 without entering the ROM until reboot. A late callback for a
  * cancelled request finds the state CANCELLED and returns without parking.
  *
- * The state is a single word with acquire/release ordering; on Cortex-M33 the
- * atomic builtins are inline ldrex/strex and dmb, so the handler's spin and
- * the release inside flash_op() touch no code outside SRAM. */
+ * The state is a single word. LDREX/STREX are not atomic across the RP2350's
+ * cores, so every read-modify-write of it runs under a SIO hardware spinlock
+ * (rpi_flash_park_lock in rpi_flash_hooks.h); plain reads of the word are
+ * single-copy atomic and fenced. All of it is register and SRAM access, so
+ * the handler's spin and the release inside flash_op() touch no code outside
+ * SRAM. */
 enum {
-	PARK_ACK_TIMEOUT_US = 10000,	/* the other core answers its FIFO interrupt within this */
+	PARK_ACK_TIMEOUT_US = 100000,	/* the other core answers its FIFO interrupt within this; it may first
+					 * have to finish a critical section it is spinning for with
+					 * interrupts off, so this is generous */
 	PARK_DONE_TIMEOUT_US = 10000,	/* and leaves the handler within this after RELEASE */
 };
 
 static struct {
-	uint32_t state;			/* enum rpi_flash_park_state_e, atomic */
+	volatile uint32_t state;	/* enum rpi_flash_park_state_e, written under the park lock */
 	bool faulted;			/* sticky until reboot */
 	bool call_ready;
 	struct rpi_flash_call_s call;
 } park;
 
+static inline __attribute__((always_inline)) uint32_t park_get(void)
+{
+	uint32_t v = park.state;
+	rpi_flash_barrier();
+	return v;
+}
+
+static inline __attribute__((always_inline)) void park_set(uint32_t v)
+{
+	rpi_flash_park_lock();
+	park.state = v;
+	rpi_flash_park_unlock();
+}
+
+/* state == expected ? state = desired, true : false */
+static inline __attribute__((always_inline)) bool park_cas(uint32_t expected, uint32_t desired)
+{
+	rpi_flash_park_lock();
+	bool ok = (park.state == expected);
+
+	if (ok) {
+		park.state = desired;
+	}
+
+	rpi_flash_park_unlock();
+	return ok;
+}
+
 RAMFUNC static int rpi_flash_park_handler(void *arg)
 {
 	(void)arg;
 	uint32_t primask = rpi_flash_irq_save();
-	uint32_t expected = RPI_FLASH_PARK_REQUESTED;
 
-	if (!__atomic_compare_exchange_n(&park.state, &expected, RPI_FLASH_PARK_PARKED, false,
-					 __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+	if (!park_cas(RPI_FLASH_PARK_REQUESTED, RPI_FLASH_PARK_PARKED)) {
 		/* cancelled, or a stale delivery: nothing to park for */
 		rpi_flash_irq_restore(primask);
 		return 0;
 	}
 
 	/* SRAM only from here until RELEASE: XIP goes down once the caller sees PARKED */
-	while (__atomic_load_n(&park.state, __ATOMIC_ACQUIRE) == RPI_FLASH_PARK_PARKED) {
+	while (park_get() == RPI_FLASH_PARK_PARKED) {
 	}
 
-	__atomic_store_n(&park.state, RPI_FLASH_PARK_DONE, __ATOMIC_RELEASE);
+	park_set(RPI_FLASH_PARK_DONE);
 	rpi_flash_irq_restore(primask);
 	return 0;
 }
 
-/* Called with the mutex and the scheduler lock held, interrupts enabled, XIP up. */
+/* Called with the mutex and the scheduler lock held, this core's interrupts
+ * masked, XIP up. */
 static bool rpi_flash_park_other_core(void)
 {
 	if (park.faulted) {
@@ -121,7 +153,7 @@ static bool rpi_flash_park_other_core(void)
 		park.call_ready = true;
 	}
 
-	__atomic_store_n(&park.state, RPI_FLASH_PARK_REQUESTED, __ATOMIC_RELEASE);
+	park_set(RPI_FLASH_PARK_REQUESTED);
 	const int other = 1 - rpi_flash_this_cpu();
 
 	if (rpi_flash_smp_call_async(other, &park.call) < 0) {
@@ -132,12 +164,9 @@ static bool rpi_flash_park_other_core(void)
 
 	const uint64_t deadline = rpi_flash_time_us() + PARK_ACK_TIMEOUT_US;
 
-	while (__atomic_load_n(&park.state, __ATOMIC_ACQUIRE) != RPI_FLASH_PARK_PARKED) {
+	while (park_get() != RPI_FLASH_PARK_PARKED) {
 		if (rpi_flash_time_us() > deadline) {
-			uint32_t expected = RPI_FLASH_PARK_REQUESTED;
-
-			if (__atomic_compare_exchange_n(&park.state, &expected, RPI_FLASH_PARK_CANCELLED, false,
-							__ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+			if (park_cas(RPI_FLASH_PARK_REQUESTED, RPI_FLASH_PARK_CANCELLED)) {
 				park.faulted = true;	/* the call may still be queued: never resubmit */
 				return false;
 			}
@@ -153,9 +182,7 @@ static bool rpi_flash_park_other_core(void)
  * restores interrupts. Idempotent: a second call after DONE changes nothing. */
 static inline __attribute__((always_inline)) void rpi_flash_publish_release(void)
 {
-	uint32_t expected = RPI_FLASH_PARK_PARKED;
-	__atomic_compare_exchange_n(&park.state, &expected, RPI_FLASH_PARK_RELEASE, false,
-				    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+	park_cas(RPI_FLASH_PARK_PARKED, RPI_FLASH_PARK_RELEASE);
 }
 
 /* Called after flash_op() returned with XIP up; waits for the other core to leave. */
@@ -164,24 +191,24 @@ static bool rpi_flash_release_other_core(void)
 	rpi_flash_publish_release();
 	const uint64_t deadline = rpi_flash_time_us() + PARK_DONE_TIMEOUT_US;
 
-	while (__atomic_load_n(&park.state, __ATOMIC_ACQUIRE) != RPI_FLASH_PARK_DONE) {
+	while (park_get() != RPI_FLASH_PARK_DONE) {
 		if (rpi_flash_time_us() > deadline) {
 			park.faulted = true;	/* the handler is still referenced: never resubmit */
 			return false;
 		}
 	}
 
-	__atomic_store_n(&park.state, RPI_FLASH_PARK_IDLE, __ATOMIC_RELEASE);
+	park_set(RPI_FLASH_PARK_IDLE);
 	return true;
 }
 
 #if !defined(__ARM_ARCH)
-uint32_t rpi_flash_park_state(void) { return __atomic_load_n(&park.state, __ATOMIC_ACQUIRE); }
+uint32_t rpi_flash_park_state(void) { return park_get(); }
 bool rpi_flash_park_faulted(void) { return park.faulted; }
 void rpi_flash_park_reset(void)
 {
 	park.faulted = false;
-	__atomic_store_n(&park.state, RPI_FLASH_PARK_IDLE, __ATOMIC_RELEASE);
+	park_set(RPI_FLASH_PARK_IDLE);
 }
 #endif
 #endif /* CONFIG_SMP */
@@ -293,6 +320,14 @@ static bool flash_transaction(bool erase, uint32_t offset, const uint8_t *data, 
 
 	rpi_flash_mutex_lock();
 	rpi_flash_sched_lock();
+
+	/* Interrupts off on this core from before the request until after the
+	 * release. The other core is parked wherever its FIFO interrupt caught
+	 * it, which can be inside a critical section or any other spinlock; an
+	 * interrupt handled here meanwhile (the hrt timer takes the critical
+	 * section) would spin on that lock forever while the parked core waits
+	 * for a release this core never publishes. */
+	uint32_t primask = rpi_flash_irq_save();
 	bool ok = rpi_flash_park_other_core();
 
 	if (ok) {
@@ -300,6 +335,7 @@ static bool flash_transaction(bool erase, uint32_t offset, const uint8_t *data, 
 		ok = rpi_flash_release_other_core();
 	}
 
+	rpi_flash_irq_restore(primask);
 	rpi_flash_sched_unlock();
 	rpi_flash_mutex_unlock();
 	return ok;

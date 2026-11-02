@@ -130,6 +130,16 @@ else()
 		nuttx_mm
 		nuttx_c
 		)
+
+	if(CONFIG_SMP)
+		# Under SMP, objects that nothing pulls in during the first pass over
+		# the NuttX group (sched_smp.o, irq_csection.o) get extracted from the
+		# libsched.a that CMake appends after the module libraries, by then
+		# past libarch.a (up_testset, up_send_smp_call) and libc.a
+		# (popcountl). Declaring the cycle makes CMake repeat the archives
+		# after libsched.a.
+		target_link_libraries(nuttx_sched INTERFACE nuttx_arch nuttx_c)
+	endif()
 endif()
 
 if(CONFIG_NET)
@@ -238,6 +248,7 @@ if (NOT CONFIG_BUILD_FLAT)
 	target_link_libraries(px4 PRIVATE
 		${module_libraries}
 	)
+
 
 	add_custom_command(OUTPUT ${PX4_BINARY_OUTPUT}
 		COMMAND ${CMAKE_OBJCOPY} -O binary ${PX4_BINARY_DIR_REL}/${FW_NAME} ${PX4_BINARY_DIR_REL}/${PX4_BOARD}_user.bin

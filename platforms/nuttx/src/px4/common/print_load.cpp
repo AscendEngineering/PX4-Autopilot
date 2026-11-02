@@ -104,6 +104,12 @@ static constexpr const char *tstate_name(const tstate_t s)
 	case TSTATE_TASK_RUNNING:
 		return "RUN";
 
+#ifdef CONFIG_SMP
+
+	case TSTATE_TASK_ASSIGNED:
+		return "ASSGN";	/* assigned to a CPU, not yet running (SMP) */
+#endif
+
 	case TSTATE_TASK_INACTIVE:
 		return "inact";
 
@@ -240,6 +246,9 @@ void print_load_buffer(char *buffer, int buffer_length, print_load_callback_f cb
 		switch (tcb_task_state) {
 		case TSTATE_TASK_PENDING:
 		case TSTATE_TASK_READYTORUN:
+#ifdef CONFIG_SMP
+		case TSTATE_TASK_ASSIGNED:
+#endif
 		case TSTATE_TASK_RUNNING:
 			print_state->running_count++;
 			break;

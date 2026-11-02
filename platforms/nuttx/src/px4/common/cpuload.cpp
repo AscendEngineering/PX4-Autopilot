@@ -44,9 +44,35 @@
 #include <px4_platform/cpuload.h>
 
 #include <drivers/drv_hrt.h>
+#include <nuttx/spinlock.h>
 
 #if defined(__PX4_NUTTX) && defined(CONFIG_SCHED_INSTRUMENTATION)
 __BEGIN_DECLS
+
+#if defined(CONFIG_SMP) && defined(CONFIG_ARCH_CHIP_RP23XX)
+/* Lock behind px4::atomic read-modify-writes on the RP2350, which has no
+ * global exclusive monitor (see px4_platform_common/atomic.h). */
+spinlock_t g_px4_atomic_lock = SP_UNLOCKED;
+#endif
+
+#ifdef CONFIG_SMP
+/* The hooks below run from nxsched_switch_context(), which under SMP always
+ * executes with g_cpu_irqlock held by this CPU. In nxtask_exit() it is held
+ * through the exiting task while the incoming task's nesting count is still
+ * zero, so enter_critical_section() from a hook spins on its own core
+ * forever (seen on the RP2350 at the first thread exit). The lock already
+ * excludes every reader that takes the critical section, so the 64-bit
+ * timestamp is stored directly. */
+static inline void cpuload_store_time(volatile hrt_abstime *t)
+{
+	*t = hrt_absolute_time();
+}
+#else
+static inline void cpuload_store_time(volatile hrt_abstime *t)
+{
+	hrt_store_absolute_time(t);
+}
+#endif
 # include <nuttx/sched_note.h>
 
 __EXPORT struct system_load_s system_load;
@@ -191,7 +217,7 @@ void sched_note_resume(FAR struct tcb_s *tcb)
 {
 	if (system_load.initialized) {
 		if (tcb->pid == 0) {
-			hrt_store_absolute_time(&system_load.tasks[0].curr_start_time);
+			cpuload_store_time(&system_load.tasks[0].curr_start_time);
 			return;
 
 		} else {
@@ -204,7 +230,7 @@ void sched_note_resume(FAR struct tcb_s *tcb)
 			if (task.valid && task.tcb && task.tcb->pid == tcb->pid) {
 				// curr_start_time is accessed from an IRQ handler (in logger), so we need
 				// to make the update atomic
-				hrt_store_absolute_time(&task.curr_start_time);
+				cpuload_store_time(&task.curr_start_time);
 				break;
 			}
 		}
@@ -214,6 +240,17 @@ void sched_note_resume(FAR struct tcb_s *tcb)
 	sysview_sched_note_resume(tcb);
 #endif
 }
+
+#ifdef CONFIG_SMP
+/* NuttX calls these from the CPU start path under CONFIG_SMP with
+ * SCHED_INSTRUMENTATION; PX4 keeps no per-CPU trace, so they are no-ops. */
+void sched_note_cpu_start(FAR struct tcb_s *tcb, int cpu) { (void)tcb; (void)cpu; }
+void sched_note_cpu_started(FAR struct tcb_s *tcb) { (void)tcb; }
+void sched_note_cpu_pause(FAR struct tcb_s *tcb, int cpu) { (void)tcb; (void)cpu; }
+void sched_note_cpu_paused(FAR struct tcb_s *tcb) { (void)tcb; }
+void sched_note_cpu_resume(FAR struct tcb_s *tcb, int cpu) { (void)tcb; (void)cpu; }
+void sched_note_cpu_resumed(FAR struct tcb_s *tcb) { (void)tcb; }
+#endif
 
 #ifdef CONFIG_SEGGER_SYSVIEW
 
