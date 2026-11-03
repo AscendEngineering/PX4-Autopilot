@@ -145,9 +145,12 @@ def transfers(f: Function, elf: Elf):
             continue                                    # return
         elif base.startswith("ldr") and ops.startswith("pc,"):
             m = _LDR_PC_LIT.match(ops[3:].strip())
-            if m:
-                continue                                # veneer body, resolved by veneer_target()
-            yield addr, "indirect", None, f"{mn} {ops}"
+            w = elf.word((addr & ~3) + 4 + int(m.group(1) or 0)) if m else None
+            if w is not None:
+                # a literal jump: a veneer body or a trampoline; resolve it like a branch
+                yield addr, "branch", w & ~1, f"{mn} {ops}"
+            else:
+                yield addr, "indirect", None, f"{mn} {ops}"
         elif base == "mov" and ops.startswith("pc,"):
             yield addr, "indirect", None, f"{mn} {ops}"
 
