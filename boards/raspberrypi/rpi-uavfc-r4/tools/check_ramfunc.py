@@ -236,8 +236,8 @@ def parse_rules(ld_text: str) -> list:
             continue
         if "_eramfunc" in t and "ABSOLUTE" in t:
             break
-        if inside and t.startswith("*"):
-            rules.append(t)
+        if inside and t.startswith("*") and not re.match(r"^\*(\s|/|$)", t):
+            rules.append(t)     # a placement rule, not a comment continuation line
     return rules
 
 
@@ -262,8 +262,9 @@ def rule_matches(rule: str, sec) -> bool:
 
 def placement_violations(rules: list, sections: list, lo: int, hi: int) -> list:
     out = []
+    live = [s for s in sections if s.addr != 0]     # address 0: garbage-collected, listed as discarded
     for rule in rules:
-        matched = [s for s in sections if rule_matches(rule, s)]
+        matched = [s for s in live if rule_matches(rule, s)]
         if not matched:
             out.append(f"rule matched nothing: {rule}")
             continue

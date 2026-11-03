@@ -194,6 +194,13 @@ CXXFLAGS = $(ARCHXXINCLUDES) \
 CPPFLAGS = $(ARCHINCLUDES) $(ARCHDEFINES) $(EXTRAFLAGS)
 AFLAGS = $(CFLAGS) -D__ASSEMBLY__
 
+# NuttX's own Toolchain.defs passes this for every Thumb build: its ARMv8-M
+# string functions (libs/libc/machine/arm/armv8-m/*.S) use conditional
+# instructions without IT blocks and do not assemble without it.
+ifeq ($(CONFIG_ARM_THUMB),y)
+AFLAGS += -Wa,-mimplicit-it=always
+endif
+
 ASMEXT = .S
 OBJEXT = .o
 LIBEXT = .a
