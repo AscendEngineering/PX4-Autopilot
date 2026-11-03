@@ -88,8 +88,9 @@
 // The RP2350 has no global exclusive monitor: LDREX/STREX are atomic only
 // within one core. Under SMP every read-modify-write therefore takes the
 // critical section (the chip-wide lock) instead of the compiler builtin, the
-// same path the non-lock-free (64-bit) types already use. Plain aligned loads
-// and stores of 32 bits or less are single-copy atomic and keep the builtins.
+// same path the non-lock-free (64-bit) types already use. Stores take the
+// same lock so they are ordered against the read-modify-writes; plain aligned
+// loads of 32 bits or less are single-copy atomic and keep the builtin.
 #if defined(__PX4_NUTTX) && defined(CONFIG_SMP) && defined(CONFIG_ARCH_CHIP_RP23XX)
 # define PX4_ATOMIC_RMW_LOCKED 1
 #else
@@ -166,7 +167,10 @@ public:
 	{
 #if defined(__PX4_NUTTX)
 
-		if (!__atomic_always_lock_free(sizeof(T), 0)) {
+		// Under PX4_ATOMIC_RMW_LOCKED a store takes the same lock as the
+		// read-modify-writes: a plain store could land between a locked
+		// fetch_sub's read and its write and be overwritten.
+		if (PX4_ATOMIC_RMW_LOCKED || !__atomic_always_lock_free(sizeof(T), 0)) {
 			PX4_ATOMIC_LOCK(flags);
 			_value = value;
 			PX4_ATOMIC_UNLOCK(flags);
