@@ -40,4 +40,11 @@ px4_add_library(arch_flash
 target_link_libraries(arch_flash
 	PRIVATE
 		nuttx_arch
+		# Under CONFIG_SMP the wrapper uses the NuttX SMP call queue, the
+		# scheduler lock and a mutex. Naming the archives here makes CMake
+		# place libsched.a, libarch.a and libc.a after this library on the
+		# link line, so sched_smp.o's references to up_testset,
+		# up_send_smp_call and popcountl resolve.
+		nuttx_sched
+		nuttx_c
 )

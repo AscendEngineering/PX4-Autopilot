@@ -42,8 +42,22 @@
 #ifdef CONFIG_SCHED_INSTRUMENTATION
 
 #include <sched.h>
+#include <nuttx/sched.h>
 #include <stdint.h>
 #include <stdbool.h>
+
+/* One idle task per core under SMP: PIDs 0 .. CPULOAD_NCPUS-1 sit in the
+ * first slots of the load table. */
+#ifdef CONFIG_SMP
+#  define CPULOAD_NCPUS CONFIG_SMP_NCPUS
+#else
+#  define CPULOAD_NCPUS 1
+#endif
+
+static inline bool cpuload_is_idle(FAR const struct tcb_s *tcb)
+{
+	return tcb->pid < CPULOAD_NCPUS;
+}
 
 struct system_load_taskinfo_s {
 	uint64_t total_runtime{0};		///< Runtime since start (start_time - total_runtime)/(start_time - current_time) = load
@@ -63,6 +77,12 @@ struct system_load_s {
 __BEGIN_DECLS
 
 __EXPORT extern struct system_load_s system_load;
+
+/* Idle time of one core up to `now`: the slot's accumulated runtime plus the
+ * interval still open if that core's idle task is running at the snapshot.
+ * Call inside the critical section, which excludes the hooks that write the
+ * slot (the context switch runs under it). */
+__EXPORT uint64_t cpuload_idle_runtime(int cpu, uint64_t now);
 
 __EXPORT void cpuload_initialize_once(void);
 

@@ -85,6 +85,32 @@
 # define PX4_ATOMIC_SINGLE_CORE 0
 #endif
 
+// The RP2350 has no global exclusive monitor: LDREX/STREX are atomic only
+// within one core. Under SMP every read-modify-write therefore takes the
+// critical section (the chip-wide lock) instead of the compiler builtin, the
+// same path the non-lock-free (64-bit) types already use. Stores take the
+// same lock so they are ordered against the read-modify-writes; plain aligned
+// loads of 32 bits or less are single-copy atomic and keep the builtin.
+#if defined(__PX4_NUTTX) && defined(CONFIG_SMP) && defined(CONFIG_ARCH_CHIP_RP23XX)
+# define PX4_ATOMIC_RMW_LOCKED 1
+#else
+# define PX4_ATOMIC_RMW_LOCKED 0
+#endif
+
+// The lock behind the locked paths. The critical section is the chip-wide
+// scheduler lock and, on a dual core, every taker contends with every other
+// user of it (uORB, hrt, the kernel). A dedicated spinlock keeps atomics out
+// of that contention; it is a hardware test-and-set on the RP2350.
+#if PX4_ATOMIC_RMW_LOCKED
+# include <nuttx/spinlock.h>
+extern "C" spinlock_t g_px4_atomic_lock;
+# define PX4_ATOMIC_LOCK(flags)   irqstate_t flags = spin_lock_irqsave(&g_px4_atomic_lock)
+# define PX4_ATOMIC_UNLOCK(flags) spin_unlock_irqrestore(&g_px4_atomic_lock, flags)
+#elif defined(__PX4_NUTTX)
+# define PX4_ATOMIC_LOCK(flags)   irqstate_t flags = enter_critical_section()
+# define PX4_ATOMIC_UNLOCK(flags) leave_critical_section(flags)
+#endif
+
 namespace px4
 {
 
@@ -112,9 +138,9 @@ public:
 		if (!__atomic_always_lock_free(sizeof(T), 0)) {
 			// Not lock-free (e.g. 64-bit on a 32-bit core): a critical section
 			// provides both atomicity and full ordering.
-			irqstate_t flags = enter_critical_section();
+			PX4_ATOMIC_LOCK(flags);
 			T val = _value;
-			leave_critical_section(flags);
+			PX4_ATOMIC_UNLOCK(flags);
 			return val;
 		}
 
@@ -141,10 +167,13 @@ public:
 	{
 #if defined(__PX4_NUTTX)
 
-		if (!__atomic_always_lock_free(sizeof(T), 0)) {
-			irqstate_t flags = enter_critical_section();
+		// Under PX4_ATOMIC_RMW_LOCKED a store takes the same lock as the
+		// read-modify-writes: a plain store could land between a locked
+		// fetch_sub's read and its write and be overwritten.
+		if (PX4_ATOMIC_RMW_LOCKED || !__atomic_always_lock_free(sizeof(T), 0)) {
+			PX4_ATOMIC_LOCK(flags);
 			_value = value;
-			leave_critical_section(flags);
+			PX4_ATOMIC_UNLOCK(flags);
 			return;
 		}
 
@@ -166,11 +195,11 @@ public:
 	{
 #if defined(__PX4_NUTTX)
 
-		if (!__atomic_always_lock_free(sizeof(T), 0)) {
-			irqstate_t flags = enter_critical_section();
+		if (PX4_ATOMIC_RMW_LOCKED || !__atomic_always_lock_free(sizeof(T), 0)) {
+			PX4_ATOMIC_LOCK(flags);
 			T ret = _value;
 			_value += num;
-			leave_critical_section(flags);
+			PX4_ATOMIC_UNLOCK(flags);
 			return ret;
 		}
 
@@ -194,11 +223,11 @@ public:
 	{
 #if defined(__PX4_NUTTX)
 
-		if (!__atomic_always_lock_free(sizeof(T), 0)) {
-			irqstate_t flags = enter_critical_section();
+		if (PX4_ATOMIC_RMW_LOCKED || !__atomic_always_lock_free(sizeof(T), 0)) {
+			PX4_ATOMIC_LOCK(flags);
 			T ret = _value;
 			_value -= num;
-			leave_critical_section(flags);
+			PX4_ATOMIC_UNLOCK(flags);
 			return ret;
 		}
 
@@ -222,11 +251,11 @@ public:
 	{
 #if defined(__PX4_NUTTX)
 
-		if (!__atomic_always_lock_free(sizeof(T), 0)) {
-			irqstate_t flags = enter_critical_section();
+		if (PX4_ATOMIC_RMW_LOCKED || !__atomic_always_lock_free(sizeof(T), 0)) {
+			PX4_ATOMIC_LOCK(flags);
 			T val = _value;
 			_value &= num;
-			leave_critical_section(flags);
+			PX4_ATOMIC_UNLOCK(flags);
 			return val;
 		}
 
@@ -250,11 +279,11 @@ public:
 	{
 #if defined(__PX4_NUTTX)
 
-		if (!__atomic_always_lock_free(sizeof(T), 0)) {
-			irqstate_t flags = enter_critical_section();
+		if (PX4_ATOMIC_RMW_LOCKED || !__atomic_always_lock_free(sizeof(T), 0)) {
+			PX4_ATOMIC_LOCK(flags);
 			T val = _value;
 			_value ^= num;
-			leave_critical_section(flags);
+			PX4_ATOMIC_UNLOCK(flags);
 			return val;
 		}
 
@@ -278,11 +307,11 @@ public:
 	{
 #if defined(__PX4_NUTTX)
 
-		if (!__atomic_always_lock_free(sizeof(T), 0)) {
-			irqstate_t flags = enter_critical_section();
+		if (PX4_ATOMIC_RMW_LOCKED || !__atomic_always_lock_free(sizeof(T), 0)) {
+			PX4_ATOMIC_LOCK(flags);
 			T val = _value;
 			_value |= num;
-			leave_critical_section(flags);
+			PX4_ATOMIC_UNLOCK(flags);
 			return val;
 		}
 
@@ -306,11 +335,11 @@ public:
 	{
 #if defined(__PX4_NUTTX)
 
-		if (!__atomic_always_lock_free(sizeof(T), 0)) {
-			irqstate_t flags = enter_critical_section();
+		if (PX4_ATOMIC_RMW_LOCKED || !__atomic_always_lock_free(sizeof(T), 0)) {
+			PX4_ATOMIC_LOCK(flags);
 			T ret = _value;
 			_value = ~(_value & num);
-			leave_critical_section(flags);
+			PX4_ATOMIC_UNLOCK(flags);
 			return ret;
 		}
 
@@ -338,17 +367,17 @@ public:
 	{
 #if defined(__PX4_NUTTX)
 
-		if (!__atomic_always_lock_free(sizeof(T), 0)) {
-			irqstate_t flags = enter_critical_section();
+		if (PX4_ATOMIC_RMW_LOCKED || !__atomic_always_lock_free(sizeof(T), 0)) {
+			PX4_ATOMIC_LOCK(flags);
 
 			if (_value == *expected) {
 				_value = desired;
-				leave_critical_section(flags);
+				PX4_ATOMIC_UNLOCK(flags);
 				return true;
 
 			} else {
 				*expected = _value;
-				leave_critical_section(flags);
+				PX4_ATOMIC_UNLOCK(flags);
 				return false;
 			}
 		}

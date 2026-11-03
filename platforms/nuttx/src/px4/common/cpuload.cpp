@@ -44,9 +44,35 @@
 #include <px4_platform/cpuload.h>
 
 #include <drivers/drv_hrt.h>
+#include <nuttx/spinlock.h>
 
 #if defined(__PX4_NUTTX) && defined(CONFIG_SCHED_INSTRUMENTATION)
 __BEGIN_DECLS
+
+#if defined(CONFIG_SMP) && defined(CONFIG_ARCH_CHIP_RP23XX)
+/* Lock behind px4::atomic read-modify-writes on the RP2350, which has no
+ * global exclusive monitor (see px4_platform_common/atomic.h). */
+spinlock_t g_px4_atomic_lock = SP_UNLOCKED;
+#endif
+
+#ifdef CONFIG_SMP
+/* The hooks below run from nxsched_switch_context(), which under SMP always
+ * executes with g_cpu_irqlock held by this CPU. In nxtask_exit() it is held
+ * through the exiting task while the incoming task's nesting count is still
+ * zero, so enter_critical_section() from a hook spins on its own core
+ * forever (seen on the RP2350 at the first thread exit). The lock already
+ * excludes every reader that takes the critical section, so the 64-bit
+ * timestamp is stored directly. */
+static inline void cpuload_store_time(volatile hrt_abstime *t)
+{
+	*t = hrt_absolute_time();
+}
+#else
+static inline void cpuload_store_time(volatile hrt_abstime *t)
+{
+	hrt_store_absolute_time(t);
+}
+#endif
 # include <nuttx/sched_note.h>
 
 __EXPORT struct system_load_s system_load;
@@ -63,18 +89,41 @@ static px4::atomic_int cpuload_monitor_all_count{0};
 void cpuload_monitor_start()
 {
 	if (cpuload_monitor_all_count.fetch_add(1) == 0) {
-		// if the count was previously 0 (idle thread only) then clear any existing runtime data
+		// if the count was previously 0 (idle threads only) then clear any existing runtime data
+#ifdef CONFIG_SMP
+		// the chip-wide lock: sched_lock() does not exclude the other core
+		irqstate_t flags = enter_critical_section();
+#else
 		sched_lock();
+#endif
 
 		system_load.start_time = hrt_absolute_time();
 
-		for (int i = 1; i < CONFIG_FS_PROCFS_MAX_TASKS; i++) {
+		// never the idle slots: their counters run from boot
+		for (int i = CPULOAD_NCPUS; i < CONFIG_FS_PROCFS_MAX_TASKS; i++) {
 			system_load.tasks[i].total_runtime = 0;
 			system_load.tasks[i].curr_start_time = 0;
 		}
 
+#ifdef CONFIG_SMP
+		leave_critical_section(flags);
+#else
 		sched_unlock();
+#endif
 	}
+}
+
+uint64_t cpuload_idle_runtime(int cpu, uint64_t now)
+{
+	const system_load_taskinfo_s &idle = system_load.tasks[cpu];
+	uint64_t runtime = idle.total_runtime;
+
+	if (idle.valid && idle.tcb != nullptr && idle.tcb->task_state == TSTATE_TASK_RUNNING
+	    && now > idle.curr_start_time) {
+		runtime += now - idle.curr_start_time;	// the interval still open on that core
+	}
+
+	return runtime;
 }
 
 void cpuload_monitor_stop()
@@ -91,7 +140,9 @@ void cpuload_initialize_once()
 		task.valid = false;
 	}
 
-	int static_tasks_count = 2;	// there are at least 2 threads that should be initialized statically - "idle" and "init"
+	// threads that exist before this runs, with consecutive PIDs: one idle per
+	// core, then init
+	int static_tasks_count = CPULOAD_NCPUS + 1;
 
 #ifdef CONFIG_PAGING
 	static_tasks_count++;	// include paging thread in initialization
@@ -119,6 +170,10 @@ void sched_note_start(FAR struct tcb_s *tcb)
 {
 	// find first free slot
 	if (system_load.initialized) {
+#ifdef CONFIG_SMP
+		irqstate_t flags = enter_critical_section();
+#endif
+
 		for (auto &task : system_load.tasks) {
 			if (!task.valid) {
 				// slot is available
@@ -130,6 +185,10 @@ void sched_note_start(FAR struct tcb_s *tcb)
 				break;
 			}
 		}
+
+#ifdef CONFIG_SMP
+		leave_critical_section(flags);
+#endif
 	}
 
 #ifdef CONFIG_SEGGER_SYSVIEW
@@ -137,9 +196,24 @@ void sched_note_start(FAR struct tcb_s *tcb)
 #endif
 }
 
+/* Lifetime of what readers of the table dereference, under SMP. Both exit
+ * paths (task_exit.c, task_terminate.c) call this hook before
+ * nxsched_release_tcb() frees the stack and the TCB, so a reader that checks
+ * `valid` and finishes its whole read, stack scan included, inside one
+ * critical section can never have them freed underneath: this hook takes
+ * the same critical section to invalidate the slot. The task group is torn
+ * down earlier, in nxtask_exithook before this hook, so readers must not
+ * touch tcb->group once TCB_FLAG_EXIT_PROCESSING is set. The callers: task
+ * exit holds the lock through the exiting task and bumped the incoming
+ * task's nesting count first, task_terminate calls from outside the lock,
+ * so taking it here nests or acquires, never spins on itself. */
 void sched_note_stop(FAR struct tcb_s *tcb)
 {
 	if (system_load.initialized) {
+#ifdef CONFIG_SMP
+		irqstate_t flags = enter_critical_section();
+#endif
+
 		for (auto &task : system_load.tasks) {
 			if (task.tcb && task.tcb->pid == tcb->pid) {
 				// mark slot as free
@@ -151,6 +225,10 @@ void sched_note_stop(FAR struct tcb_s *tcb)
 				break;
 			}
 		}
+
+#ifdef CONFIG_SMP
+		leave_critical_section(flags);
+#endif
 	}
 
 #ifdef CONFIG_SEGGER_SYSVIEW
@@ -161,8 +239,9 @@ void sched_note_stop(FAR struct tcb_s *tcb)
 void sched_note_suspend(FAR struct tcb_s *tcb)
 {
 	if (system_load.initialized) {
-		if (tcb->pid == 0) {
-			system_load.tasks[0].total_runtime += hrt_elapsed_time(&system_load.tasks[0].curr_start_time);
+		if (cpuload_is_idle(tcb)) {
+			// one slot per core; the switch path runs under the critical section, which readers take
+			system_load.tasks[tcb->pid].total_runtime += hrt_elapsed_time(&system_load.tasks[tcb->pid].curr_start_time);
 			return;
 
 		} else {
@@ -190,8 +269,8 @@ void sched_note_suspend(FAR struct tcb_s *tcb)
 void sched_note_resume(FAR struct tcb_s *tcb)
 {
 	if (system_load.initialized) {
-		if (tcb->pid == 0) {
-			hrt_store_absolute_time(&system_load.tasks[0].curr_start_time);
+		if (cpuload_is_idle(tcb)) {
+			cpuload_store_time(&system_load.tasks[tcb->pid].curr_start_time);
 			return;
 
 		} else {
@@ -204,7 +283,7 @@ void sched_note_resume(FAR struct tcb_s *tcb)
 			if (task.valid && task.tcb && task.tcb->pid == tcb->pid) {
 				// curr_start_time is accessed from an IRQ handler (in logger), so we need
 				// to make the update atomic
-				hrt_store_absolute_time(&task.curr_start_time);
+				cpuload_store_time(&task.curr_start_time);
 				break;
 			}
 		}
@@ -214,6 +293,17 @@ void sched_note_resume(FAR struct tcb_s *tcb)
 	sysview_sched_note_resume(tcb);
 #endif
 }
+
+#ifdef CONFIG_SMP
+/* NuttX calls these from the CPU start path under CONFIG_SMP with
+ * SCHED_INSTRUMENTATION; PX4 keeps no per-CPU trace, so they are no-ops. */
+void sched_note_cpu_start(FAR struct tcb_s *tcb, int cpu) { (void)tcb; (void)cpu; }
+void sched_note_cpu_started(FAR struct tcb_s *tcb) { (void)tcb; }
+void sched_note_cpu_pause(FAR struct tcb_s *tcb, int cpu) { (void)tcb; (void)cpu; }
+void sched_note_cpu_paused(FAR struct tcb_s *tcb) { (void)tcb; }
+void sched_note_cpu_resume(FAR struct tcb_s *tcb, int cpu) { (void)tcb; (void)cpu; }
+void sched_note_cpu_resumed(FAR struct tcb_s *tcb) { (void)tcb; }
+#endif
 
 #ifdef CONFIG_SEGGER_SYSVIEW
 

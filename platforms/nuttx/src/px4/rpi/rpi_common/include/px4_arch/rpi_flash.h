@@ -43,9 +43,11 @@
  * The chips have no on-die flash controller. Reads go through XIP; erase and
  * program go through the ROM flash functions (RP2350 datasheet 5.4.8), during
  * which the QSPI part is in serial command mode and any XIP access bus-faults.
- * The wrapper therefore runs from SRAM (.ramfunc, which both linker scripts
- * place in .data), masks interrupts, and restores XIP by executing a stack
- * copy of the ROM's XIP setup routine before returning.
+ * The wrapper therefore runs from SRAM (.ramfunc), masks interrupts, and
+ * restores XIP by executing a stack copy of the ROM's XIP setup routine
+ * before returning. Under CONFIG_SMP the other core is parked in SRAM with
+ * its interrupts masked for the duration, because it would otherwise fetch
+ * from flash while XIP is down.
  *
  * Offsets are relative to the start of flash (XIP address minus
  * RPI_FLASH_BASE). Bounds are the caller's job: the library does not know the
@@ -80,9 +82,25 @@ size_t rpi_flash_program(uint32_t offset, const void *data, size_t count);
 /* True when every word of [offset, offset + count) reads 0xffffffff. */
 bool rpi_flash_is_blank(uint32_t offset, size_t count);
 
+/* Under CONFIG_SMP the other core is parked in SRAM for every erase and
+ * program (see rpi_flash.c). The handshake state, exposed for the host tests
+ * and for diagnostics. */
+enum rpi_flash_park_state_e {
+	RPI_FLASH_PARK_IDLE = 0,
+	RPI_FLASH_PARK_REQUESTED,	/* posted to the other core, waiting for its acknowledgment */
+	RPI_FLASH_PARK_PARKED,		/* the other core spins in SRAM with interrupts masked */
+	RPI_FLASH_PARK_RELEASE,		/* XIP is back; the other core may leave */
+	RPI_FLASH_PARK_DONE,		/* the other core has left the handler */
+	RPI_FLASH_PARK_CANCELLED,	/* the acknowledgment timed out; the call may still be queued */
+};
+
 #if !defined(__ARM_ARCH)
 /* Host tests only: forget the resolved table so init can be exercised again. */
 bool rpi_flash_init_fresh(void);
+/* Host tests only: observe and reset the SMP park handshake. */
+uint32_t rpi_flash_park_state(void);
+bool rpi_flash_park_faulted(void);
+void rpi_flash_park_reset(void);
 #endif
 
 __END_DECLS
