@@ -146,6 +146,10 @@ SECTIONS
 		*libmodules__control_allocator.a:(.text .text.*)
 		*libControlAllocation.a:(.text .text.*)
 
+		/* 6. EKF functions picked from the PC profile by samples per byte
+		 *    (48 KB budget); ld finds the file through -L<nuttx-config>/scripts. */
+		INCLUDE ramfunc_ekf.ld
+
 		. = ALIGN(4);
 		_eramfunc = ABSOLUTE(.);
 	} > sram AT > flash
