@@ -132,6 +132,7 @@ ICM56686::~ICM56686()
 	DataReadyInterruptDisable();
 	perf_free(_bad_register_perf);
 	perf_free(_bad_transfer_perf);
+	perf_free(_fifo_read_perf);
 	perf_free(_fifo_empty_perf);
 	perf_free(_fifo_overflow_perf);
 	perf_free(_fifo_reset_perf);
@@ -174,6 +175,7 @@ void ICM56686::print_status()
 
 	perf_print_counter(_bad_register_perf);
 	perf_print_counter(_bad_transfer_perf);
+	perf_print_counter(_fifo_read_perf);
 	perf_print_counter(_fifo_empty_perf);
 	perf_print_counter(_fifo_overflow_perf);
 	perf_print_counter(_fifo_reset_perf);
@@ -741,6 +743,7 @@ bool ICM56686::FIFORead(const hrt_abstime &timestamp_sample)
 		return false;
 	}
 
+	perf_count(_fifo_read_perf);
 	ProcessGyro(timestamp_sample, buffer.samples, samples);
 	ProcessAccel(timestamp_sample, buffer.samples, samples);
 	return true;
