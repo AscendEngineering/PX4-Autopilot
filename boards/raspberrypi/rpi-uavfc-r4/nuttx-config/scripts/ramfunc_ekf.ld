@@ -27,7 +27,6 @@
 *(.text._ZN15OutputPredictor35resetVelocityDerivativeAccumulationEv)  /* OutputPredictor::resetVelocityDerivativeAccumulation()  14 B  0.0% */
 *(.text._ZNK3Ekf36estimateInertialNavFallingLikelihoodEv)  /* Ekf::estimateInertialNavFallingLikelihood() const  360 B  0.2% */
 *(.text._ZN11AlphaFilterIN6matrix7Vector2IfEEE17updateCalculationERKS2_)  /* AlphaFilter<matrix::Vector2<float> >::updateCalculation(matrix::Vector2<float> const&)  46 B  0.0% */
-*(.text._ZN4EKF215PublishAttitudeERKy.part.0.isra.0)  /* EKF2::PublishAttitude(unsigned long long const&) [clone .part.0] [clone .isra.0]  104 B  0.1% */
 *(.text._ZN3Ekf4fuseERKN6matrix6VectorIfLj24EEEf)  /* Ekf::fuse(matrix::Vector<float, 24u> const&, float)  1338 B  0.8% */
 *(.text._ZNK15OutputPredictor21getVelocityDerivativeEv)  /* OutputPredictor::getVelocityDerivative() const  60 B  0.0% */
 *(.text._ZN15OutputPredictor29applyCorrectionToOutputBufferERKN6matrix7Vector3IfEES4_)  /* OutputPredictor::applyCorrectionToOutputBuffer(matrix::Vector3<float> const&, matrix::Vector3<float> const&)  74 B  0.0% */
@@ -40,11 +39,9 @@
 *(.text._ZNK3Ekf12getRotVarNedEv)  /* Ekf::getRotVarNed() const  84 B  0.0% */
 *(.text._ZN4EKF226PublishInnovationVariancesERKy)  /* EKF2::PublishInnovationVariances(unsigned long long const&)  292 B  0.2% */
 *(.text._ZN4EKF217UpdateCalibrationERKyRNS_19InFlightCalibrationERKN6matrix7Vector3IfEES8_fbb)  /* EKF2::UpdateCalibration(unsigned long long const&, EKF2::InFlightCalibration&, matrix::Vector3<float> const&, matrix::Vector3<float> const&, float, bool, bool)  400 B  0.2% */
-*(.text._ZN3Ekf6updateEv.part.0)  /* Ekf::update() [clone .part.0]  612 B  0.3% */
 *(.text._ZN18EstimatorInterface10setIMUDataERKN9estimator9imuSampleE)  /* EstimatorInterface::setIMUData(estimator::imuSample const&)  528 B  0.3% */
 *(.text._ZN4EKF218PublishInnovationsERKy)  /* EKF2::PublishInnovations(unsigned long long const&)  302 B  0.2% */
 *(.text._ZN3Ekf14stopGnssFusionEv)  /* Ekf::stopGnssFusion()  142 B  0.1% */
-*(.text._ZN4EKF220PublishFusionControlERKy.part.0)  /* EKF2::PublishFusionControl(unsigned long long const&) [clone .part.0]  380 B  0.2% */
 *(.text._ZN3Ekf18controlFusionModesERKN9estimator9imuSampleE)  /* Ekf::controlFusionModes(estimator::imuSample const&)  684 B  0.3% */
 *(.text._ZN15OutputPredictor12outputSampleaSERKS0_.isra.0)  /* OutputPredictor::outputSample::operator=(OutputPredictor::outputSample const&) [clone .isra.0]  46 B  0.0% */
 *(.text._ZNK3Ekf21updateAidSourceStatusI24estimator_aid_source3d_sN6matrix7Vector3IfEES4_EEvRT_RKyRKT1_RKT0_SE_SE_f.isra.0)  /* void Ekf::updateAidSourceStatus<estimator_aid_source3d_s, matrix::Vector3<float>, matrix::Vector3<float> >(estimator_aid_source3d_s&, unsigned long long const&, matrix::Vector3<float> const&, matrix::Vector3<float> const&, matrix::Vector3<float> const&, matrix::Vector3<float> const&, float) const [clone .isra.0]  608 B  0.3% */
@@ -72,7 +69,6 @@
 *(.text._ZN4EKF217UpdateRangeSampleER17ekf2_timestamps_s)  /* EKF2::UpdateRangeSample(ekf2_timestamps_s&)  516 B  0.1% */
 *(.text._ZN4EKF23RunEv)  /* EKF2::Run()  3124 B  0.7% */
 *(.text._ZNK3Ekf38getVerticalPositionInnovationTestRatioEv)  /* Ekf::getVerticalPositionInnovationTestRatio() const  208 B  0.0% */
-*(.text._ZN4EKF218UpdateAuxVelSampleER17ekf2_timestamps_s.part.0)  /* EKF2::UpdateAuxVelSample(ekf2_timestamps_s&) [clone .part.0]  88 B  0.0% */
 *(.text._ZN18ZeroVelocityUpdate6updateER3EkfRKN9estimator9imuSampleE)  /* ZeroVelocityUpdate::update(Ekf&, estimator::imuSample const&)  216 B  0.0% */
 *(.text._ZN4EKF222PublishAidSourceStatusERKy)  /* EKF2::PublishAidSourceStatus(unsigned long long const&)  2106 B  0.4% */
 *(.text._ZN4EKF219UpdateGnssYawSampleEv)  /* EKF2::UpdateGnssYawSample()  132 B  0.0% */
@@ -85,7 +81,6 @@
 *(.text._ZN3Ekf35updateHorizontalDeadReckoningstatusEv)  /* Ekf::updateHorizontalDeadReckoningstatus()  704 B  0.1% */
 *(.text._ZN3Ekf23updateYawManualValidityEv)  /* Ekf::updateYawManualValidity()  120 B  0.0% */
 *(.text._ZNK10EKFGSF_yaw10getLogDataEPfS0_S0_S0_S0_S0_)  /* EKFGSF_yaw::getLogData(float*, float*, float*, float*, float*, float*) const  78 B  0.0% */
-*(.text._ZN4EKF220UpdateAirspeedSampleER17ekf2_timestamps_s)  /* EKF2::UpdateAirspeedSample(ekf2_timestamps_s&)  576 B  0.1% */
 *(.text._ZN3Ekf21updateTerrainValidityEv)  /* Ekf::updateTerrainValidity()  336 B  0.0% */
 *(.text._ZN4EKF220PublishLocalPositionERKyRKN6matrix7Vector3IfEE)
 *(.text._ZN4uORB10DeviceNode14add_subscriberE6ORB_IDhPjb)
