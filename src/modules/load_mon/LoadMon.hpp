@@ -102,6 +102,9 @@ private:
 #elif defined(__PX4_NUTTX)
 	hrt_abstime _last_idle_time {0};
 	hrt_abstime _last_idle_time_sample{0};
+#  ifdef CONFIG_SMP
+	bool _idle_sample_initialized{false};	///< an idle sum of zero is data, not the first sample
+#  endif
 #endif
 
 	perf_counter_t _cycle_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};

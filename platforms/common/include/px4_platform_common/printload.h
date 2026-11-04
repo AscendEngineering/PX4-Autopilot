@@ -57,6 +57,7 @@ struct print_load_s {
 	uint64_t interval_start_time{0};
 	uint64_t last_times[CONFIG_FS_PROCFS_MAX_TASKS] {};
 	float interval_time_us{0.f};
+	uint64_t longest_cs_us{0};	///< longest critical section held for one task's read (SMP)
 };
 
 __BEGIN_DECLS

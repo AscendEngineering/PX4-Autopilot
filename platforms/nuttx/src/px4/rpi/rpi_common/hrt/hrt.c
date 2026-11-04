@@ -459,11 +459,16 @@ hrt_tim_isr(int irq, void *context, void *arg)
 	/* do latency calculations */
 	hrt_latency_update();
 
-	/* run any callouts that have met their deadline */
+	/* run any callouts that have met their deadline, then schedule the next
+	 * interrupt. The callout queue is also edited by tasks under the critical
+	 * section; with two cores that section is a chip-wide lock, and an ISR
+	 * that skips it races a task on the other core and corrupts the queue
+	 * (seen as an endless walk in hrt_call_enter). On one core this is the
+	 * interrupt mask the ISR already runs under. */
+	irqstate_t flags = px4_enter_critical_section();
 	hrt_call_invoke();
-
-	/* and schedule the next interrupt */
 	hrt_call_reschedule();
+	px4_leave_critical_section(flags);
 
 	return OK;
 }

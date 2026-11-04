@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "LoadMon.hpp"
+#include "cpu_load.hpp"
 
 #if defined(__PX4_NUTTX)
 // if free stack space falls below this, print a warning
@@ -140,6 +141,40 @@ void LoadMon::cpuload()
 	// compute system load
 	const float interval = total_time_stamp - _last_total_time_stamp;
 	const float interval_spent_time = spent_time_stamp - _last_spent_time_stamp;
+#elif defined(__PX4_NUTTX) && defined(CONFIG_SMP)
+	// Idle time of every core up to the same wall-clock instant, including the
+	// interval still open on a core that is idle right now. A zero delta with
+	// time elapsed is a saturated system and publishes as full load.
+	irqstate_t irqstate = enter_critical_section();
+	const hrt_abstime now = hrt_absolute_time();
+	uint64_t idle_sum = 0;
+
+	for (int cpu = 0; cpu < CPULOAD_NCPUS; cpu++) {
+		idle_sum += cpuload_idle_runtime(cpu, now);
+	}
+
+	leave_critical_section(irqstate);
+
+	if (!_idle_sample_initialized) {
+		_idle_sample_initialized = true;
+		_last_idle_time = idle_sum;
+		_last_idle_time_sample = now;
+		return;
+	}
+
+	if (now <= _last_idle_time_sample) {
+		return;	// no time elapsed, nothing to compute
+	}
+
+	if (idle_sum < _last_idle_time) {
+		// a counter went backwards (monitor reset): restart from this sample
+		_last_idle_time = idle_sum;
+		_last_idle_time_sample = now;
+		return;
+	}
+
+	const uint64_t interval_us = now - _last_idle_time_sample;
+	const uint64_t interval_idletime_us = idle_sum - _last_idle_time;
 #elif defined(__PX4_NUTTX)
 
 	if (_last_idle_time == 0) {
@@ -227,6 +262,11 @@ void LoadMon::cpuload()
 	}
 
 	cpuload.load = interval_spent_time / interval;
+#elif defined(__PX4_NUTTX) && defined(CONFIG_SMP)
+	// get ram usage
+	struct mallinfo mem = mallinfo();
+	cpuload.ram_usage = (float)mem.uordblks / mem.arena;
+	cpuload.load = cpu_load_from_idle(interval_idletime_us, interval_us, CPULOAD_NCPUS);
 #elif defined(__PX4_NUTTX)
 	// get ram usage
 	struct mallinfo mem = mallinfo();
@@ -244,6 +284,9 @@ void LoadMon::cpuload()
 #if defined(__PX4_LINUX)
 	_last_total_time_stamp = total_time_stamp;
 	_last_spent_time_stamp = spent_time_stamp;
+#elif defined(__PX4_NUTTX) && defined(CONFIG_SMP)
+	_last_idle_time = idle_sum;
+	_last_idle_time_sample = now;
 #elif defined(__PX4_NUTTX)
 	_last_idle_time = total_runtime;
 	_last_idle_time_sample = now;
@@ -261,7 +304,13 @@ void LoadMon::stack_usage()
 	static_assert(sizeof(task_stack_info.task_name) == CONFIG_TASK_NAME_SIZE,
 		      "task_stack_info.task_name must match NuttX CONFIG_TASK_NAME_SIZE");
 
+#ifdef CONFIG_SMP
+	// the critical section keeps the TCB and its stack alive for the whole
+	// scan: sched_note_stop() invalidates the slot under the same lock
+	irqstate_t flags = enter_critical_section();
+#else
 	sched_lock();
+#endif
 
 	if (system_load.tasks[_stack_task_index].valid && (system_load.tasks[_stack_task_index].tcb->pid > 0)) {
 
@@ -275,12 +324,21 @@ void LoadMon::stack_usage()
 
 #if CONFIG_NFILE_DESCRIPTORS_PER_BLOCK > 0
 		unsigned int tcb_num_used_fds = 0; // number of used file descriptors
-		struct fdlist *fdlist = &system_load.tasks[_stack_task_index].tcb->group->tg_fdlist;
+#ifdef CONFIG_SMP
 
-		for (int fdr = 0; fdr < fdlist->fl_rows; fdr++) {
-			for (int fdc = 0; fdc < CONFIG_NFILE_DESCRIPTORS_PER_BLOCK; fdc++) {
-				if (fdlist->fl_fds[fdr][fdc].f_file) {
-					++tcb_num_used_fds;
+		// the group is torn down before the slot is invalidated: skip it for an exiting task
+		if ((system_load.tasks[_stack_task_index].tcb->flags & TCB_FLAG_EXIT_PROCESSING) == 0
+		    && system_load.tasks[_stack_task_index].tcb->group != nullptr) {
+#else
+		{
+#endif
+			struct fdlist *fdlist = &system_load.tasks[_stack_task_index].tcb->group->tg_fdlist;
+
+			for (int fdr = 0; fdr < fdlist->fl_rows; fdr++) {
+				for (int fdc = 0; fdc < CONFIG_NFILE_DESCRIPTORS_PER_BLOCK; fdc++) {
+					if (fdlist->fl_fds[fdr][fdc].f_file) {
+						++tcb_num_used_fds;
+					}
 				}
 			}
 		}
@@ -288,7 +346,11 @@ void LoadMon::stack_usage()
 #endif // CONFIG_NFILE_DESCRIPTORS_PER_BLOCK
 	}
 
+#ifdef CONFIG_SMP
+	leave_critical_section(flags);
+#else
 	sched_unlock();
+#endif
 
 	if (checked_task) {
 		task_stack_info.stack_free = stack_free;

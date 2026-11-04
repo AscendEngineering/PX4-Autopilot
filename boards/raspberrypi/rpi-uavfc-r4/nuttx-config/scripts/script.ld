@@ -98,6 +98,7 @@ SECTIONS
 		*libarch.a:rp23xx_spi.o(.text .text.*)
 		*libarch.a:rp23xx_i2c.o(.text .text.*)
 		*libarch.a:rp23xx_dmac.o(.text .text.*)
+		*libarch.a:rp23xx_testset.o(.text .text.*)
 
 		/* 3. PX4 platform: hrt, uORB, work queue, device and cdev layers, perf */
 		*libarch_hrt.a:(.text .text.*)
@@ -115,6 +116,7 @@ SECTIONS
 		*libc.a:arch_strcmp.o(.text .text.*)
 		*libc.a:arch_strlen.o(.text .text.*)
 		*libc.a:lib_memcmp.o(.text .text.*)
+		*libc.a:arch_atomic.o(.text .text.*)
 		*libc.a:sem_wait.o(.text .text.*)
 		*libc.a:sem_post.o(.text .text.*)
 		*libuorb_msgs.a:uORBTopics.cpp.obj(.text .text.*)
