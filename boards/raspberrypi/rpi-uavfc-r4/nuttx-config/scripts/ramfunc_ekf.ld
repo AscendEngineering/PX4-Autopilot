@@ -13,15 +13,14 @@
 *(.text._ZNK6matrix10QuaternionIfE19rotateVectorInverseERKNS_7Vector3IfEE)  /* matrix::Quaternion<float>::rotateVectorInverse(matrix::Vector3<float> const&) const  220 B  0.2% */
 *(.text._ZN6matrix6MatrixIfLj4ELj1EEC2ERKS1_)  /* matrix::Matrix<float, 4u, 1u>::Matrix(matrix::Matrix<float, 4u, 1u> const&)  18 B  0.0% */
 *(.text._ZNK3Ekf13getRotVarBodyEv)  /* Ekf::getRotVarBody() const  360 B  0.4% */
+*(.text._ZN4EKF215PublishOdometryERKyRKN9estimator9imuSampleERKN6matrix7Vector3IfEE)
 *(.text._ZN15OutputPredictor37getAngularVelocityAndResetAccumulatorEv)  /* OutputPredictor::getAngularVelocityAndResetAccumulator()  104 B  0.1% */
-*(.text._ZNK18EstimatorInterface11getPositionEv)  /* EstimatorInterface::getPosition() const  376 B  0.3% */
 *(.text._ZNK6matrix7Vector3IfEplES1_)  /* matrix::Vector3<float>::operator+(matrix::Vector3<float>) const  64 B  0.1% */
 *(.text._ZN6matrix6MatrixIfLj4ELj1EE11setIdentityEv)  /* matrix::Matrix<float, 4u, 1u>::setIdentity()  16 B  0.0% */
 *(.text._ZN10EKFGSF_yaw5resetEv)  /* EKFGSF_yaw::reset()  22 B  0.0% */
 *(.text._ZN4EKF213PublishStatusERKy)  /* EKF2::PublishStatus(unsigned long long const&)  648 B  0.5% */
 *(.text._ZN6matrix6VectorIfLj4EE9normalizeEv)  /* matrix::Vector<float, 4u>::normalize()  46 B  0.0% */
 *(.text._ZNK3Ekf30clearInhibitedStateKalmanGainsERN6matrix6VectorIfLj24EEE)  /* Ekf::clearInhibitedStateKalmanGains(matrix::Vector<float, 24u>&) const  108 B  0.1% */
-*(.text._ZN4EKF215PublishOdometryERKyRKN9estimator9imuSampleE)  /* EKF2::PublishOdometry(unsigned long long const&, estimator::imuSample const&)  288 B  0.2% */
 *(.text._ZN15OutputPredictor37applyCorrectionToVerticalOutputBufferEff)  /* OutputPredictor::applyCorrectionToVerticalOutputBuffer(float, float)  146 B  0.1% */
 *(.text._ZN6matrix10QuaternionIfEC2ERKNS_9AxisAngleIfEE)  /* matrix::Quaternion<float>::Quaternion(matrix::AxisAngle<float> const&)  152 B  0.1% */
 *(.text._ZN4EKF213PublishStatesERKy)  /* EKF2::PublishStates(unsigned long long const&)  126 B  0.1% */
@@ -51,7 +50,6 @@
 *(.text._ZNK3Ekf21updateAidSourceStatusI24estimator_aid_source3d_sN6matrix7Vector3IfEES4_EEvRT_RKyRKT1_RKT0_SE_SE_f.isra.0)  /* void Ekf::updateAidSourceStatus<estimator_aid_source3d_s, matrix::Vector3<float>, matrix::Vector3<float> >(estimator_aid_source3d_s&, unsigned long long const&, matrix::Vector3<float> const&, matrix::Vector3<float> const&, matrix::Vector3<float> const&, matrix::Vector3<float> const&, float) const [clone .isra.0]  608 B  0.3% */
 *(.text._ZNK6matrix10QuaternionIfE8inversedEv)  /* matrix::Quaternion<float>::inversed() const  94 B  0.0% */
 *(.text._ZN3Ekf17predictCovarianceERKN9estimator9imuSampleE)  /* Ekf::predictCovariance(estimator::imuSample const&)  16780 B  6.8% */
-*(.text._ZN4EKF220PublishLocalPositionERKy)  /* EKF2::PublishLocalPosition(unsigned long long const&)  1404 B  0.6% */
 *(.text._ZN4EKF221UpdateGyroCalibrationERKy)  /* EKF2::UpdateGyroCalibration(unsigned long long const&)  134 B  0.1% */
 *(.text._ZN3Ekf12predictStateERKN9estimator9imuSampleE)  /* Ekf::predictState(estimator::imuSample const&)  1548 B  0.6% */
 *(.text._ZN14ImuDownSampler5resetEv)  /* ImuDownSampler::reset()  208 B  0.1% */
@@ -89,3 +87,11 @@
 *(.text._ZNK10EKFGSF_yaw10getLogDataEPfS0_S0_S0_S0_S0_)  /* EKFGSF_yaw::getLogData(float*, float*, float*, float*, float*, float*) const  78 B  0.0% */
 *(.text._ZN4EKF220UpdateAirspeedSampleER17ekf2_timestamps_s)  /* EKF2::UpdateAirspeedSample(ekf2_timestamps_s&)  576 B  0.1% */
 *(.text._ZN3Ekf21updateTerrainValidityEv)  /* Ekf::updateTerrainValidity()  336 B  0.0% */
+*(.text._ZN4EKF220PublishLocalPositionERKyRKN6matrix7Vector3IfEE)
+*(.text._ZN4uORB10DeviceNode14add_subscriberE6ORB_IDhPjb)
+*(.text._ZN4uORB12Subscription9subscribeEb)
+*(.text._ZN4uORB10DeviceNode7publishEPK12orb_metadataRPvPKv)
+*(.text._ZN4uORB10DeviceNode4copyEPvRS1_Rj)
+*(.text._ZN4uORB7Manager8orb_copyEPK12orb_metadataPvS4_)
+*(.text._ZN4uORB10DeviceNode17remove_subscriberERPv)
+
