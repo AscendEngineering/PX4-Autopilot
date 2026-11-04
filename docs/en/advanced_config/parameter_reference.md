@@ -25744,7 +25744,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ## Circuit Breaker
 
-<div class="param-group" style="--param-count: 7">
+<div class="param-group" style="--param-count: 6">
 
 <div class="param">
 
@@ -25779,22 +25779,6 @@ and takeoff failure detection safety logic.
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
 &check; | 0 | 121212 |  | 121212 |  | &nbsp;
-
-</div>
-
-<div class="param">
-
-### CBRK_IO_SAFETY (`INT32`) {#CBRK_IO_SAFETY}
-
-Circuit breaker for IO safety.
-
-Setting this parameter to 22027 will disable IO safety.
-WARNING: ENABLING THIS CIRCUIT BREAKER IS AT OWN RISK
-
-
-Reboot | minValue | maxValue | increment | default | unit | Read-Only
---- | --- | --- | --- | --- | --- | ---
-&nbsp; | 0 | 22027 |  | 22027 |  | &nbsp;
 
 </div>
 
@@ -25874,7 +25858,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ## Commander
 
-<div class="param-group" style="--param-count: 74">
+<div class="param-group" style="--param-count: 75">
 
 <div class="param">
 
@@ -26753,10 +26737,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### COM_FORCE_SAFETY (`INT32`) {#COM_FORCE_SAFETY}
 
-Enable force safety.
-
-Force safety when the vehicle disarms
-
+Re-enable safety when the vehicle disarms.
 
 **Values:**
 
@@ -26779,6 +26760,7 @@ Action the system takes when a GNSS failure is detected during flight.
 Triggers when the active GNSS count drops below SYS_HAS_NUM_GNSS (disabled
 when SYS_HAS_NUM_GNSS=0), or when two receivers report positions inconsistent
 with their reported accuracy and SYS_HAS_NUM_GNSS=2 (otherwise warning only).
+The reported accuracy of each receiver is floored with EKF2_GPS_P_NOISE.
 Any value above Warning also blocks arming.
 
 
@@ -26788,6 +26770,7 @@ Any value above Warning also blocks arming.
 - `1`: Return
 - `2`: Land
 - `3`: Terminate
+- `4`: Warning, block arming
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -27232,11 +27215,15 @@ Condition to enter prearmed mode.
 Condition to enter the prearmed state, an intermediate state between disarmed and armed
 in which non-throttling actuators are active.
 
+0: Never prearmed.
+1: Prearmed when safety is off (COM_SAFETY_MODE)
+2: Always prearmed.
+
 
 **Values:**
 
 - `0`: Disabled
-- `1`: Safety button
+- `1`: When safety off
 - `2`: Always
 
 
@@ -27351,6 +27338,34 @@ Ensure the value is not set lower than the update interval of the RC or Joystick
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
 &nbsp; | 0 | 35 | 0.1 | 0.5 | s | &nbsp;
+
+</div>
+
+<div class="param">
+
+### COM_SAFETY_MODE (`INT32`) {#COM_SAFETY_MODE}
+
+Condition to turn safety off.
+
+Vehicle arming is prevented for as long as safety is on.
+
+0: Always off.
+1: Safety can be turned off either by pressing a physical safety switch, or by sending a MAV_CMD_DO_SET_SAFETY_SWITCH_STATE command.
+2: Safety can only be turned off by pressing a physical safety switch. MAV_CMD_DO_SET_SAFETY_SWITCH_STATE commands are rejected.
+3: Safety can only be turned off by sending a MAV_CMD_DO_SET_SAFETY_SWITCH_STATE command. Any physical switch is ignored.
+
+
+**Values:**
+
+- `0`: Always off
+- `1`: Safety switch (physical or virtual via MAVLink)
+- `2`: Physical safety switch only
+- `3`: MAVLink only
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&check; |  |  |  | 0 |  | &nbsp;
 
 </div>
 
@@ -28594,7 +28609,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ## EKF2
 
-<div class="param-group" style="--param-count: 155">
+<div class="param-group" style="--param-count: 154">
 
 <div class="param">
 
@@ -29742,6 +29757,21 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 <div class="param">
 
+### EKF2_GPS_YAW_RST (`FLOAT`) {#EKF2_GPS_YAW_RST}
+
+GNSS heading reset wait.
+
+After GNSS heading fusion fails, or the heading receiver reports spoofing or jamming, EKF2 waits this long before resetting yaw to the GNSS heading.
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&nbsp; | 0.1 |  |  | 10.0 | s | &nbsp;
+
+</div>
+
+<div class="param">
+
 ### EKF2_GRAV_NOISE (`FLOAT`) {#EKF2_GRAV_NOISE}
 
 Accelerometer measurement noise for gravity based observations.
@@ -30480,36 +30510,6 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 <div class="param">
 
-### EKF2_REQ_GPS_H (`FLOAT`) {#EKF2_REQ_GPS_H}
-
-GNSS fusion restart and heading reset wait.
-
-After EKF2 stops GNSS velocity and position fusion, it restarts it only after this time while disarmed on the ground, and after a tenth of it, at least 1 s, otherwise. After a GNSS heading failure, a yaw reset to the GNSS heading also waits this long. The GNSS checks use GNSS_REQ_TIME.
-
-
-Reboot | minValue | maxValue | increment | default | unit | Read-Only
---- | --- | --- | --- | --- | --- | ---
-&nbsp; | 0.1 |  |  | 10.0 | s | &nbsp;
-
-</div>
-
-<div class="param">
-
-### EKF2_REQ_SACC (`FLOAT`) {#EKF2_REQ_SACC}
-
-GNSS speed accuracy for vertical velocity and yaw estimator.
-
-Below this speed accuracy EKF2 trusts the GNSS vertical velocity while the accelerometer clips, and feeds the GNSS velocity to the EKF-GSF yaw estimator. The GNSS checks use GNSS_REQ_SACC.
-
-
-Reboot | minValue | maxValue | increment | default | unit | Read-Only
---- | --- | --- | --- | --- | --- | ---
-&nbsp; | 0.5 | 5.0 |  | 0.5 | m/s | &nbsp;
-
-</div>
-
-<div class="param">
-
 ### EKF2_RNGBC_CTRL (`INT32`) {#EKF2_RNGBC_CTRL}
 
 Ranging beacon fusion control.
@@ -31125,7 +31125,10 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Maximum manual pitch angle.
 
-Applies to both directions in all manual modes with attitude stabilization but without altitude control
+Pitch angle commanded by full stick deflection, relative to FW_PSP_OFF (the centred-stick pitch).
+The resulting pitch setpoint is additionally limited to this angle around level,
+so with a non-zero FW_PSP_OFF the range is not symmetric.
+Applies in all manual modes with attitude stabilization but without altitude control.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -31171,9 +31174,12 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Pitch setpoint offset (pitch at level flight).
 
-An airframe specific offset of the pitch setpoint in degrees, the value is
-added to the pitch setpoint and should correspond to the pitch at
-typical cruise speed of the airframe.
+Pitch angle of the body x-axis above the horizon in level flight at trim airspeed (FW_AIRSPD_TRIM).
+
+The altitude and airspeed controller (TECS) uses it as the pitch at zero climb angle,
+and in Stabilized mode the centred pitch stick commands it.
+Pitch setpoints and pitch limits set elsewhere, for example FW_P_LIM_MIN and FW_P_LIM_MAX,
+are absolute and do not include it.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -31469,10 +31475,12 @@ Landing flare altitude (relative to landing altitude).
 
 NOTE: max(FW_LND_FLALT, FW_LND_FL_TIME * |z-velocity|) is taken as the flare altitude
 
+Set FW_LND_FLALT or FW_LND_FL_TIME to -1 to disable the flare (land on the glide slope at landing airspeed).
+
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&nbsp; | 0.0 |  | 0.5 | 0.5 | m | &nbsp;
+&nbsp; | -1.0 |  | 0.5 | 0.5 | m | &nbsp;
 
 </div>
 
@@ -31480,7 +31488,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### FW_LND_FL_PMAX (`FLOAT`) {#FW_LND_FL_PMAX}
 
-Flare, maximum pitch.
+Flare, maximum absolute pitch.
 
 Maximum pitch during landing flare.
 
@@ -31495,7 +31503,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### FW_LND_FL_PMIN (`FLOAT`) {#FW_LND_FL_PMIN}
 
-Flare, minimum pitch.
+Flare, minimum absolute pitch.
 
 Minimum pitch during landing flare.
 
@@ -31532,10 +31540,12 @@ to trigger the flare.
 
 NOTE: max(FW_LND_FLALT, FW_LND_FL_TIME * descent rate) is taken as the flare altitude
 
+Set FW_LND_FLALT or FW_LND_FL_TIME to -1 to disable the flare (land on the glide slope at landing airspeed).
+
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&nbsp; | 0.1 | 5.0 | 0.1 | 1.0 | s | &nbsp;
+&nbsp; | -1.0 | 5.0 | 0.1 | 1.0 | s | &nbsp;
 
 </div>
 
@@ -31880,7 +31890,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### FW_TKO_PITCH_MIN (`FLOAT`) {#FW_TKO_PITCH_MIN}
 
-Minimum pitch during takeoff.
+Minimum absolute pitch during takeoff.
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
@@ -31951,7 +31961,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### FW_P_LIM_MAX (`FLOAT`) {#FW_P_LIM_MAX}
 
-Maximum pitch angle setpoint.
+Maximum absolute pitch angle setpoint.
 
 Applies in any altitude controlled flight mode.
 
@@ -31966,7 +31976,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### FW_P_LIM_MIN (`FLOAT`) {#FW_P_LIM_MIN}
 
-Minimum pitch angle setpoint.
+Minimum absolute pitch angle setpoint.
 
 Applies in any altitude controlled flight mode.
 
@@ -32082,6 +32092,9 @@ Adjusts the amount of weighting that the pitch control
 applies to speed vs height errors.
 0 -> control height only
 2 -> control speed only (gliders)
+Up to a weight of 1, pitch only trades height for speed up to trim airspeed;
+accelerating above trim is left to the throttle. Between 1 and 2, pitch
+increasingly tracks airspeed setpoints above trim as well.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -33005,6 +33018,7 @@ Chose source for manual setting of flaps in manual flight modes.
 - `4`: Aux4
 - `5`: Aux5
 - `6`: Flaps channel
+- `7`: Aux6
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -33263,6 +33277,7 @@ Chose source for manual setting of spoilers in manual flight modes.
 - `4`: Aux3
 - `5`: Aux4
 - `6`: Aux5
+- `7`: Aux6
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -40658,13 +40673,21 @@ each stream is automatically decreased.
 
 If this is set to 0 a value of half of the theoretical maximum bandwidth is used.
 This corresponds to baudrate/20 Bytes/s (baudrate/10 = maximum data rate on
-8N1-configured links).
+8N1-configured links). USB and UDP links have no baudrate, so for those 0
+means 100000 Bytes/s.
+
+Note that for a telemetry radio the serial baudrate says little about what
+the link can actually carry over the air. A SiK radio at the common 57600
+baud, 64 kbps air rate carries roughly 2000 B/s with error correction
+enabled and about twice that without, where baudrate/20 would suggest 2880.
+Instance 0 therefore defaults to a fixed value that is safe either way
+rather than to 0. Raise it if you know your link is better.
 
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&check; | 0 |  |  | 1200 | B/s | &nbsp;
+&check; | 0 |  |  | 2000 | B/s | &nbsp;
 
 </div>
 
@@ -40896,7 +40919,15 @@ each stream is automatically decreased.
 
 If this is set to 0 a value of half of the theoretical maximum bandwidth is used.
 This corresponds to baudrate/20 Bytes/s (baudrate/10 = maximum data rate on
-8N1-configured links).
+8N1-configured links). USB and UDP links have no baudrate, so for those 0
+means 100000 Bytes/s.
+
+Note that for a telemetry radio the serial baudrate says little about what
+the link can actually carry over the air. A SiK radio at the common 57600
+baud, 64 kbps air rate carries roughly 2000 B/s with error correction
+enabled and about twice that without, where baudrate/20 would suggest 2880.
+Instance 0 therefore defaults to a fixed value that is safe either way
+rather than to 0. Raise it if you know your link is better.
 
 
 
@@ -41134,7 +41165,15 @@ each stream is automatically decreased.
 
 If this is set to 0 a value of half of the theoretical maximum bandwidth is used.
 This corresponds to baudrate/20 Bytes/s (baudrate/10 = maximum data rate on
-8N1-configured links).
+8N1-configured links). USB and UDP links have no baudrate, so for those 0
+means 100000 Bytes/s.
+
+Note that for a telemetry radio the serial baudrate says little about what
+the link can actually carry over the air. A SiK radio at the common 57600
+baud, 64 kbps air rate carries roughly 2000 B/s with error correction
+enabled and about twice that without, where baudrate/20 would suggest 2880.
+Instance 0 therefore defaults to a fixed value that is safe either way
+rather than to 0. Raise it if you know your link is better.
 
 
 
@@ -41312,9 +41351,19 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 MAVLink system ID.
 
+IDs above 255 use the 32-bit system ID extension of MAVLink 2,
+which forces MAV_PROTO_VER to 2. Every system on the network needs
+to support the extension to talk to such a system.
+
+Only use IDs above 255 for vehicles, and keep ground stations and
+other controlling systems at 255 or below. The gimbal protocol and
+other messages that carry a system ID inside the payload, such as
+the ID of the system in control, still only support IDs up to 255.
+
+
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&check; | 1 | 250 |  | 1 |  | &nbsp;
+&check; | 1 | 2147483647 |  | 1 |  | &nbsp;
 
 </div>
 
@@ -41685,12 +41734,12 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### MIS_MNT_YAW_CTL (`INT32`) {#MIS_MNT_YAW_CTL}
 
-Enable gimbal yaw control in missions.
+Enable gimbal yaw control in missions and Hold.
 
-Enable yaw control of the mount. (Only affects multicopters and ROI mission items)
+Enable yaw control of the mount. (Only affects multicopters with an active ROI)
 
 If enabled, yaw commands will be sent to the mount and the vehicle will follow its heading towards the flight direction.
-If disabled, the vehicle will yaw towards the ROI.
+If disabled, the vehicle will yaw towards the ROI in Mission and Hold mode.
 
 
 **Values:**
@@ -45004,6 +45053,35 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 </div>
 
+## Open Drone ID
+
+<div class="param-group" style="--param-count: 1">
+
+<div class="param">
+
+### ODID_BID_SRC (`INT32`) {#ODID_BID_SRC}
+
+Open Drone ID UAS ID source.
+
+Selects how the Open Drone ID UAS ID is sourced.
+
+In locked mode, the first received Basic ID UAS ID is expected to be stored persistently and reused on subsequent boots.
+
+
+**Values:**
+
+- `0`: PX4 board GUID legacy fallback
+- `1`: Lock first received Basic ID
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&check; |  |  |  | 0 |  | &nbsp;
+
+</div>
+
+</div>
+
 ## PWM Outputs
 
 <div class="param-group" style="--param-count: 2">
@@ -45363,8 +45441,8 @@ Select your RC input protocol or auto to scan.
 - `1`: PPM
 - `2`: SBUS
 - `3`: DSM
-- `4`: ST24
-- `5`: SUMD
+- `4`: SUMD
+- `5`: ST24
 - `6`: CRSF
 - `7`: GHST
 
@@ -48789,7 +48867,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### RWTO_PSP (`FLOAT`) {#RWTO_PSP}
 
-Pitch setpoint during taxi / before rotation.
+Absolute pitch setpoint during taxi / before rotation.
 
 Pitch setpoint during taxi / before takeoff rotation airspeed is reached
 
@@ -49264,7 +49342,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ## Sensor Calibration
 
-<div class="param-group" style="--param-count: 151">
+<div class="param-group" style="--param-count: 157">
 
 <div class="param">
 
@@ -50171,6 +50249,96 @@ Barometer 3 priority.
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
 &nbsp; |  |  |  | -1 |  | &nbsp;
+
+</div>
+
+<div class="param">
+
+### CAL_DPRES0_ID (`INT32`) {#CAL_DPRES0_ID}
+
+Differential pressure sensor 0 calibration device ID.
+
+Device ID of the differential pressure sensor this calibration applies to.
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&nbsp; |  |  |  | 0 |  | &nbsp;
+
+</div>
+
+<div class="param">
+
+### CAL_DPRES0_OFF (`FLOAT`) {#CAL_DPRES0_OFF}
+
+Differential pressure sensor 0 offset.
+
+The zero-reading of this differential pressure sensor, in Pascal.
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&nbsp; |  |  |  | 0.0 |  | &nbsp;
+
+</div>
+
+<div class="param">
+
+### CAL_DPRES1_ID (`INT32`) {#CAL_DPRES1_ID}
+
+Differential pressure sensor 1 calibration device ID.
+
+Device ID of the differential pressure sensor this calibration applies to.
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&nbsp; |  |  |  | 0 |  | &nbsp;
+
+</div>
+
+<div class="param">
+
+### CAL_DPRES1_OFF (`FLOAT`) {#CAL_DPRES1_OFF}
+
+Differential pressure sensor 1 offset.
+
+The zero-reading of this differential pressure sensor, in Pascal.
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&nbsp; |  |  |  | 0.0 |  | &nbsp;
+
+</div>
+
+<div class="param">
+
+### CAL_DPRES2_ID (`INT32`) {#CAL_DPRES2_ID}
+
+Differential pressure sensor 2 calibration device ID.
+
+Device ID of the differential pressure sensor this calibration applies to.
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&nbsp; |  |  |  | 0 |  | &nbsp;
+
+</div>
+
+<div class="param">
+
+### CAL_DPRES2_OFF (`FLOAT`) {#CAL_DPRES2_OFF}
+
+Differential pressure sensor 2 offset.
+
+The zero-reading of this differential pressure sensor, in Pascal.
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&nbsp; |  |  |  | 0.0 |  | &nbsp;
 
 </div>
 
@@ -52042,9 +52210,12 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### SENS_DPRES_OFF (`FLOAT`) {#SENS_DPRES_OFF}
 
-Differential pressure sensor offset.
+Differential pressure sensor offset of the first airspeed sensor.
 
-The offset (zero-reading) in Pascal
+The offset (zero-reading) in Pascal of the sensor holding calibration slot 0.
+
+Kept as a mirror of CAL_DPRES0_OFF so that ground stations can still detect whether
+airspeed has been calibrated. The firmware applies CAL_DPRESx_OFF, not this value.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -52412,6 +52583,9 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 ### GNSS_REQ_SACC (`FLOAT`) {#GNSS_REQ_SACC}
 
 Required speed accuracy to use GNSS.
+
+EKF2 also feeds GNSS velocity to the EKF-GSF yaw estimator, and trusts the GNSS vertical velocity while the accelerometer clips, only below this speed accuracy, in flight too. With the speed accuracy check disabled in GNSS_CHECK, it does both whatever the speed accuracy.
+
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
@@ -53170,12 +53344,11 @@ IMU gyro FFT length.
 - `256`: 256
 - `512`: 512
 - `1024`: 1024
-- `4096`: 4096
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&check; |  |  |  | 512 | Hz | &nbsp;
+&check; |  |  |  | 512 |  | &nbsp;
 
 </div>
 
@@ -56114,21 +56287,12 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Multi GPS primary instance.
 
-Preferred GPS receiver instance.
-The GPS selection logic waits until the primary receiver is available to
-send data to the EKF even if a secondary instance is already available.
-The secondary instance is then only used if the primary one times out.
-
-To select a DroneCAN GPS, set this to the node ID.
-
-GPS_RAW_INT reports the preferred receiver, or without one the first receiver
-to publish, and GPS2_RAW the other one. Neither follows the selection.
-
+The primary receiver is used while it passes the strict checks (GNSS_REQ_*), and while disarmed whenever it publishes. In flight, the other receiver is used when the primary fails its checks (GNSS_CHECK) or stops publishing for 2 s, and then for the rest of the flight unless it fails too. The other receiver is also used once it has been better through a hold: when the primary failed the strict checks while the other passed them, or when the primary was usable for a clearly smaller share of the last 10 s or so (availability lower by 0.2). The primary is used again once it has been better through the hold. The hold is 10 s and doubles with every such switch in a flight, so the first return takes 20 s. With Auto, the moving base of a moving base pair (SENS_GNSSn_HDG) is the primary. Without a primary, a receiver that passes the strict checks is preferred, and among those one with an RTK fixed solution. To make a DroneCAN receiver the primary, set its node ID (2 to 127). GPS_RAW_INT reports the primary receiver, or the first receiver to publish if there is no primary.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&nbsp; | -1 | 127 |  | 0 |  | &nbsp;
+&nbsp; | -1 | 127 |  | -1 |  | &nbsp;
 
 </div>
 
@@ -58556,7 +58720,42 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ## Simulation
 
-<div class="param-group" style="--param-count: 8">
+<div class="param-group" style="--param-count: 9">
+
+<div class="param">
+
+### SIM_GZ_EC_SIGNED (`INT32`) {#SIM_GZ_EC_SIGNED}
+
+Signed command for non-motor ESC channels.
+
+For motors, use CA_R_REV; bits set here for motor channels are ignored. Select simulated ESC channels assigned a non-motor function (e.g. Peripheral via Actuator Set or Servo) to send values from -MAX (full reverse) to +MAX (full forward), with 0 as neutral. For signed channels, keep DISARMED at 0, set MIN to 1, and use FAILSAFE 0 for neutral failsafe behavior. Failsafe values use the same MIN/MAX-to-signed mapping as normal outputs. Mirrors UAVCAN_EC_SIGNED.
+
+
+**Bitmask:**
+
+- `0`: ESC1
+- `1`: ESC2
+- `2`: ESC3
+- `3`: ESC4
+- `4`: ESC5
+- `5`: ESC6
+- `6`: ESC7
+- `7`: ESC8
+- `8`: ESC9
+- `9`: ESC10
+- `10`: ESC11
+- `11`: ESC12
+- `12`: ESC13
+- `13`: ESC14
+- `14`: ESC15
+- `15`: ESC16
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&check; | 0 | 65535 |  | 0 |  | &nbsp;
+
+</div>
 
 <div class="param">
 
@@ -58580,12 +58779,13 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### SIM_GZ_EN_BARO (`INT32`) {#SIM_GZ_EN_BARO}
 
-Enable barometer/air pressure sensor in Gazebo bridge.
+Enable barometer/air pressure sensor(s) in Gazebo bridge.
 
 **Values:**
 
 - `0`: Disabled
-- `1`: Enabled
+- `1`: Simulate 1 barometer sensor
+- `2`: Simulate 2 barometer sensors
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -58616,12 +58816,13 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### SIM_GZ_EN_GPS (`INT32`) {#SIM_GZ_EN_GPS}
 
-Enable GPS/NavSat sensor in Gazebo bridge.
+Enable GPS/NavSat sensor(s) in Gazebo bridge.
 
 **Values:**
 
 - `0`: Disabled
-- `1`: Enabled
+- `1`: Simulate 1 GPS sensor
+- `2`: Simulate 2 GPS sensors
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -58634,12 +58835,14 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### SIM_GZ_EN_IMU (`INT32`) {#SIM_GZ_EN_IMU}
 
-Enable IMU sensor in Gazebo bridge.
+Enable IMU sensor(s) in Gazebo bridge.
 
 **Values:**
 
 - `0`: Disabled
-- `1`: Enabled
+- `1`: Simulate 1 IMU sensor
+- `2`: Simulate 2 IMU sensors
+- `3`: Simulate 3 IMU sensors
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -58670,12 +58873,13 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ### SIM_GZ_EN_MAG (`INT32`) {#SIM_GZ_EN_MAG}
 
-Enable magnetometer sensor in Gazebo bridge.
+Enable magnetometer sensor(s) in Gazebo bridge.
 
 **Values:**
 
 - `0`: Disabled
-- `1`: Enabled
+- `1`: Simulate 1 magnometer sensor
+- `2`: Simulate 2 magnometer sensors
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -59469,7 +59673,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Bootloader update.
 
-If enabled, update the bootloader on the next boot.
+If enabled, update the bootloader on the next boot. DroneCAN nodes
+update within about 2 seconds of it being set, without rebooting.
 
 WARNING: do not cut the power during an update process, otherwise you will
 have to recover using some alternative method (e.g. JTAG).
@@ -63116,7 +63321,7 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 ## UAVCAN
 
-<div class="param-group" style="--param-count: 49">
+<div class="param-group" style="--param-count: 50">
 
 <div class="param">
 
@@ -63387,6 +63592,37 @@ Maximum fuel capacity of fuel tank 3.
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
 &check; | 0.0 | 100000.0 | 0.1 | 15.0 | liters | &nbsp;
+
+</div>
+
+<div class="param">
+
+### UAVCAN_EC_SIGNED (`INT32`) {#UAVCAN_EC_SIGNED}
+
+Signed command for non-motor ESC channels.
+
+For motors, use CA_R_REV; bits set here for motor channels are ignored. Select ESC channels assigned a non-motor function (e.g. Peripheral via Actuator Set or Servo) to send signed RawCommand values from -MAX (full reverse) to +MAX (full forward), with 0 as neutral. Keep MIN at its default of 1 so full reverse remains distinct from disarmed and failsafe values of 0. Failsafe values use the same MIN/MAX-to-signed mapping as normal outputs.
+
+
+**Bitmask:**
+
+- `0`: ESC1
+- `1`: ESC2
+- `2`: ESC3
+- `3`: ESC4
+- `4`: ESC5
+- `5`: ESC6
+- `6`: ESC7
+- `7`: ESC8
+- `8`: ESC9
+- `9`: ESC10
+- `10`: ESC11
+- `11`: ESC12
+
+
+Reboot | minValue | maxValue | increment | default | unit | Read-Only
+--- | --- | --- | --- | --- | --- | ---
+&check; | 0 | 4095 |  | 0 |  | &nbsp;
 
 </div>
 
@@ -66864,14 +67100,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 UAV acceleration white-noise power spectral density.
 
-White-noise PSD on the UAV acceleration input. The
-1-sigma vel_uav change allowed over a time t is sqrt(VTE_ACC_D_UNC * t).
-
-This is a variance rate, not a per-step variance; the value is independent
-of the filter update rate. Higher values let the filter follow new
-measurements more tightly and reject fewer outliers.
-
-Unit: m^2/s^3.
+UAV velocity variance growth rate from acceleration noise (m^2/s^3), independent of update rate.
+Higher values follow measurements faster and reject fewer outliers.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -66886,16 +67116,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Target acceleration random-walk process noise.
 
-Process-noise spectral density of the target acceleration random walk
-(moving-target builds only). The 1-sigma target-acceleration change over a
-time t is sqrt(VTE_ACC_T_UNC * t) (e.g. for the 0.1 default, ~0.32 m/s^2
-after 1 s, ~1.0 m/s^2 after 10 s).
-
-This is a variance rate, not a linear rate of change; the value is
-independent of the filter update rate. Higher values let the filter follow
-target manoeuvres more aggressively and accept more outliers.
-
-Unit: ((m/s^2)^2)/s.
+Target acceleration variance growth rate (m^2/s^5), independent of update rate. Moving-target builds only.
+Higher values track manoeuvres faster and reject fewer outliers.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -66910,13 +67132,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Initial target absolute acceleration uncertainty.
 
-Initial variance of the relative target acceleration in x, y, and z directions
-(moving-target builds only).
-Changes while the estimator is running are picked up immediately by the module but only take effect
-the next time the estimator initializes or resets.
-Once the filter is running, the steady-state target-acceleration variance is
-governed by VTE_ACC_T_UNC and the measurement updates, so this parameter does
-not influence runtime behaviour.
+Initial absolute target-acceleration variance per axis (moving-target builds only).
+Changes apply at initialization/reset. Use VTE_ACC_T_UNC for ongoing manoeuvre tracking.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -66931,9 +67148,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Integer bitmask controlling data fusion and aiding methods.
 
-Selects which measurements the vision target estimator fuses.
-Bits 0, 3 and 5 give an absolute pad position. It is converted to a relative observation with the vehicle GNSS position, and its offset to the vision-based pad position is estimated as the GNSS bias.
-Only one absolute pad position is fused at a time: bit 0 takes precedence over bits 3 and 5, which are also ignored in moving-target builds.
+Absolute target references (bits 0, 3, 5) require vehicle GNSS; their offset from vision is estimated as a bias.
+Bit 0 overrides bits 3 and 5, which are ignored in moving-target builds.
 
 
 **Bitmask:**
@@ -66958,18 +67174,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Bias random-walk process noise.
 
-Process-noise spectral density of the GPS/vision bias random walk. The
-1-sigma expected bias change over a time t is sqrt(VTE_BIAS_UNC * t) (e.g.
-for the 0.001 default, ~3 cm after 1 s, ~10 cm after 10 s, ~32 cm after
-100 s).
-
-This is a variance rate, not a linear drift rate; the value is independent
-of the filter update rate. Higher values let the bias follow new
-observations more aggressively; lower values keep it stiff. Tune to match
-the realistic physical drift of the absolute reference (typically a few
-centimetres over tens of seconds for consumer GNSS, less for RTK).
-
-Unit: m^2/s.
+GNSS/vision position-bias variance growth rate (m^2/s), independent of update rate.
+Higher values track reference drift faster; lower values keep the bias steadier.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -66984,10 +67190,9 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Initial GNSS/vision bias averaging threshold.
 
-When the GNSS/vision bias first becomes observable while the estimator is still referenced to GNSS,
-VTE low-pass filters the first GNSS/vision bias samples before activating the bias estimate.
-The LPF exit requires consecutive raw bias samples to stay within this threshold and for the LPF
-to have run for at least 2 * tau, or until VTE_BIA_AVG_TOUT elapses.
+Maximum 3D difference between raw and filtered bias to finish averaging after GNSS-first startup.
+Lower values require steadier samples. Requires 5 consecutive matches and at least 0.6 s, or VTE_BIA_AVG_TOUT.
+Set to 0 to disable averaging.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67002,14 +67207,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Initial GNSS/vision bias averaging timeout.
 
-Maximum time spent averaging the initial GNSS bias before activating it once GNSS and vision
-are jointly observable while the estimator is still referenced to GNSS. During that phase, valid
-vision samples keep updating the LPF. While the current GNSS-relative measurement stays valid,
-it can be propagated with the UAV velocity estimate to match the vision timestamp. If that GNSS
-sample is no longer valid, averaging stops, the current vision position is used, and the current
-LPF bias is activated.
-
-Set to 0 to disable averaging and activate the bias immediately.
+Maximum time to average the GNSS/vision bias when starting from GNSS position. Vision fusion waits meanwhile.
+If GNSS expires, switch to vision with the filtered bias. Set to 0 to disable averaging.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67024,12 +67223,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Initial GPS bias uncertainty.
 
-Initial variance of the bias between the GPS on the target and the GPS on the drone.
-Changes while the estimator is running are picked up immediately by the module but only take effect
-the next time the estimator initializes or resets.
-Once the filter is running, the steady-state bias variance is governed by VTE_BIAS_UNC
-and the measurement updates, so this parameter does not influence runtime behaviour.
-Keep it large so initialization can absorb initial misalignments.
+Initial GNSS/vision position-bias variance per axis. Higher values allow larger initial bias corrections.
+Applied at initialization/reset and bias activation. Use VTE_BIAS_UNC for ongoing drift.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67044,12 +67239,13 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Vision target timeout.
 
-Time after which the target is considered lost without any new fused measurements. When this timeout expires, the estimator is reset and can restart immediately once an enabled fusion source is available.
+Reset after this long without accepted position or yaw updates, tracked separately.
+Velocity updates do not prevent position resets.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&nbsp; | 0.0 | 50 | 0.5 | 3.0 | s | &nbsp;
+&nbsp; | 0.1 | 50 | 0.5 | 3.0 | s | &nbsp;
 
 </div>
 
@@ -67076,13 +67272,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Minimum standard deviation for vision yaw observations.
 
-Lower bound on the standard deviation used when fusing the vision yaw
-observation. The estimator squares this value and clamps the per-sample
-observation variance to max(reported_variance, VTE_EVA_NOISE^2). The floor only
-takes effect when the sensor under-reports its own noise.
-The default of ~0.07 rad (4 deg) is a reasonable starting point for marker-based
-yaw detection. Lowering it makes the filter trust each yaw sample more, which
-can cause the controller to chase the resulting setpoint changes and oscillate.
+Minimum vision yaw noise; used only when reported noise is lower. Default: about 4 deg.
+Lower values increase trust in yaw measurements and can cause control oscillations.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67097,10 +67288,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Minimum standard deviation for vision relative-position observations.
 
-Lower bound on the standard deviation used when fusing the vision relative
-position. The estimator squares this value and clamps the per-sample
-observation variance to max(reported_variance, VTE_EVP_NOISE^2). The floor only
-takes effect when the sensor under-reports its own noise.
+Minimum vision position noise; used only when reported noise is lower.
+Increase to reduce trust in position measurements.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67115,10 +67304,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Minimum standard deviation for GPS position observations.
 
-Lower bound on the standard deviation used when fusing GPS position (target or
-mission landing waypoint). The estimator squares this value and clamps the
-per-sample observation variance to max(reported_variance, VTE_GPS_P_NOISE^2).
-The floor only takes effect when the sensor under-reports its own noise.
+Minimum GNSS position noise for target, mission or home aiding; used only when reported noise is lower.
+Increase to reduce trust in position measurements.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67133,11 +67320,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Minimum standard deviation for GPS velocity observations.
 
-Lower bound on the standard deviation used when fusing GPS velocity. The
-estimator squares this value and clamps the per-sample observation variance
-to max(reported_variance, VTE_GPS_V_NOISE^2). The floor only takes effect when
-the sensor under-reports its own noise; if the reported variance is already
-above the floor, this parameter has no effect.
+Minimum GNSS velocity noise; used only when reported noise is lower.
+Increase to reduce trust in velocity measurements.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67152,12 +67336,12 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Measurement recent timeout.
 
-Time window for considering a raw measurement as recent and eligible for fusion.
+Maximum raw measurement age allowed for fusion.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&nbsp; | 0.0 | 10 | 0.05 | 1.0 | s | &nbsp;
+&nbsp; | 0.1 | 10 | 0.05 | 1.0 | s | &nbsp;
 
 </div>
 
@@ -67167,12 +67351,12 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Measurement updated timeout.
 
-Maximum allowed age of a retained measurement before it is discarded from the estimator's cache.
+Maximum age of local position, velocity and antenna-offset corrections. GNSS-to-vision alignment may span the measurement recent timeout.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&nbsp; | 0.0 | 5 | 0.01 | 0.1 | s | &nbsp;
+&nbsp; | 0.01 | 5 | 0.01 | 0.1 | s | &nbsp;
 
 </div>
 
@@ -67199,10 +67383,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Normalized innovation squared threshold for the position estimator.
 
-Lower values mean that more measurements will be rejected. Null hypothesis H0: the innovation is
-consistent with the innovation covariance matrix. Values of 0.46, 1.64, 2.71, 3.84, 6.63, and 10.83
-correspond to 50%, 20%, 10%, 5%, 1%, and 0.1% probability respectively that H0 is incorrectly rejected.
-The confidence interval is computed from the chi-squared distribution.
+Per-axis outlier gate for position and velocity measurements. Lower values reject more samples.
+For Gaussian innovations, 3.84 rejects about 5% of valid samples; 6.63 rejects 1%.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67217,9 +67399,9 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Initial target and drone relative position uncertainty.
 
-Initial variance of the relative target position in x, y, and z direction.
-Changes while the estimator is running are picked up immediately by the module but only take effect
-the next time the estimator initializes or resets.
+Minimum initial variance of the relative target position in x, y, and z direction.
+The variance reported by the initializing observation is used if it is larger.
+Applied at initialization/reset and GNSS/vision bias activation.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67233,12 +67415,6 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 ### VTE_TASK_MASK (`INT32`) {#VTE_TASK_MASK}
 
 Integer bitmask controlling the tasks of the target estimator.
-
-Set bits in the following positions to enable:
-0 : Set to true to use the vision target estimator for precision landing. (+1)
-1 : DEBUG, always active. (+2)
-2 : Set to true to use the vision target estimator for precision takeoff. (+4)
-
 
 **Bitmask:**
 
@@ -67259,12 +67435,13 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Target validity timeout.
 
-Maximum time without any fused measurements before the published relative pose/yaw is flagged invalid.
+Maximum time without accepted position or yaw updates before that estimate becomes invalid.
+Keep below VTE_BTOUT.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
 --- | --- | --- | --- | --- | --- | ---
-&nbsp; | 0.0 | 50 | 0.25 | 2.0 | s | &nbsp;
+&nbsp; | 0.1 | 50 | 0.25 | 2.0 | s | &nbsp;
 
 </div>
 
@@ -67274,9 +67451,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Initial target and drone relative velocity uncertainty.
 
-Initial variance of the relative target velocity in x, y, and z directions.
-Changes while the estimator is running are picked up immediately by the module but only take effect
-the next time the estimator initializes or resets.
+Initial velocity variance per axis, applied separately to the UAV and moving target.
+Changes apply at initialization/reset.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67291,16 +67467,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Yaw acceleration white-noise power spectral density.
 
-White-noise PSD on the yaw acceleration driving the
-yaw-rate state. The 1-sigma yaw-rate change allowed over a time t is
-sqrt(VTE_YAW_ACC_UNC * t) (e.g. for the 0.004 default, ~3.6 deg/s after 1 s,
-~11.5 deg/s after 10 s).
-
-This is a variance rate, not a per-step variance; the value is independent
-of the filter update rate. Higher values let the filter follow rapid
-heading changes; lower values smooth the yaw estimate aggressively.
-
-Unit: rad^2/s^3.
+Yaw-rate variance growth rate from acceleration noise (rad^2/s^3), independent of update rate.
+Higher values track heading changes faster; lower values smooth yaw more.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67332,10 +67500,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Normalized innovation squared threshold for the orientation estimator.
 
-Lower values mean that more measurements will be rejected. Null hypothesis H0: the innovation is
-consistent with the innovation covariance matrix. Values of 0.46, 1.64, 2.71, 3.84, 6.63, and 10.83
-correspond to 50%, 20%, 10%, 5%, 1%, and 0.1% probability respectively that H0 is incorrectly rejected.
-The confidence interval is computed from the chi-squared distribution.
+Yaw outlier gate. Lower values reject more samples.
+For Gaussian innovations, 3.84 rejects about 5% of valid samples; 6.63 rejects 1%.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only
@@ -67350,9 +67516,8 @@ Reboot | minValue | maxValue | increment | default | unit | Read-Only
 
 Initial orientation uncertainty.
 
-Initial variance of the target orientation yaw in rad^2.
-Changes while the estimator is running are picked up immediately by the module but only take effect
-the next time the estimator initializes or resets.
+Initial yaw variance (rad^2); also used for yaw-rate variance ((rad/s)^2).
+Changes apply at initialization/reset.
 
 
 Reboot | minValue | maxValue | increment | default | unit | Read-Only

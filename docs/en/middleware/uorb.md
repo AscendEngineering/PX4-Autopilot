@@ -11,6 +11,18 @@ Unit tests can be started with `uorb_tests`.
 This document explains how to add uORB message definitions and their corresponding topic(s), how to use reference a topic in code, and how to view topics as they change in PX4.
 The [First Application Tutorial (Hello Sky)](../modules/hello_sky.md) provides more comprehensive instructions for how to use topics in C++.
 
+## Publisher Lifetime
+
+The shared-memory implementation counts publisher references separately from subscriber references.
+Unadvertising releases one publisher reference; it does not hide a topic instance while another publisher still owns it.
+After the last publisher releases its reference, the instance becomes unadvertised and its data becomes invalid.
+The node is freed once no publishers or subscribers remain.
+
+Destroying a `uORB::Publication` or `uORB::PublicationMulti` automatically releases its reference for topics with a single-message buffer.
+A multi-instance slot is available for reuse only after its last publisher releases it.
+Queued topics are deliberately not automatically unadvertised on destruction, so messages such as vehicle commands remain available.
+Call `unadvertise()` explicitly when that retention is not wanted.
+
 ## Adding a New Topic
 
 New uORB topics can be added either within the main PX4/PX4-Autopilot repository, or can be added in an [out-of-tree message definition](../advanced/out_of_tree_modules.md#out-of-tree-uorb-message-definitions).
@@ -186,6 +198,9 @@ A publisher can call `orb_advertise_multi` to create a new topic instance and ge
 A subscriber will then have to choose to which instance to subscribe to using `orb_subscribe_multi` (`orb_subscribe` subscribes to the first instance).
 
 Make sure not to mix `orb_advertise_multi` and `orb_advertise` for the same topic!
+
+Destroying a `uORB::PublicationMulti` frees its instance for the next publisher.
+Destroying a `uORB::Publication` leaves the topic advertised with its last sample, because other publishers may share it.
 
 The full API is documented in [platforms/common/uORB/uORBManager.hpp](https://github.com/PX4/PX4-Autopilot/blob/main/platforms/common/uORB/uORBManager.hpp).
 

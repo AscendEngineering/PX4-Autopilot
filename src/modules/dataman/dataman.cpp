@@ -150,7 +150,7 @@ static constexpr size_t g_per_item_size_with_hdr[DM_KEY_NUM_KEYS] = {
 /* Table of offset for index 0 of each item type */
 static unsigned int g_key_offsets[DM_KEY_NUM_KEYS];
 
-static uint8_t dataman_clients_count = 1;
+static uint16_t dataman_clients_count = 1;
 
 static perf_counter_t _dm_read_perf{nullptr};
 static perf_counter_t _dm_write_perf{nullptr};
@@ -685,7 +685,7 @@ task_main(int argc, char *argv[])
 	g_task_should_exit.store(false);
 
 	uORB::Publication<dataman_response_s> dataman_response_pub{ORB_ID(dataman_response)};
-	const orb_sub_t dataman_request_sub = orb_subscribe(ORB_ID(dataman_request));
+	orb_sub_t dataman_request_sub = orb_subscribe(ORB_ID(dataman_request));
 
 	if (!orb_sub_valid(dataman_request_sub)) {
 		PX4_ERR("Failed to subscribe (%i)", errno);
@@ -752,7 +752,7 @@ task_main(int argc, char *argv[])
 				switch (request.request_type) {
 
 				case DM_GET_ID:
-					if (dataman_clients_count < UINT8_MAX) {
+					if (dataman_clients_count < UINT16_MAX) {
 						response.client_id = dataman_clients_count++;
 						/* Send the timestamp of the request over the data buffer so that the "dataman client"
 						 * can distinguish whether the request was made by it. */

@@ -47,8 +47,8 @@ namespace uORB
 
 PublicationBase::~PublicationBase()
 {
-	if (_handle != nullptr) {
-		// don't automatically unadvertise queued publications (eg vehicle_command)
+	if (orb_advert_valid(_handle)) {
+		// Keep queued publications available after publisher destruction.
 		if (Manager::orb_get_queue_size(_handle) == 1) {
 			unadvertise();
 		}
