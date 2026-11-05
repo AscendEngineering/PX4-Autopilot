@@ -76,7 +76,6 @@
 *(.text._ZN14ZeroGyroUpdate6updateER3EkfRKN9estimator9imuSampleE)  /* ZeroGyroUpdate::update(Ekf&, estimator::imuSample const&)  312 B  0.1% */
 *(.text._ZNK3Ekf15getHeadingInnovEv)  /* Ekf::getHeadingInnov() const  110 B  0.0% */
 *(.text._ZN4EKF217PublishEventFlagsERKy)  /* EKF2::PublishEventFlags(unsigned long long const&)  420 B  0.1% */
-*(.text._ZN4EKF219PublishWindEstimateERKy)  /* EKF2::PublishWindEstimate(unsigned long long const&)  140 B  0.0% */
 *(.text._ZNK3Ekf39getHeightAboveGroundInnovationTestRatioEv)  /* Ekf::getHeightAboveGroundInnovationTestRatio() const  128 B  0.0% */
 *(.text._ZN3Ekf35updateHorizontalDeadReckoningstatusEv)  /* Ekf::updateHorizontalDeadReckoningstatus()  704 B  0.1% */
 *(.text._ZN3Ekf23updateYawManualValidityEv)  /* Ekf::updateYawManualValidity()  120 B  0.0% */
@@ -89,4 +88,16 @@
 *(.text._ZN4uORB10DeviceNode4copyEPvRS1_Rj)
 *(.text._ZN4uORB7Manager8orb_copyEPK12orb_metadataPvS4_)
 *(.text._ZN4uORB10DeviceNode17remove_subscriberERPv)
+*(.text._ZN3Ekf16controlMagFusionERKN9estimator9imuSampleE)
+*(.text._ZN9Commander14handle_commandERK17vehicle_command_s)
+*(.text._ZN26MulticopterPositionControl17parameters_updateEb)
+*(.text._ZN15MavlinkReceiver3runEv)
+*(.text._ZN7Mavlink9task_mainEiPPc)
+*(.text._ZN15MavlinkReceiverC2ER7Mavlink)
+*(.text._ZN26MulticopterPositionControlC2Eb)
+*(.text._ZThn24_N7Sensors3RunEv)
+*(.text._ZN6CrsfRc3RunEv)
+*(.text._ZN3px46logger6Logger3runEv)
+*(.text._ZN15MavlinkReceiver14handle_messageEP17__mavlink_message)
+*(.text._ZN23MavlinkStreamHighresIMU4sendEv)
 
