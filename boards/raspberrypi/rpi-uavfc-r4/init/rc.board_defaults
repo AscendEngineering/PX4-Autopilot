@@ -15,4 +15,4 @@ param set-default BAT1_A_PER_V 65.7895
 param set-default CBRK_SUPPLY_CHK 894281
 param set-default CBRK_IO_SAFETY 22027
 param set-default SYS_HAS_MAG 0
-param set-default IMU_GYOR_RATEMAX 400
+param set-default IMU_GYRO_RATEMAX 400
