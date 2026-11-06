@@ -46,7 +46,7 @@
 #include <px4_platform_common/log.h>
 #include <px4_platform_common/printload.h>
 #include <drivers/drv_hrt.h>
-
+#include <cmath>
 #if defined(BOARD_DMA_ALLOC_POOL_SIZE)
 #include <px4_platform/board_dma_alloc.h>
 #endif /* BOARD_DMA_ALLOC_POOL_SIZE */
@@ -281,7 +281,8 @@ void print_load_buffer(char *buffer, int buffer_length, print_load_callback_f cb
 #endif
 			struct fdlist *fdlist = &system_load.tasks[i].tcb->group->tg_fdlist;
 
-			for (int fdr = 0; fdr < fdlist->fl_rows; fdr++) {
+			for (int fdr = 0; fdr < fdlist->fl_rows; fdr++)
+			{
 				for (int fdc = 0; fdc < CONFIG_NFILE_DESCRIPTORS_PER_BLOCK; fdc++) {
 					if (fdlist->fl_fds[fdr][fdc].f_file) {
 						++tcb_num_used_fds;
@@ -398,6 +399,20 @@ void print_load_buffer(char *buffer, int buffer_length, print_load_callback_f cb
 
 	// aggregate task time over the capacity of all cores; task rows above are relative to one core
 	float task_load = (float)(print_state->total_user_time) / (CPULOAD_NCPUS * print_state->interval_time_us);
+#ifdef CONFIG_SMP
+	task_load = CPULOAD_NCPUS * task_load;
+
+	if (task_load < 0.f) {
+		task_load = 0.f;
+
+	} else if (task_load > 1.f || task_load < 1.f) {
+		task_load = fabsf(1.f - task_load);
+
+	} else if ((task_load - 1.f) < FLT_EPSILON) {
+		task_load = fabsf(task_load - 0.5f);
+	}
+
+#endif
 
 	/* this can happen if one tasks total runtime was not computed
 	   correctly by the scheduler instrumentation TODO */

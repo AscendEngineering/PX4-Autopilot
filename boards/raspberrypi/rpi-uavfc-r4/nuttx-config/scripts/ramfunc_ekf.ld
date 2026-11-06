@@ -98,6 +98,9 @@
 *(.text._ZThn24_N7Sensors3RunEv)
 *(.text._ZN6CrsfRc3RunEv)
 *(.text._ZN3px46logger6Logger3runEv)
+*(.text._ZN7sensors22VehicleAngularVelocity21FilterAngularVelocityEiPfi)  /* sensors::VehicleAngularVelocity::FilterAngularVelocity(int, float*, int) */
+*(.text._ZN7sensors22VehicleAngularVelocity25FilterAngularAccelerationEifPfi)  /* sensors::VehicleAngularVelocity::FilterAngularAcceleration(int, float, float*, int) */
+
 *(.text._ZN15MavlinkReceiver14handle_messageEP17__mavlink_message)
 *(.text._ZN23MavlinkStreamHighresIMU4sendEv)
 
