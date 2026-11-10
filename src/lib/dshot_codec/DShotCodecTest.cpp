@@ -57,3 +57,312 @@ TEST(DShotCodec, EncodeTelemetryBit)
 {
 	EXPECT_EQ(dshot_codec_encode(1046, true, false) & 0x0010, 0x0010);
 }
+
+// ---- telemetry decode ----------------------------------------------------
+
+namespace
+{
+
+constexpr unsigned kSampleCycles = 18;   // PIO cycles between two samples
+constexpr unsigned kBitCycles = 100;     // nominal PIO cycles in one response bit
+constexpr unsigned kSamples = 32 * DSHOT_CODEC_SAMPLE_WORDS;
+constexpr uint32_t kVector = 0x1CDBAD;   // payload 0x064: nibbles 0, 6, 4, D -> quintets 19, 16, 1D, 0D
+
+/**
+ * Make the sample window that the PIO program gives for a response.
+ *
+ * @param gcr                  the 21-bit transition word of the response
+ * @param bit_cycles           cycles in one response bit (the ESC clock)
+ * @param sample_cycles        cycles between two samples
+ * @param first_sample_cycles  cycles from the start-bit falling edge to the first sample.
+ *                             The PIO program takes it 18 cycles after the edge.
+ */
+void make_window(uint32_t words[DSHOT_CODEC_SAMPLE_WORDS], uint32_t gcr, unsigned bit_cycles,
+		 unsigned sample_cycles = kSampleCycles, unsigned first_sample_cycles = 18)
+{
+	bool line[DSHOT_CODEC_FRAME_BITS];
+	line[0] = false;   // the start bit is low
+
+	for (unsigned i = 0; i + 1 < DSHOT_CODEC_FRAME_BITS; i++) {
+		line[i + 1] = line[i] ^ (((gcr >> (19 - i)) & 1u) != 0);
+	}
+
+	for (unsigned w = 0; w < DSHOT_CODEC_SAMPLE_WORDS; w++) {
+		words[w] = 0;
+	}
+
+	for (unsigned k = 0; k < kSamples; k++) {
+		const unsigned bit = (first_sample_cycles + k * sample_cycles) / bit_cycles;
+		const bool level = (bit < DSHOT_CODEC_FRAME_BITS) ? line[bit] : true;   // idle high after the frame
+
+		if (level) {
+			words[k / 32] |= 1u << (31 - k % 32);
+		}
+	}
+}
+
+/** The transition word that an ESC sends for a 12-bit payload. */
+uint32_t payload_to_gcr(unsigned payload)
+{
+	static const uint8_t quintet[16] = {
+		0x19, 0x1B, 0x12, 0x13, 0x1D, 0x15, 0x16, 0x17, 0x1A, 0x09, 0x0A, 0x0B, 0x1E, 0x0D, 0x0E, 0x0F
+	};
+	const unsigned checksum = ~(payload ^ (payload >> 4) ^ (payload >> 8)) & 0xFu;
+	const unsigned data = (payload << 4) | checksum;
+	return (1u << 20) | (uint32_t)(quintet[(data >> 12) & 0xF] << 15) | (uint32_t)(quintet[(data >> 8) & 0xF] << 10)
+	       | (uint32_t)(quintet[(data >> 4) & 0xF] << 5) | quintet[data & 0xF];
+}
+
+} // namespace
+
+TEST(DShotCodec, GcrToPayloadKnownVector)
+{
+	uint16_t payload = 0;
+	EXPECT_EQ(dshot_codec_gcr_to_payload(kVector, &payload), DSHOT_CODEC_OK);
+	EXPECT_EQ(payload, 0x064);
+	EXPECT_EQ(payload_to_gcr(0x064), kVector);   // the test helper agrees with the vector
+}
+
+TEST(DShotCodec, GcrBadSymbol)
+{
+	uint16_t p;
+	EXPECT_EQ(dshot_codec_gcr_to_payload(0x1CDBA0, &p), DSHOT_CODEC_ERR_GCR_SYMBOL);   // quintet 0x00
+}
+
+TEST(DShotCodec, GcrBadChecksum)
+{
+	uint16_t p;
+	EXPECT_EQ(dshot_codec_gcr_to_payload(0x1CDBAB, &p), DSHOT_CODEC_ERR_CHECKSUM);   // last quintet 0x0B = nibble B
+}
+
+TEST(DShotCodec, PayloadErpm)
+{
+	dshot_codec_telemetry_t t;
+	dshot_codec_decode_payload(0x064, false, &t);   // exponent 0, period 100 us
+	EXPECT_EQ(t.type, 0);
+	EXPECT_EQ(t.value, 6000);
+}
+
+TEST(DShotCodec, PayloadStoppedMotor)
+{
+	dshot_codec_telemetry_t t;
+	dshot_codec_decode_payload(0xFFF, false, &t);   // period 511 << 7 = 65408
+	EXPECT_EQ(t.type, 0);
+	EXPECT_EQ(t.value, 0);
+}
+
+TEST(DShotCodec, PayloadEdtTemperature)
+{
+	dshot_codec_telemetry_t t;
+	dshot_codec_decode_payload(0x223, true, &t);
+	EXPECT_EQ(t.type, 0x02);
+	EXPECT_EQ(t.value, 35);
+	dshot_codec_decode_payload(0x223, false, &t);   // EDT off: read as eRPM, exponent 1, period 70
+	EXPECT_EQ(t.type, 0);
+	EXPECT_EQ(t.value, 8571);
+}
+
+TEST(DShotCodec, PayloadEdtVoltage)
+{
+	dshot_codec_telemetry_t t;
+	dshot_codec_decode_payload(0x464, true, &t);   // 25.0 V
+	EXPECT_EQ(t.type, 0x04);
+	EXPECT_EQ(t.value, 100);
+}
+
+TEST(DShotCodec, PayloadEdtCurrent)
+{
+	dshot_codec_telemetry_t t;
+	dshot_codec_decode_payload(0x60C, true, &t);
+	EXPECT_EQ(t.type, 0x06);
+	EXPECT_EQ(t.value, 12);
+}
+
+TEST(DShotCodec, PayloadEdtStateEvent)
+{
+	dshot_codec_telemetry_t t;
+	dshot_codec_decode_payload(0xE00, true, &t);
+	EXPECT_EQ(t.type, 0x0E);
+	EXPECT_EQ(t.value, 0);
+}
+
+TEST(DShotCodec, PayloadEdtEnabledTypeZeroIsErpm)
+{
+	// Extended frames have the types 0x02 to 0x0E. Type 0 is eRPM: its value is a period, not 8 bits of data.
+	dshot_codec_telemetry_t t;
+	dshot_codec_decode_payload(0x064, true, &t);
+	EXPECT_EQ(t.type, 0);
+	EXPECT_EQ(t.value, 6000);
+}
+
+TEST(DShotCodec, SamplesNominal)
+{
+	uint32_t w[4];
+	make_window(w, kVector, 100);
+	uint32_t gcr = 0;
+	EXPECT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_OK);
+	EXPECT_EQ(gcr, kVector);
+}
+
+TEST(DShotCodec, SamplesStretched)   // ESC clock +-10 %
+{
+	uint32_t w[4];
+	uint32_t gcr = 0;
+	make_window(w, kVector, 90);
+	EXPECT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_OK);
+	EXPECT_EQ(gcr, kVector);
+	make_window(w, kVector, 110);
+	EXPECT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_OK);
+	EXPECT_EQ(gcr, kVector);
+}
+
+TEST(DShotCodec, SamplesSamplingPhase)
+{
+	for (unsigned bit_cycles : {90u, 100u, 110u}) {
+		for (unsigned first_sample_cycles = 0; first_sample_cycles <= 18; ++first_sample_cycles) {
+			SCOPED_TRACE(::testing::Message() << "bit_cycles=" << bit_cycles
+				     << " first_sample_cycles=" << first_sample_cycles);
+			uint32_t w[4];
+			make_window(w, kVector, bit_cycles, kSampleCycles, first_sample_cycles);
+			uint32_t gcr = 0;
+			ASSERT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_OK);
+			EXPECT_EQ(gcr, kVector);
+		}
+	}
+}
+
+TEST(DShotCodec, SamplesAllPayloads)   // every 12-bit payload, through GCR and the sample window, at three ESC clock rates
+{
+	for (unsigned payload = 0; payload < 4096; ++payload) {
+		const uint32_t gcr = payload_to_gcr(payload);
+
+		for (unsigned bit_cycles : {90u, 100u, 110u}) {
+			uint32_t w[4];
+			make_window(w, gcr, bit_cycles);
+			uint32_t out = 0;
+			uint16_t p = 0;
+			ASSERT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &out), DSHOT_CODEC_OK)
+					<< payload << " " << bit_cycles;
+			ASSERT_EQ(dshot_codec_gcr_to_payload(out, &p), DSHOT_CODEC_OK) << payload << " " << bit_cycles;
+			ASSERT_EQ(p, payload);
+		}
+	}
+}
+
+TEST(DShotCodec, SamplesTrailingOnesPadded)
+{
+	// The last line bit of the vector is 1 and merges with idle: only 20 bits make edges, the 21st is padded
+	uint32_t w[4];
+	make_window(w, kVector, 100);
+	uint32_t gcr = 0;
+	EXPECT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_OK);
+	EXPECT_EQ(gcr & 1u, 1u);
+}
+
+TEST(DShotCodec, SamplesNoResponse)
+{
+	uint32_t w[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+	uint32_t gcr = 0;
+	EXPECT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_ERR_NO_EDGES);
+	uint32_t z[4] = {0, 0, 0, 0};
+	EXPECT_EQ(dshot_codec_samples_to_gcr(z, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_ERR_NO_EDGES);
+}
+
+TEST(DShotCodec, SamplesGlitchRejected)
+{
+	for (unsigned glitch_samples : {1u, 2u}) {
+		SCOPED_TRACE(glitch_samples);
+		uint32_t w[4];
+		make_window(w, kVector, 100, kSampleCycles, 0);
+
+		// Samples 40 (and 41) lie strictly inside the low run at samples 34..44.
+		for (unsigned k = 40; k < 40 + glitch_samples; ++k) {
+			w[k / 32] ^= 1u << (31 - k % 32);
+		}
+
+		uint32_t gcr = 0;
+		EXPECT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_ERR_RUN_LENGTH);
+	}
+}
+
+TEST(DShotCodec, SamplesTruncated)   // only the first 8 bits, then idle
+{
+	uint32_t w[4];
+	make_window(w, kVector, 100, kSampleCycles, 0);
+	w[1] |= 0x0000FFFFu;
+	w[2] = w[3] = 0xFFFFFFFFu;
+	uint32_t gcr = 0;
+	uint16_t payload = 0;
+	const dshot_codec_result_t r = dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr);
+	EXPECT_TRUE(r != DSHOT_CODEC_OK || dshot_codec_gcr_to_payload(gcr, &payload) != DSHOT_CODEC_OK);
+}
+
+TEST(DShotCodec, SamplesRunCrossesWordBoundary)
+{
+	uint32_t w[4];
+	make_window(w, kVector, 100, kSampleCycles, 0);
+	uint32_t gcr = 0;
+	// High runs 28..33, 62..66 and 95..99 cross boundaries 32, 64 and 96.
+	// Assert the fixture really splits each run across adjacent words.
+	const unsigned starts[] = {28, 62, 95};
+	const unsigned ends[] = {33, 66, 99};
+	auto sample = [&](unsigned k) { return (w[k / 32] >> (31 - k % 32)) & 1u; };
+
+	for (unsigned i = 0; i < 3; ++i) {
+		SCOPED_TRACE(i);
+		ASSERT_LT(starts[i], 32u * (i + 1));
+		ASSERT_GE(ends[i], 32u * (i + 1));
+		ASSERT_EQ(sample(starts[i] - 1), 0u);
+
+		for (unsigned k = starts[i]; k <= ends[i]; ++k) {
+			ASSERT_EQ(sample(k), 1u);
+		}
+
+		ASSERT_EQ(sample(ends[i] + 1), 0u);
+	}
+
+	ASSERT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_OK);
+	EXPECT_EQ(gcr, kVector);
+}
+
+TEST(DShotCodec, SamplesWindowStartsHigh)
+{
+	// The capture starts in the start bit, which is low. A window that starts high is not a response.
+	uint32_t w[4];
+	make_window(w, kVector, 100);
+	w[0] |= 0xC0000000u;
+	uint32_t gcr = 0;
+	EXPECT_NE(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_OK);
+}
+
+TEST(DShotCodec, SamplesOnePulseOnly)
+{
+	// One low pulse of one bit, then idle: a glitch on the line, not a frame
+	uint32_t w[4] = {0x07FFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+	uint32_t gcr = 0;
+	EXPECT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_ERR_BIT_COUNT);
+}
+
+TEST(DShotCodec, SamplesTooManyBits)
+{
+	// A line that toggles each 5 samples (one bit) for the full window has 25 runs: more than 21 bits
+	uint32_t w[4];
+	bool level = false;
+
+	for (unsigned word = 0; word < 4; word++) {
+		w[word] = 0;
+	}
+
+	for (unsigned k = 0; k < kSamples; k++) {
+		if (k % 5 == 0 && k != 0) {
+			level = !level;
+		}
+
+		if (level) {
+			w[k / 32] |= 1u << (31 - k % 32);
+		}
+	}
+
+	uint32_t gcr = 0;
+	EXPECT_EQ(dshot_codec_samples_to_gcr(w, kSampleCycles, kBitCycles, &gcr), DSHOT_CODEC_ERR_BIT_COUNT);
+}
