@@ -1,0 +1,63 @@
+;
+; DShot PIO programs for the PX4 RP2350 DShot backend.
+;
+; From ArduPilot, libraries/AP_HAL_ChibiOS/rp2350/pio/dshot.pio, at
+; https://github.com/davidbuzz/ardupilot commit
+; e45dae01b13a8bd61d9098f4c8b55d43b6cd9f53, which took it from Betaflight,
+; src/platform/PICO/dshot.pio. Regenerate dshot.pio.h with pioasm.sh after
+; editing.
+;
+; Copyright (c) Betaflight contributors.
+; Written by Matthew Selby, with later work by Andy Piper and qqqlab.
+;
+; This program is free software: you can redistribute it and/or modify it
+; under the terms of the GNU General Public License as published by the
+; Free Software Foundation, either version 3 of the License, or (at your
+; option) any later version.
+;
+; This program is distributed in the hope that it will be useful, but WITHOUT
+; ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+; FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+; more details.
+;
+; You should have received a copy of the GNU General Public License along
+; with this program. If not, see <http://www.gnu.org/licenses/>.
+;
+; Local modifications (PX4):
+;
+; - dshot_uni replaces the upstream dshot_600 program. It uses 125 PIO
+;   cycles for each bit, not 40, and the protocol nominal pulse widths
+;   (75 % and 37.5 % of the bit), not 67 % and 33 %. The bit rate is set
+;   by the clock divider only: PIO clock = 125 x bit rate.
+;
+
+; Unidirectional DShot. Idle low, active high.
+;
+; The host writes one 32-bit word for each frame, with the 16-bit frame in
+; the low half. The shift direction is left, so the most significant bit
+; goes out first. Autopull is off and the pull threshold is 32.
+;
+; One bit is 125 cycles:
+;   bit 1: 94 cycles high, 31 cycles low
+;   bit 0: 47 cycles high, 78 cycles low
+; The number at the start of each comment is the instruction index.
+.program dshot_uni
+
+.wrap_target
+PUBLIC pull_data:
+    pull   block                 ; 0  wait for a frame; the line stays low
+    out    y, 16                 ; 1  discard the empty high half
+bitloop:
+    out    y, 1                  ; 2  next bit (1 low cycle of the previous bit)
+    set    pins, 1        [31]   ; 3  32 high
+    jmp    !y, outzero    [14]   ; 4  15 high
+    nop                   [31]   ; 5  32 high
+    nop                   [14]   ; 6  15 high  -> bit 1: 94 high
+    set    pins, 0        [28]   ; 7  29 low
+    jmp    !osre, bitloop        ; 8  1 low + out 1 = 31 low; loop while bits remain
+    jmp    pull_data             ; 9  frame done after a 1
+outzero:
+    set    pins, 0        [31]   ; 10 32 low   (bit 0: 47 high)
+    nop                   [31]   ; 11 32 low
+    jmp    !osre, bitloop [12]   ; 12 13 low + out 1 = 78 low; wraps to pull after the last bit
+.wrap
