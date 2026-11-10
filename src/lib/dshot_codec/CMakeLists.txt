@@ -43,6 +43,7 @@ px4_add_unit_gtest(SRC DShotCodecTest.cpp LINKLIBS dshot_codec)
 # directory is not part of the SITL build, so the test lives here.
 px4_add_unit_gtest(SRC DShotPioProgramTest.cpp
 	INCLUDES ${PX4_SOURCE_DIR}/platforms/nuttx/src/px4/rpi/rpi_common/dshot
+	LINKLIBS dshot_codec
 )
 
 # The RP2350 backend itself, compiled for the host on a model of the PIO block.

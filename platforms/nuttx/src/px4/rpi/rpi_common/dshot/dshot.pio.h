@@ -61,3 +61,50 @@ static const uint16_t dshot_uni_program_instructions[] = {
 	//     .wrap
 };
 
+// ----------- //
+// dshot_bidir //
+// ----------- //
+
+#define dshot_bidir_wrap_target 0
+#define dshot_bidir_wrap 28
+#define dshot_bidir_pio_version 0
+
+#define dshot_bidir_offset_pull_data 0u
+#define dshot_bidir_offset_wait_one 16u
+#define dshot_bidir_offset_wait_zero 18u
+#define dshot_bidir_offset_complete 25u
+
+static const uint16_t dshot_bidir_program_instructions[] = {
+	//     .wrap_target
+	0x80a0, //  0: pull   block
+	0xe081, //  1: set    pindirs, 1
+	0x6050, //  2: out    y, 16
+	0x6041, //  3: out    y, 1
+	0xff00, //  4: set    pins, 0                [31]
+	0x0e6b, //  5: jmp    !y, 11                 [14]
+	0xbf42, //  6: nop                           [31]
+	0xae42, //  7: nop                           [14]
+	0xfc01, //  8: set    pins, 1                [28]
+	0x00e3, //  9: jmp    !osre, 3
+	0x000e, // 10: jmp    14
+	0xff01, // 11: set    pins, 1                [31]
+	0xbf42, // 12: nop                           [31]
+	0x0ce3, // 13: jmp    !osre, 3               [12]
+	0xb442, // 14: nop                           [20]
+	0xe080, // 15: set    pindirs, 0
+	0x20a0, // 16: wait   1 pin, 0
+	0xe023, // 17: set    x, 3
+	0x3020, // 18: wait   0 pin, 0               [16]
+	0xe05f, // 19: set    y, 31
+	0x4e01, // 20: in     pins, 1                [14]
+	0x0098, // 21: jmp    y--, 24
+	0x0053, // 22: jmp    x--, 19
+	0x0019, // 23: jmp    25
+	0x0114, // 24: jmp    20                     [1]
+	0xe081, // 25: set    pindirs, 1
+	0xe001, // 26: set    pins, 1
+	0xe044, // 27: set    y, 4
+	0x1d9c, // 28: jmp    y--, 28                [29]
+	//     .wrap
+};
+

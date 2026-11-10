@@ -50,6 +50,10 @@
 
 #include "dshot.pio.h"
 
+extern "C" {
+#include "dshot_codec.h"
+}
+
 namespace
 {
 
@@ -355,6 +359,117 @@ std::vector<PinEdge> runUniFrame(const uint16_t *program, uint16_t frame, bool *
 	return pio.output_edges;
 }
 
+constexpr unsigned kBidirLength = sizeof(dshot_bidir_program_instructions) / sizeof(uint16_t);
+constexpr unsigned kSampleCycles = 18;           // cycles from one telemetry sample to the next
+constexpr unsigned kSampleCount = 128;
+constexpr unsigned kResponseBitCycles = 100;     // one telemetry bit at the nominal ESC clock
+constexpr uint64_t kTurnaroundCycles = 2250;     // 30 us at 75 MHz: the ESC answers this long after the release
+constexpr unsigned kInterFrameDelayLoops = 5;
+constexpr unsigned kInterFrameLoopCycles = 30;
+constexpr uint32_t kResponseVector = 0x1CDBAD;   // payload 0x064, the vector of DShotCodecTest.cpp
+
+/** The line bits of a telemetry response, from its 21-bit transition word. The start bit is low. */
+std::vector<bool> responseLineBits(uint32_t gcr)
+{
+	std::vector<bool> line(DSHOT_CODEC_FRAME_BITS);
+	line[0] = false;
+
+	for (unsigned i = 0; i + 1 < DSHOT_CODEC_FRAME_BITS; i++) {
+		line[i + 1] = line[i] ^ (((gcr >> (19 - i)) & 1u) != 0);
+	}
+
+	return line;
+}
+
+/** One or more bidirectional transactions on the interpreter, each with an ESC response. */
+struct BidirTrace {
+	PioInterpreter pio;
+	std::vector<uint64_t> release_cycles;    ///< the pin became an input
+	std::vector<uint64_t> response_cycles;   ///< falling edge of the start bit of each response
+	std::vector<uint64_t> reclaim_cycles;    ///< the pin became an output again
+	bool completed{false};
+
+	BidirTrace(const uint16_t *program, const std::vector<uint16_t> &frames, uint32_t response_gcr = kResponseVector) :
+		pio(program, kBidirLength, dshot_bidir_wrap_target, dshot_bidir_wrap)
+	{
+		const std::vector<bool> line = responseLineBits(response_gcr);
+		uint64_t response_edge = UINT64_MAX;
+
+		pio.pin_level = true;   // the backend sets the idle level high
+		pio.pin_is_output = true;
+		pio.line_when_input = [&](uint64_t at) {
+			if (at < response_edge) {
+				return true;   // the pull-up holds the released line high
+			}
+
+			const uint64_t bit = (at - response_edge) / kResponseBitCycles;
+			return bit < line.size() ? static_cast<bool>(line[bit]) : true;
+		};
+
+		for (uint16_t frame : frames) {
+			pio.tx_fifo.push_back(frame);
+		}
+
+		for (size_t i = 0; i < frames.size(); i++) {
+			if (!runUntilDirection(false)) {
+				return;
+			}
+
+			release_cycles.push_back(pio.direction_edges.back().cycle);
+			response_edge = release_cycles.back() + kTurnaroundCycles;
+			response_cycles.push_back(response_edge);
+
+			if (!runUntilDirection(true)) {
+				return;
+			}
+
+			reclaim_cycles.push_back(pio.direction_edges.back().cycle);
+		}
+
+		completed = pio.runUntilIdle(kFrameCycleBudget) && !pio.unsupported;
+	}
+
+private:
+	bool runUntilDirection(bool output)
+	{
+		const uint64_t end = pio.cycle + kFrameCycleBudget;
+
+		while (pio.pin_is_output != output) {
+			if (pio.cycle >= end || pio.unsupported) {
+				return false;
+			}
+
+			pio.run(1);
+		}
+
+		return true;
+	}
+};
+
+/** Check that each telemetry sample is 18 cycles after the one before, and the first 18 cycles after the edge. */
+::testing::AssertionResult sampleTimesAreCorrect(const std::vector<uint64_t> &samples, uint64_t response_edge)
+{
+	if (samples.size() != kSampleCount) {
+		return ::testing::AssertionFailure() << "expected " << kSampleCount << " samples, got " << samples.size();
+	}
+
+	for (unsigned k = 0; k < kSampleCount; k++) {
+		const uint64_t expected = response_edge + kSampleCycles + k * kSampleCycles;
+
+		if (samples[k] != expected) {
+			return ::testing::AssertionFailure() << "sample " << k << " at cycle " << (samples[k] - response_edge)
+			       << " after the edge, expected " << (expected - response_edge);
+		}
+	}
+
+	return ::testing::AssertionSuccess();
+}
+
+std::vector<uint16_t> copyOfBidirProgram()
+{
+	return std::vector<uint16_t>(dshot_bidir_program_instructions, dshot_bidir_program_instructions + kBidirLength);
+}
+
 } // namespace
 
 TEST(DShotPioProgram, UniFirstInstructionIsPullBlock)
@@ -398,4 +513,112 @@ TEST(DShotPioProgram, TransmitTiming)
 	const std::vector<PinEdge> edges = runUniFrame(mutated, 0xAAAA, &completed);
 	ASSERT_TRUE(completed);
 	EXPECT_FALSE(transmitTraceIsCorrect(edges, 0xAAAA, true));
+
+	// The bidirectional program: the same widths with the levels inverted
+	for (uint16_t frame : kTimingFrames) {
+		SCOPED_TRACE(::testing::Message() << "dshot_bidir frame=0x" << std::hex << frame);
+		const BidirTrace trace(dshot_bidir_program_instructions, {frame});
+		ASSERT_TRUE(trace.completed);
+		EXPECT_TRUE(transmitTraceIsCorrect(trace.pio.output_edges, frame, false));
+		// Idle high after the frame, and the pin is released before the ESC answers
+		ASSERT_FALSE(trace.pio.output_edges.empty());
+		EXPECT_TRUE(trace.pio.output_edges.back().level);
+		ASSERT_EQ(trace.release_cycles.size(), 1u);
+		EXPECT_GT(trace.release_cycles[0], trace.pio.output_edges.back().cycle);
+		EXPECT_LT(trace.release_cycles[0], trace.response_cycles[0]);
+	}
+
+	std::vector<uint16_t> mutated_bidir = copyOfBidirProgram();
+	mutated_bidir[4] = static_cast<uint16_t>(mutated_bidir[4] - 0x0100);   // `set pins, 0 [31]` -> `[30]`
+	const BidirTrace mutated_trace(mutated_bidir.data(), {0xAAAA});
+	ASSERT_TRUE(mutated_trace.completed);
+	EXPECT_FALSE(transmitTraceIsCorrect(mutated_trace.pio.output_edges, 0xAAAA, false));
+}
+
+TEST(DShotPioProgram, Layout)
+{
+	EXPECT_EQ(kBidirLength, 29u);
+	EXPECT_EQ(dshot_bidir_wrap_target, 0);
+	EXPECT_EQ(dshot_bidir_wrap, 28);
+	EXPECT_EQ(dshot_bidir_offset_pull_data, 0u);
+	EXPECT_EQ(dshot_bidir_offset_wait_one, 16u);
+	EXPECT_EQ(dshot_bidir_offset_wait_zero, 18u);
+	EXPECT_EQ(dshot_bidir_offset_complete, 25u);
+}
+
+TEST(DShotPioProgram, FirstInstructionIsPullBlock)
+{
+	EXPECT_EQ(dshot_bidir_program_instructions[0], 0x80a0);
+}
+
+TEST(DShotPioProgram, WaitsAreOnPinZero)
+{
+	EXPECT_EQ(dshot_bidir_program_instructions[dshot_bidir_offset_wait_one], 0x20a0);    // wait 1 pin 0
+	EXPECT_EQ(dshot_bidir_program_instructions[dshot_bidir_offset_wait_zero], 0x3020);   // wait 0 pin 0 [16]
+}
+
+TEST(DShotPioProgram, ReceiveSampleTiming)
+{
+	const BidirTrace trace(dshot_bidir_program_instructions, {0x82C9});
+	ASSERT_TRUE(trace.completed);
+	ASSERT_EQ(trace.response_cycles.size(), 1u);
+
+	// 128 samples: the first 18 cycles after the falling edge, then one each 18 cycles, also across
+	// the word boundaries (samples 31/32, 63/64 and 95/96). This is the time model of the codec
+	// fixture (first_sample_cycles = 18, sample_cycles = 18). It does not include the GPIO
+	// input synchroniser.
+	EXPECT_TRUE(sampleTimesAreCorrect(trace.pio.sample_cycles, trace.response_cycles[0]));
+
+	// The pin is an input from before the response to after the last sample
+	ASSERT_EQ(trace.reclaim_cycles.size(), 1u);
+	EXPECT_LT(trace.release_cycles[0], trace.response_cycles[0]);
+	ASSERT_FALSE(trace.pio.sample_cycles.empty());
+	EXPECT_GT(trace.reclaim_cycles[0], trace.pio.sample_cycles.back());
+
+	// The four words in the RX FIFO decode to the response that was on the line
+	ASSERT_EQ(trace.pio.rx_fifo.size(), (size_t)DSHOT_CODEC_SAMPLE_WORDS);
+	uint32_t gcr = 0;
+	uint16_t payload = 0;
+	ASSERT_EQ(dshot_codec_samples_to_gcr(trace.pio.rx_fifo.data(), kSampleCycles, kResponseBitCycles, &gcr), DSHOT_CODEC_OK);
+	EXPECT_EQ(gcr, kResponseVector);
+	ASSERT_EQ(dshot_codec_gcr_to_payload(gcr, &payload), DSHOT_CODEC_OK);
+	EXPECT_EQ(payload, 0x064);
+
+	// Mutation check: a changed delay in the sample loop must be seen
+	std::vector<uint16_t> mutated = copyOfBidirProgram();
+	mutated[20] = static_cast<uint16_t>(mutated[20] - 0x0100);   // `in pins, 1 [14]` -> `[13]`
+	const BidirTrace mutated_trace(mutated.data(), {0x82C9});
+	ASSERT_TRUE(mutated_trace.completed);
+	EXPECT_FALSE(sampleTimesAreCorrect(mutated_trace.pio.sample_cycles, mutated_trace.response_cycles[0]));
+}
+
+TEST(DShotPioProgram, InterFrameDelayTiming)
+{
+	const BidirTrace trace(dshot_bidir_program_instructions, {0x82C9, 0x5555});
+	ASSERT_TRUE(trace.completed);
+	ASSERT_EQ(trace.reclaim_cycles.size(), 2u);
+
+	// After each capture the delay loop runs five times, 30 cycles each: 150 cycles = 2 us at 75 MHz
+	const std::vector<uint64_t> &loops = trace.pio.delay_loop_cycles;
+	ASSERT_EQ(loops.size(), 2u * kInterFrameDelayLoops);
+
+	for (unsigned i = 1; i < kInterFrameDelayLoops; i++) {
+		EXPECT_EQ(loops[i] - loops[i - 1], kInterFrameLoopCycles);
+	}
+
+	// The loop starts after `set pindirs`, `set pins` and `set y, 4`
+	EXPECT_EQ(loops[0] - trace.reclaim_cycles[0], 3u);
+
+	// The full interval from the pin reclaim to the first active edge of the next frame is longer than
+	// the delay loop: 3 instructions before it, then `pull`, `set pindirs`, `out y, 16` and `out y, 1`.
+	const uint64_t second_frame_start = trace.pio.output_edges[2 * kFrameBits].cycle;
+	EXPECT_EQ(second_frame_start - trace.reclaim_cycles[0], 3u + kInterFrameDelayLoops * kInterFrameLoopCycles + 4u);
+
+	// The line is driven high for all of that interval
+	EXPECT_FALSE(trace.pio.output_edges[2 * kFrameBits].level);
+	EXPECT_TRUE(trace.pio.output_edges[2 * kFrameBits - 1].level);
+
+	// The second frame is correct too
+	const std::vector<PinEdge> second(trace.pio.output_edges.begin() + 2 * kFrameBits, trace.pio.output_edges.end());
+	EXPECT_TRUE(transmitTraceIsCorrect(second, 0x5555, false));
 }
