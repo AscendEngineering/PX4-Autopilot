@@ -58,13 +58,21 @@ constexpr uint32_t kAllChannels = 0xF;
 constexpr unsigned kChannelCount = 4;
 constexpr unsigned kRate600 = 600000;
 constexpr unsigned kUniLength = sizeof(dshot_uni_program_instructions) / sizeof(uint16_t);
+constexpr unsigned kBidirLength = sizeof(dshot_bidir_program_instructions) / sizeof(uint16_t);
+// One bidirectional transaction at 600 kbit/s: frame 27 us + turnaround 30 us + capture window 31 us + margin 50 us
+constexpr hrt_abstime kTransactionUs600 = 138;
+constexpr hrt_abstime kStartTime = 1000000;
 constexpr unsigned kInstructionSlots = 32;
 const unsigned kGpio[kChannelCount] = {9, 8, 7, 6};   // M1 to M4
 
 class DShotBackend : public ::testing::Test
 {
 protected:
-	void SetUp() override { dshot_fake_reset(); }
+	void SetUp() override
+	{
+		dshot_fake_reset();
+		g_dshot_fake.now = kStartTime;
+	}
 
 	void TearDown() override
 	{
@@ -133,6 +141,57 @@ protected:
 			dshot_motor_data_set(ch, value, false);
 		}
 	}
+
+	/** Init and arm all four channels in one mode. */
+	static void startAll(bool bidirectional)
+	{
+		ASSERT_EQ(up_dshot_init(kAllChannels, bidirectional ? kAllChannels : 0, kRate600, false), (int)kAllChannels);
+		up_dshot_arm(true);
+	}
+
+	/** A disarm gives the pads back as inputs at the idle level and sends nothing that is old. */
+	static void checkArmFalseReleasesPads(bool bidirectional)
+	{
+		startAll(bidirectional);
+		stageAll(DSHOT_CMD_MIN_THROTTLE + 500);
+		up_dshot_trigger();
+		ASSERT_EQ(g_dshot_fake.sm[0].put_count, 1u);
+
+		EXPECT_EQ(up_dshot_arm(false), 0);
+
+		EXPECT_FALSE(anyEnabled());
+
+		for (unsigned ch = 0; ch < kChannelCount; ch++) {
+			SCOPED_TRACE(::testing::Message() << "channel " << ch);
+			const dshot_fake_pad_t &pad = g_dshot_fake.pad[kGpio[ch]];
+			EXPECT_EQ(pad.function, (uint32_t)RPI_GPIO_FUNC_SIO);   // the PIO block no longer drives the pad
+			EXPECT_FALSE(pad.sio_output);                           // an input
+			EXPECT_EQ(pad.pull_down, !bidirectional);               // at the idle level
+			EXPECT_EQ(pad.pull_up, bidirectional);
+		}
+
+		for (const dshot_fake_sm_t &sm : g_dshot_fake.sm) {
+			EXPECT_EQ(sm.tx_level, 0u);   // the queued frame is gone
+		}
+
+		// No output while disarmed
+		g_dshot_fake.now += 10 * kTransactionUs600;
+		stageAll(DSHOT_CMD_MIN_THROTTLE + 600);
+		up_dshot_trigger();
+		EXPECT_EQ(g_dshot_fake.sm[0].put_count, 1u);
+
+		// After the next arm nothing goes out until the module stages a new frame
+		up_dshot_arm(true);
+		EXPECT_EQ(g_dshot_fake.pad[kGpio[0]].function, (uint32_t)RP23XX_GPIO_FUNC_PIO0);
+		up_dshot_trigger();
+		EXPECT_EQ(g_dshot_fake.sm[0].put_count, 1u);
+
+		const uint16_t value = DSHOT_CMD_MIN_THROTTLE + 700;
+		stageAll(value);
+		up_dshot_trigger();
+		ASSERT_EQ(g_dshot_fake.sm[0].put_count, 2u);
+		EXPECT_EQ(g_dshot_fake.sm[0].put_log[1], (uint32_t)dshot_codec_encode(value, false, bidirectional));
+	}
 };
 
 } // namespace
@@ -197,11 +256,93 @@ TEST_F(DShotBackend, InitRejectsBadRate)
 	EXPECT_EQ(g_dshot_fake.error_count, 1u);
 }
 
-TEST_F(DShotBackend, InitRejectsBdshot)
+TEST_F(DShotBackend, InitRejectsMixedModes)
 {
-	EXPECT_LT(up_dshot_init(kAllChannels, kAllChannels, kRate600, false), 0);
+	// The two PIO programs do not fit in one block: all the outputs are DShot, or all are BDShot
+	EXPECT_EQ(up_dshot_init(kAllChannels, 0x3, kRate600, false), -EINVAL);
 	expectNothingHeld();
 	EXPECT_EQ(g_dshot_fake.error_count, 1u);
+}
+
+TEST_F(DShotBackend, InitBidirectional)
+{
+	EXPECT_EQ(up_dshot_init(kAllChannels, kAllChannels, kRate600, false), (int)kAllChannels);
+
+	EXPECT_EQ(g_dshot_fake.program_add_count, 1u);
+	EXPECT_EQ(g_dshot_fake.loaded_program_length, kBidirLength);
+	EXPECT_EQ(claimedCount(), kChannelCount);
+	EXPECT_FALSE(anyEnabled());
+	EXPECT_EQ(g_dshot_fake.error_count, 0u);
+
+	const unsigned offset = kInstructionSlots - kBidirLength;
+
+	for (unsigned ch = 0; ch < kChannelCount; ch++) {
+		SCOPED_TRACE(::testing::Message() << "channel " << ch);
+		const unsigned gpio = kGpio[ch];
+		const dshot_fake_pad_t &pad = g_dshot_fake.pad[gpio];
+		EXPECT_EQ(pad.function, (uint32_t)RP23XX_GPIO_FUNC_PIO0);
+		EXPECT_TRUE(pad.pull_up);     // holds the line high when the pin is released for the response
+		EXPECT_FALSE(pad.pull_down);
+		EXPECT_TRUE(pad.hysteresis);
+		// Driven high: the idle level of bidirectional DShot
+		EXPECT_NE(g_dshot_fake.pin_level & (1u << gpio), 0u);
+		EXPECT_NE(g_dshot_fake.pin_dir & (1u << gpio), 0u);
+	}
+
+	for (const dshot_fake_sm_t &sm : g_dshot_fake.sm) {
+		EXPECT_EQ(sm.pc, offset + dshot_bidir_offset_pull_data);
+		EXPECT_EQ(sm.config.wrap_target, offset + dshot_bidir_wrap_target);
+		EXPECT_EQ(sm.config.wrap, offset + dshot_bidir_wrap);
+		EXPECT_EQ(sm.config.in_base, sm.config.set_base);   // the response comes on the pin that sends
+		EXPECT_FALSE(sm.config.in_shift_right);             // the first sample is the most significant bit
+		EXPECT_TRUE(sm.config.autopush);
+		EXPECT_EQ(sm.config.push_threshold, 32u);
+		EXPECT_EQ(sm.config.clkdiv_int, 2u);
+	}
+
+	// Each bidirectional channel can give telemetry
+	for (unsigned ch = 0; ch < kChannelCount; ch++) {
+		EXPECT_EQ(up_bdshot_channel_capture_supported(ch), 1);
+	}
+}
+
+TEST_F(DShotBackend, UnidirectionalHasNoCapture)
+{
+	startAll(false);
+
+	for (unsigned ch = 0; ch < kChannelCount; ch++) {
+		EXPECT_EQ(up_bdshot_channel_capture_supported(ch), 0);
+	}
+}
+
+TEST_F(DShotBackend, BidirMotorStopFrame)
+{
+	startAll(true);
+	stageAll(0);
+	up_dshot_trigger();
+
+	for (const dshot_fake_sm_t &sm : g_dshot_fake.sm) {
+		ASSERT_EQ(sm.put_count, 1u);
+		EXPECT_EQ(sm.put_log[0], 0x000Fu);   // the checksum is inverted
+	}
+}
+
+TEST_F(DShotBackend, TriggerHoldsOffDuringTransaction)
+{
+	startAll(true);
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 100);
+	up_dshot_trigger();
+	ASSERT_EQ(g_dshot_fake.sm[0].put_count, 1u);
+	ASSERT_TRUE(dshot_fake_tx_pop(0, nullptr));   // the state machine took the frame: the FIFO is not full
+
+	// The ESC can drive the line until the end of the transaction: no new frame before that
+	g_dshot_fake.now += kTransactionUs600 - 1;
+	up_dshot_trigger();
+	EXPECT_EQ(g_dshot_fake.sm[0].put_count, 1u);
+
+	g_dshot_fake.now += 1;
+	up_dshot_trigger();
+	EXPECT_EQ(g_dshot_fake.sm[0].put_count, 2u);
 }
 
 TEST_F(DShotBackend, InitRejectsBlockWithoutAllocator)
@@ -260,6 +401,15 @@ TEST_F(DShotBackend, InitSkipsForeignChannels)
 	EXPECT_EQ(claimedCount(), 2u);
 	EXPECT_EQ(g_dshot_fake.pad[7].config_count, 0u);
 	EXPECT_EQ(g_dshot_fake.pad[6].config_count, 0u);
+}
+
+TEST_F(DShotBackend, InitIgnoresUnsetChannels)
+{
+	// The channel table is longer than the number of outputs of the board. An entry that is not
+	// set is all zero: it must not be read as GPIO0 on timer 0.
+	EXPECT_EQ(up_dshot_init(0x3F, 0, kRate600, false), (int)kAllChannels);
+	EXPECT_EQ(claimedCount(), kChannelCount);
+	EXPECT_EQ(g_dshot_fake.pad[0].config_count, 0u);
 }
 
 TEST_F(DShotBackend, InitNoUsableChannel)
@@ -342,45 +492,12 @@ TEST_F(DShotBackend, TriggerSkipsFullFifo)
 
 TEST_F(DShotBackend, ArmFalseReleasesPads)
 {
-	ASSERT_EQ(up_dshot_init(kAllChannels, 0, kRate600, false), (int)kAllChannels);
-	up_dshot_arm(true);
-	stageAll(DSHOT_CMD_MIN_THROTTLE + 500);
-	up_dshot_trigger();
-	ASSERT_EQ(g_dshot_fake.sm[0].put_count, 1u);
+	checkArmFalseReleasesPads(false);
+}
 
-	EXPECT_EQ(up_dshot_arm(false), 0);
-
-	EXPECT_FALSE(anyEnabled());
-
-	for (unsigned ch = 0; ch < kChannelCount; ch++) {
-		SCOPED_TRACE(::testing::Message() << "channel " << ch);
-		const dshot_fake_pad_t &pad = g_dshot_fake.pad[kGpio[ch]];
-		EXPECT_EQ(pad.function, (uint32_t)RPI_GPIO_FUNC_SIO);   // the PIO block no longer drives the pad
-		EXPECT_FALSE(pad.sio_output);                           // an input
-		EXPECT_TRUE(pad.pull_down);                             // at the idle level
-		EXPECT_FALSE(pad.pull_up);
-	}
-
-	for (const dshot_fake_sm_t &sm : g_dshot_fake.sm) {
-		EXPECT_EQ(sm.tx_level, 0u);   // the queued frame is gone
-	}
-
-	// No output while disarmed
-	stageAll(DSHOT_CMD_MIN_THROTTLE + 600);
-	up_dshot_trigger();
-	EXPECT_EQ(g_dshot_fake.sm[0].put_count, 1u);
-
-	// After the next arm nothing goes out until the module stages a new frame
-	up_dshot_arm(true);
-	EXPECT_EQ(g_dshot_fake.pad[kGpio[0]].function, (uint32_t)RP23XX_GPIO_FUNC_PIO0);
-	up_dshot_trigger();
-	EXPECT_EQ(g_dshot_fake.sm[0].put_count, 1u);
-
-	const uint16_t value = DSHOT_CMD_MIN_THROTTLE + 700;
-	stageAll(value);
-	up_dshot_trigger();
-	ASSERT_EQ(g_dshot_fake.sm[0].put_count, 2u);
-	EXPECT_EQ(g_dshot_fake.sm[0].put_log[1], (uint32_t)dshot_codec_encode(value, false, false));
+TEST_F(DShotBackend, ArmFalseReleasesPadsBidirectional)
+{
+	checkArmFalseReleasesPads(true);
 }
 
 TEST_F(DShotBackend, ReinitReleasesFirst)

@@ -65,7 +65,8 @@ extern "C" {
 #define BOARD_SYS_FREQ          150000000u
 
 #define MAX_IO_TIMERS           2
-#define MAX_TIMER_IO_CHANNELS   4
+#define MAX_TIMER_IO_CHANNELS   6   /* the board has four outputs: the last two entries are not set */
+#define DSHOT_FAKE_BOARD_CHANNELS 4
 #define DSHOT_PIO_NONE          0xff
 
 #define GPIO_PU                 (1 << 6)

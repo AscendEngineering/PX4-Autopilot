@@ -92,6 +92,17 @@
 #define DSHOT_PIO_WORD_BITS         32u
 #define DSHOT_PIN_COUNT             1u
 
+/*
+ * One bidirectional transaction: the frame, the turnaround of the ESC, the
+ * capture window of the PIO program (128 samples of 18 PIO cycles) and a
+ * margin. The ESC can drive the line until the end of it.
+ */
+#define DSHOT_FRAME_BITS            16u
+#define DSHOT_TURNAROUND_US         30u
+#define DSHOT_CAPTURE_PIO_CYCLES    2304u
+#define DSHOT_TRANSACTION_MARGIN_US 50u
+#define DSHOT_US_PER_S              1000000ull
+
 #define DSHOT_ARRAY_SIZE(a)         (sizeof(a) / sizeof((a)[0]))
 
 /* The clock divider has no fraction: the bit period must be exact */
@@ -119,6 +130,7 @@ static bool _program_loaded;
 static uint32_t _program_offset;
 static bool _bidir;                      /* direction mode, the same for all the channels */
 static unsigned _rate;                   /* bit/s */
+static hrt_abstime _transaction_us;      /* length of one bidirectional transaction */
 static bool _armed;
 
 /* Pull of the idle level: the line keeps this level when nothing drives it */
@@ -130,6 +142,28 @@ static uint32_t pad_idle_pull(void)
 static uint32_t pio_gpio_function(uint32_t pio)
 {
 	return (pio == 0) ? RP23XX_GPIO_FUNC_PIO0 : RP23XX_GPIO_FUNC_PIO1;
+}
+
+/* Division that rounds up */
+static uint32_t div_ceil(uint64_t numerator, uint64_t denominator)
+{
+	return (uint32_t)((numerator + denominator - 1u) / denominator);
+}
+
+/* Wrap addresses and entry point of the loaded program, without the load offset */
+static uint32_t program_wrap_target(void)
+{
+	return _bidir ? dshot_bidir_wrap_target : dshot_uni_wrap_target;
+}
+
+static uint32_t program_wrap(void)
+{
+	return _bidir ? dshot_bidir_wrap : dshot_uni_wrap;
+}
+
+static uint32_t program_entry(void)
+{
+	return _bidir ? dshot_bidir_offset_pull_data : dshot_uni_offset_pull_data;
 }
 
 /* Mask of the state machines in the given state */
@@ -162,7 +196,7 @@ static void channel_start(dshot_channel_t *channel)
 	const uint32_t pin_bit = 1u << channel->gpio;
 
 	rp23xx_pio_sm_config config = rp23xx_pio_get_default_sm_config();
-	rp23xx_sm_config_set_wrap(&config, _program_offset + dshot_uni_wrap_target, _program_offset + dshot_uni_wrap);
+	rp23xx_sm_config_set_wrap(&config, _program_offset + program_wrap_target(), _program_offset + program_wrap());
 	rp23xx_sm_config_set_set_pins(&config, channel->gpio, DSHOT_PIN_COUNT);
 	rp23xx_sm_config_set_out_pins(&config, channel->gpio, DSHOT_PIN_COUNT);
 	rp23xx_sm_config_set_in_pins(&config, channel->gpio);
@@ -171,7 +205,7 @@ static void channel_start(dshot_channel_t *channel)
 	rp23xx_sm_config_set_in_shift(&config, false, true, DSHOT_PIO_WORD_BITS);
 	rp23xx_sm_config_set_clkdiv_int_frac(&config, (uint16_t)(BOARD_SYS_FREQ / (DSHOT_PIO_CYCLES_PER_BIT * _rate)), 0);
 
-	rp23xx_pio_sm_init(_pio, channel->sm, _program_offset + dshot_uni_offset_pull_data, &config);
+	rp23xx_pio_sm_init(_pio, channel->sm, _program_offset + program_entry(), &config);
 
 	/* The level first, then the direction, then the pad: the line does not go to the active level */
 	rp23xx_pio_sm_set_pins_with_mask(_pio, channel->sm, _bidir ? pin_bit : 0, pin_bit);
@@ -227,12 +261,13 @@ int up_dshot_init(uint32_t channel_mask, uint32_t bdshot_channel_mask, unsigned 
 		return -EINVAL;
 	}
 
-	if (bdshot_channel_mask != 0) {
-		PX4_ERR("BDShot is not supported yet");
+	/* The two PIO programs do not fit in one block together */
+	if (bdshot_channel_mask != 0 && bdshot_channel_mask != channel_mask) {
+		PX4_ERR("all DShot outputs must share one mode, DShot or BDShot");
 		return -EINVAL;
 	}
 
-	_bidir = false;
+	_bidir = (bdshot_channel_mask != 0);
 
 	/* Find the channels that DShot can use */
 	uint32_t usable = 0;
@@ -242,7 +277,8 @@ int up_dshot_init(uint32_t channel_mask, uint32_t bdshot_channel_mask, unsigned 
 		const uint32_t bit = 1u << ch;
 		const uint8_t timer_index = timer_io_channels[ch].timer_index;
 
-		if ((channel_mask & bit) == 0 || timer_index >= MAX_IO_TIMERS) {
+		/* An entry of the board table that is not set is all zero: it has no GPIO */
+		if ((channel_mask & bit) == 0 || timer_io_channels[ch].gpio_out == 0 || timer_index >= MAX_IO_TIMERS) {
 			continue;
 		}
 
@@ -281,8 +317,15 @@ int up_dshot_init(uint32_t channel_mask, uint32_t bdshot_channel_mask, unsigned 
 	}
 
 	/* Claim the program memory and the state machines before a pad or a state machine changes */
-	_program.instructions = dshot_uni_program_instructions;
-	_program.length = DSHOT_ARRAY_SIZE(dshot_uni_program_instructions);
+	if (_bidir) {
+		_program.instructions = dshot_bidir_program_instructions;
+		_program.length = DSHOT_ARRAY_SIZE(dshot_bidir_program_instructions);
+
+	} else {
+		_program.instructions = dshot_uni_program_instructions;
+		_program.length = DSHOT_ARRAY_SIZE(dshot_uni_program_instructions);
+	}
+
 	_program.origin = -1;
 
 	if (!rp23xx_pio_can_add_program(_pio, &_program)) {
@@ -312,6 +355,9 @@ int up_dshot_init(uint32_t channel_mask, uint32_t bdshot_channel_mask, unsigned 
 	}
 
 	_rate = dshot_pwm_freq;
+	_transaction_us = div_ceil(DSHOT_FRAME_BITS * DSHOT_US_PER_S, _rate) + DSHOT_TURNAROUND_US
+			  + div_ceil(DSHOT_CAPTURE_PIO_CYCLES * DSHOT_US_PER_S, (uint64_t)DSHOT_PIO_CYCLES_PER_BIT * _rate)
+			  + DSHOT_TRANSACTION_MARGIN_US;
 
 	for (unsigned ch = 0; ch < DSHOT_ARRAY_SIZE(_channels); ch++) {
 		if (_channels[ch].claimed) {
@@ -345,6 +391,14 @@ void up_dshot_trigger(void)
 		if (!channel->init || !channel->staged) {
 			continue;
 		}
+
+		/* The ESC can still drive the line: do not start a new frame */
+		if (_bidir && channel->in_flight && now - channel->tx_started < _transaction_us) {
+			channel->tx_skipped++;
+			continue;
+		}
+
+		channel->in_flight = false;
 
 		/* A full FIFO: the control loop is faster than the line. Drop the frame, do not queue it. */
 		if (rp23xx_pio_sm_is_tx_fifo_full(_pio, channel->sm)) {
@@ -414,7 +468,6 @@ void up_bdshot_status(void)
 		const dshot_channel_t *channel = &_channels[ch];
 
 		if (!channel->init) {
-			PX4_INFO("Channel %u: not init", ch);
 			continue;
 		}
 
@@ -425,13 +478,27 @@ void up_bdshot_status(void)
 }
 
 /*
- * Bidirectional DShot is not in this backend yet. The module is never
- * blocked: no channel has a capture, and each one is reported as ready.
+ * The capture of the response is not in this backend yet. The module waits
+ * for the ready bit of each bidirectional channel, thus each one is always
+ * reported as ready, with no new eRPM.
  */
+
+static bool channel_is_bidirectional(uint8_t channel)
+{
+	return _bidir && channel < DSHOT_ARRAY_SIZE(_channels) && _channels[channel].init;
+}
 
 uint16_t up_bdshot_get_ready_mask(void)
 {
-	return 0;
+	uint16_t mask = 0;
+
+	for (unsigned ch = 0; ch < DSHOT_ARRAY_SIZE(_channels); ch++) {
+		if (channel_is_bidirectional((uint8_t)ch)) {
+			mask |= (uint16_t)(1u << ch);
+		}
+	}
+
+	return mask;
 }
 
 int up_bdshot_num_errors(uint8_t channel)
@@ -456,5 +523,5 @@ int up_bdshot_channel_online(uint8_t channel)
 
 int up_bdshot_channel_capture_supported(uint8_t channel)
 {
-	return 0;
+	return channel_is_bidirectional(channel) ? 1 : 0;
 }

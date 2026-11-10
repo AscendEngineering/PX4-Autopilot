@@ -74,15 +74,17 @@ void dshot_fake_reset(void)
 	g_dshot_fake.pio_used = 0xff;
 
 	/* The RPI-UAVFC-R4: M1 to M4 on GPIO9, 8, 7, 6; timer 0 has M3 and M4, timer 1 has M1 and M2 */
-	static const uint8_t gpio[MAX_TIMER_IO_CHANNELS] = {9, 8, 7, 6};
-	static const uint8_t timer[MAX_TIMER_IO_CHANNELS] = {1, 1, 0, 0};
+	static const uint8_t gpio[DSHOT_FAKE_BOARD_CHANNELS] = {9, 8, 7, 6};
+	static const uint8_t timer[DSHOT_FAKE_BOARD_CHANNELS] = {1, 1, 0, 0};
+
+	memset(timer_io_channels, 0, sizeof(timer_io_channels));
 
 	for (unsigned i = 0; i < MAX_IO_TIMERS; i++) {
 		io_timers[i].base = 0x400a8000u + i;
 		io_timers[i].dshot.pio = 0;
 	}
 
-	for (unsigned ch = 0; ch < MAX_TIMER_IO_CHANNELS; ch++) {
+	for (unsigned ch = 0; ch < DSHOT_FAKE_BOARD_CHANNELS; ch++) {
 		timer_io_channels[ch].gpio_out = gpio[ch] | GPIO_FUN(RPI_GPIO_FUNC_PWM);
 		timer_io_channels[ch].gpio_in = timer_io_channels[ch].gpio_out;
 		timer_io_channels[ch].timer_index = timer[ch];
