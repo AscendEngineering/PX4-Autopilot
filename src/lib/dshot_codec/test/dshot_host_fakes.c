@@ -144,7 +144,9 @@ void dshot_fake_log(bool is_error, const char *fmt, ...)
 
 hrt_abstime hrt_absolute_time(void)
 {
-	return g_dshot_fake.now;
+	const hrt_abstime now = g_dshot_fake.now;
+	g_dshot_fake.now += g_dshot_fake.now_step;
+	return now;
 }
 
 uint32_t getreg32(uint32_t address)

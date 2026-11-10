@@ -19,7 +19,8 @@
 
 - `dshot_uni` replaces the upstream `dshot_600` program. It uses 125 PIO
   cycles for each bit, not 40, and the protocol nominal pulse widths, not
-  67 % and 33 %. The clock divider sets the bit rate.
+  67 % and 33 %. The clock divider sets the bit rate. After a frame it holds
+  the line low for 250 cycles (two bit times) before the next frame.
 - `dshot_bidir` is the upstream `dshot_600_bidir` program with these changes:
   - The name. The clock divider sets the bit rate.
   - The transmit delays give the protocol nominal pulse widths (94 and 47

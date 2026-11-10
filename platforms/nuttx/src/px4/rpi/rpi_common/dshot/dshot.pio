@@ -28,7 +28,9 @@
 ; - dshot_uni replaces the upstream dshot_600 program. It uses 125 PIO
 ;   cycles for each bit, not 40, and the protocol nominal pulse widths
 ;   (75 % and 37.5 % of the bit), not 67 % and 33 %. The bit rate is set
-;   by the clock divider only: PIO clock = 125 x bit rate.
+;   by the clock divider only: PIO clock = 125 x bit rate. After a frame
+;   it holds the line low for 250 cycles (two bit times), thus two frames
+;   in the FIFO do not go out back to back.
 ; - dshot_bidir is the upstream dshot_600_bidir program with these changes:
 ;   - The name. The clock divider sets the bit rate.
 ;   - The transmit delays give the protocol nominal pulse widths (94 and
@@ -48,6 +50,9 @@
 ; One bit is 125 cycles:
 ;   bit 1: 94 cycles high, 31 cycles low
 ;   bit 0: 47 cycles high, 78 cycles low
+; After the last bit the line stays low for 250 cycles more, two bit times,
+; before the next frame can start. An ESC finds the start of a frame by the
+; gap before it.
 ; The number at the start of each comment is the instruction index.
 .program dshot_uni
 
@@ -63,11 +68,15 @@ bitloop:
     nop                   [14]   ; 6  15 high  -> bit 1: 94 high
     set    pins, 0        [28]   ; 7  29 low
     jmp    !osre, bitloop        ; 8  1 low + out 1 = 31 low; loop while bits remain
-    jmp    pull_data             ; 9  frame done after a 1
+    jmp    frame_gap             ; 9  frame done after a 1
 outzero:
     set    pins, 0        [31]   ; 10 32 low   (bit 0: 47 high)
     nop                   [31]   ; 11 32 low
-    jmp    !osre, bitloop [12]   ; 12 13 low + out 1 = 78 low; wraps to pull after the last bit
+    jmp    !osre, bitloop [12]   ; 12 13 low + out 1 = 78 low; falls through after the last bit
+frame_gap:
+    set    y, 9                  ; 13
+gap_loop:
+    jmp    y--, gap_loop  [24]   ; 14 10 x 25 = 250 cycles low before the next frame
 .wrap
 
 

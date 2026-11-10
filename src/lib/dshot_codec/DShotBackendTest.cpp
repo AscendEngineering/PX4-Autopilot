@@ -62,6 +62,8 @@ constexpr unsigned kUniLength = sizeof(dshot_uni_program_instructions) / sizeof(
 constexpr unsigned kBidirLength = sizeof(dshot_bidir_program_instructions) / sizeof(uint16_t);
 // One bidirectional transaction at 600 kbit/s: frame 27 us + turnaround 30 us + capture window 31 us + margin 50 us
 constexpr hrt_abstime kTransactionUs600 = 138;
+// One unidirectional frame with its gap at 600 kbit/s: 16 bits + 2 bit times, 31 us
+constexpr hrt_abstime kUniFrameUs600 = 31;
 constexpr hrt_abstime kStartTime = 1000000;
 constexpr hrt_abstime kControlPeriodUs = 2500;   // a 400 Hz control loop
 constexpr unsigned kOnlineCount = 200;           // good or bad attempts in a row that change the online state
@@ -409,7 +411,7 @@ TEST_F(DShotBackend, InitRejectsBlockWithoutAllocator)
 
 TEST_F(DShotBackend, InitNoInstructionMemory)
 {
-	const uint32_t in_use = 0x000FFFFFu;   // 20 of 32 slots used: 12 free, the program needs 13
+	const uint32_t in_use = 0x000FFFFFu;   // 20 of 32 slots used: 12 free, the program needs more
 	g_dshot_fake.used_instruction_mask = in_use;
 	EXPECT_EQ(up_dshot_init(kAllChannels, 0, kRate600, false), -ENOMEM);
 	EXPECT_EQ(g_dshot_fake.used_instruction_mask, in_use);
@@ -512,6 +514,7 @@ TEST_F(DShotBackend, TriggerSendsMotorStop)
 	}
 
 	// A throttle frame is in the low 16 bits of the word
+	g_dshot_fake.now += kControlPeriodUs;
 	const uint16_t value = DSHOT_CMD_MIN_THROTTLE + 998;
 	stageAll(value);
 	up_dshot_trigger();
@@ -528,8 +531,10 @@ TEST_F(DShotBackend, TriggerSkipsFullFifo)
 	up_dshot_arm(true);
 	stageAll(DSHOT_CMD_MIN_THROTTLE + 1);
 
+	// A state machine that does not take its frames (for example one that is stopped): the FIFO fills
 	for (unsigned i = 0; i < DSHOT_FAKE_TX_FIFO_DEPTH; i++) {
 		up_dshot_trigger();   // the model does not take the words out
+		g_dshot_fake.now += kControlPeriodUs;
 	}
 
 	EXPECT_EQ(g_dshot_fake.sm[0].put_count, (unsigned)DSHOT_FAKE_TX_FIFO_DEPTH);
@@ -537,6 +542,7 @@ TEST_F(DShotBackend, TriggerSkipsFullFifo)
 	up_dshot_trigger();
 	EXPECT_EQ(g_dshot_fake.sm[0].put_count, (unsigned)DSHOT_FAKE_TX_FIFO_DEPTH);   // no write to a full FIFO
 
+	g_dshot_fake.now += kControlPeriodUs;
 	ASSERT_TRUE(dshot_fake_tx_pop(0, nullptr));
 	up_dshot_trigger();
 	EXPECT_EQ(g_dshot_fake.sm[0].put_count, (unsigned)DSHOT_FAKE_TX_FIFO_DEPTH + 1);
@@ -893,4 +899,99 @@ TEST_F(DShotBackend, RearmWithoutNewDataSendsNothing)
 	up_dshot_trigger();
 
 	EXPECT_EQ(putCount(), kChannelCount);   // only the frames from before the disable
+}
+
+// ---- findings of the branch review ----------------------------------------
+
+TEST_F(DShotBackend, UnidirectionalDoesNotQueueBehindAFrame)
+{
+	// A frame that is written while one is on the line would follow it with no gap, and it would be old.
+	startAll(false);
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 100);
+	up_dshot_trigger();
+	ASSERT_EQ(g_dshot_fake.sm[0].put_count, 1u);
+	ASSERT_TRUE(dshot_fake_tx_pop(0, nullptr));   // the state machine has the frame: the FIFO is empty
+
+	g_dshot_fake.now += kUniFrameUs600 - 1;
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 200);
+	up_dshot_trigger();
+	EXPECT_EQ(g_dshot_fake.sm[0].put_count, 1u);
+
+	g_dshot_fake.now += 1;
+	up_dshot_trigger();
+	ASSERT_EQ(g_dshot_fake.sm[0].put_count, 2u);
+	EXPECT_EQ(g_dshot_fake.sm[0].put_log[1], (uint32_t)dshot_codec_encode(DSHOT_CMD_MIN_THROTTLE + 200, false, false));
+}
+
+TEST_F(DShotBackend, TransactionIsTimedFromItsOwnWrite)
+{
+	// The channels are served one after the other, and the decode of a response takes time. The
+	// deadline of a channel starts when its frame is written, not when the trigger call started.
+	startBidirAndSend();
+
+	for (unsigned ch = 0; ch < kChannelCount; ch++) {
+		ASSERT_TRUE(dshot_fake_tx_pop(ch, nullptr));
+	}
+
+	// The second trigger restarts the four silent channels. Each clock read is 100 us later, and each
+	// channel reads the clock two times: the frame of the last channel is written 700 us after the
+	// start of the call.
+	constexpr hrt_abstime kStep = 100;
+	g_dshot_fake.now += kControlPeriodUs;
+	g_dshot_fake.now_step = kStep;
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 100);
+	const hrt_abstime second_trigger = g_dshot_fake.now;
+	up_dshot_trigger();
+	g_dshot_fake.now_step = 0;
+	ASSERT_EQ(g_dshot_fake.sm[3].put_count, 2u);
+	ASSERT_EQ(g_dshot_fake.now, second_trigger + 2 * kChannelCount * kStep);
+	const hrt_abstime last_write = second_trigger + (2 * kChannelCount - 1) * kStep;
+
+	// One microsecond before the deadline of the last channel. This is far after 138 us from the
+	// start of that trigger call.
+	g_dshot_fake.now = last_write + kTransactionUs600 - 1;
+	ASSERT_TRUE(dshot_fake_tx_pop(3, nullptr));
+	up_dshot_trigger();
+	EXPECT_EQ(g_dshot_fake.sm[3].put_count, 2u);   // no restart and no new frame yet
+	EXPECT_EQ(up_bdshot_num_errors(3), 1);        // only the timeout of the first frame
+	EXPECT_EQ(g_dshot_fake.sm[0].put_count, 3u);   // the first channel was written 600 us before: its deadline is over
+}
+
+TEST_F(DShotBackend, SkippedBidirChannelDoesNotBlockTelemetry)
+{
+	// The module waits for the ready bit of each BDShot output that it asked for. An output that the
+	// backend cannot use never has a transaction, so its bit is set at all times.
+	g_dshot_fake.channel_mode[2] = IOTimerChanMode_PWMOut;
+	g_dshot_fake.channel_mode[3] = IOTimerChanMode_PWMOut;
+	ASSERT_EQ(up_dshot_init(kAllChannels, kAllChannels, kRate600, false), 0x3);
+	up_dshot_arm(true);
+	EXPECT_EQ(up_bdshot_get_ready_mask() & 0xC, 0xC);
+
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 100);
+	up_dshot_trigger();
+	period(0x3);
+	EXPECT_EQ(up_bdshot_get_ready_mask(), 0xF);
+
+	// A read of a skipped output gives nothing and does not clear its bit
+	int erpm = -1;
+	EXPECT_EQ(up_bdshot_get_erpm(2, &erpm), -1);
+	EXPECT_EQ(up_bdshot_get_erpm(0, &erpm), 0);
+	EXPECT_EQ(up_bdshot_get_ready_mask(), 0xE);
+	EXPECT_EQ(up_bdshot_channel_capture_supported(2), 0);
+}
+
+TEST_F(DShotBackend, ModeCheckUsesTheChannelsThatAreUsed)
+{
+	// M1 and M2 on a BDShot timer, a motor on M3 of a PWM timer that pwm_out has: the module asks for
+	// 0x7 with BDShot on 0x3. M3 is not used, so the request is not a mix of modes.
+	g_dshot_fake.channel_mode[2] = IOTimerChanMode_PWMOut;
+	EXPECT_EQ(up_dshot_init(0x7, 0x3, kRate600, false), 0x3);
+	EXPECT_EQ(g_dshot_fake.loaded_program_length, kBidirLength);
+	EXPECT_EQ(g_dshot_fake.pad[7].config_count, 0u);
+
+	// When M3 is free the request is a mix, and nothing is driven
+	up_dshot_init(0, 0, kRate600, false);   // give everything back before the model is reset
+	dshot_fake_reset();
+	EXPECT_EQ(up_dshot_init(0x7, 0x3, kRate600, false), -EINVAL);
+	expectNothingHeld();
 }

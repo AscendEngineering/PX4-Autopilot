@@ -479,12 +479,48 @@ TEST(DShotPioProgram, UniFirstInstructionIsPullBlock)
 
 TEST(DShotPioProgram, UniLayout)
 {
-	EXPECT_EQ(kUniLength, 13u);
+	EXPECT_EQ(kUniLength, 15u);
 	EXPECT_EQ(dshot_uni_wrap_target, 0);
-	EXPECT_EQ(dshot_uni_wrap, 12);
+	EXPECT_EQ(dshot_uni_wrap, 14);
 	EXPECT_EQ(dshot_uni_offset_pull_data, 0u);
 	// The last instruction is a jmp, so the wrap only ever falls back to pull
-	EXPECT_EQ(dshot_uni_program_instructions[12] & 0xE000, 0x0000);
+	EXPECT_EQ(dshot_uni_program_instructions[14] & 0xE000, 0x0000);
+}
+
+TEST(DShotPioProgram, UniFrameGap)
+{
+	// Two frames in the FIFO must not go out back to back: an ESC finds the start of a frame by the
+	// gap before it. The program holds the line low for 250 cycles (two bit times) after each frame.
+	constexpr unsigned kGapLoops = 10;
+	constexpr unsigned kGapLoopCycles = 25;
+	constexpr unsigned kGapCycles = kGapLoops * kGapLoopCycles;
+
+	for (uint16_t first : kTimingFrames) {
+		SCOPED_TRACE(::testing::Message() << "first frame=0x" << std::hex << first);
+		PioInterpreter pio(dshot_uni_program_instructions, kUniLength, dshot_uni_wrap_target, dshot_uni_wrap);
+		pio.pin_level = false;
+		pio.tx_fifo.push_back(first);
+		pio.tx_fifo.push_back(0xAAAA);
+		ASSERT_TRUE(pio.runUntilIdle(2 * kFrameCycleBudget));
+		ASSERT_FALSE(pio.unsupported);
+		ASSERT_EQ(pio.output_edges.size(), 4u * kFrameBits);
+
+		const std::vector<PinEdge> one(pio.output_edges.begin(), pio.output_edges.begin() + 2 * kFrameBits);
+		const std::vector<PinEdge> two(pio.output_edges.begin() + 2 * kFrameBits, pio.output_edges.end());
+		EXPECT_TRUE(transmitTraceIsCorrect(one, first, true));
+		EXPECT_TRUE(transmitTraceIsCorrect(two, 0xAAAA, true));
+
+		// From the start of the last bit of the first frame to the start of the second frame: one bit,
+		// the gap, and the instructions around it (set y, pull, out y 16, out y 1). After a last bit of
+		// 1 there is one more jmp.
+		const uint64_t last_bit_start = one[2 * (kFrameBits - 1)].cycle;
+		const unsigned extra = (first & 1u) ? 5u : 4u;
+		EXPECT_EQ(two[0].cycle - last_bit_start, kCyclesPerBit + kGapCycles + extra - 1u);
+
+		// The line is low for more than the gap
+		EXPECT_GE(two[0].cycle - one.back().cycle, kGapCycles);
+		EXPECT_EQ(pio.delay_loop_cycles.size(), 2u * kGapLoops);
+	}
 }
 
 TEST(DShotPioProgram, TransmitTiming)

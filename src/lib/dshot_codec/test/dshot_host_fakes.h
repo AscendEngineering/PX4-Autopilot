@@ -205,6 +205,7 @@ typedef struct {
 	dshot_fake_pad_t pad[DSHOT_FAKE_GPIO_COUNT];
 
 	hrt_abstime now;
+	hrt_abstime now_step;         /* added to `now` after each hrt_absolute_time(): the time a channel takes */
 	unsigned    error_count;          /* PX4_ERR calls */
 	int         channel_mode[MAX_TIMER_IO_CHANNELS];
 

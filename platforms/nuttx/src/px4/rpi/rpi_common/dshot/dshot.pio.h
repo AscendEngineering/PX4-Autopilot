@@ -38,7 +38,7 @@
 // --------- //
 
 #define dshot_uni_wrap_target 0
-#define dshot_uni_wrap 12
+#define dshot_uni_wrap 14
 #define dshot_uni_pio_version 0
 
 #define dshot_uni_offset_pull_data 0u
@@ -54,10 +54,12 @@ static const uint16_t dshot_uni_program_instructions[] = {
 	0xae42, //  6: nop                           [14]
 	0xfc00, //  7: set    pins, 0                [28]
 	0x00e2, //  8: jmp    !osre, 2
-	0x0000, //  9: jmp    0
+	0x000d, //  9: jmp    13
 	0xff00, // 10: set    pins, 0                [31]
 	0xbf42, // 11: nop                           [31]
 	0x0ce2, // 12: jmp    !osre, 2               [12]
+	0xe049, // 13: set    y, 9
+	0x188e, // 14: jmp    y--, 14                [24]
 	//     .wrap
 };
 

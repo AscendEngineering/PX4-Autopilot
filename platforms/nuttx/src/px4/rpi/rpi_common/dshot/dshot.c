@@ -109,6 +109,14 @@
 #define DSHOT_TRANSACTION_MARGIN_US 50u
 #define DSHOT_US_PER_S              1000000ull
 
+/*
+ * One unidirectional frame: the frame, the gap that the PIO program holds
+ * after it (250 cycles), and the instructions around them. A frame that is
+ * written before the end of this time waits in the FIFO behind the one on
+ * the line: it is old when it goes out.
+ */
+#define DSHOT_UNI_FRAME_PIO_CYCLES  (DSHOT_FRAME_BITS * DSHOT_PIO_CYCLES_PER_BIT + 250u + 8u)
+
 /* The telemetry capture of the bidirectional PIO program */
 #define DSHOT_SAMPLE_PIO_CYCLES     18u
 #define DSHOT_RESPONSE_BIT_CYCLES   100u /* the response is at 5/4 of the bit rate: 125 x 4 / 5 */
@@ -135,8 +143,8 @@ typedef struct {
 	uint8_t     gpio;
 	uint16_t    frame;         /* staged frame */
 	bool        staged;        /* a frame is staged. The motor-stop frame is 0x0000, thus 0 is not a sentinel. */
-	hrt_abstime tx_started;    /* 0 while nothing is in flight */
-	bool        in_flight;
+	hrt_abstime tx_started;    /* time of the write of the last frame */
+	bool        in_flight;     /* the last frame, or its response, can still be on the line */
 	uint32_t    tx_count;
 	uint32_t    tx_skipped;
 
@@ -163,10 +171,11 @@ static bool _program_loaded;
 static uint32_t _program_offset;
 static bool _bidir;                      /* direction mode, the same for all the channels */
 static unsigned _rate;                   /* bit/s */
-static hrt_abstime _transaction_us;      /* length of one bidirectional transaction */
+static hrt_abstime _transaction_us;      /* time from the write of a frame to the earliest write of the next one */
 static bool _armed;
 static bool _edt_enabled;                /* extended telemetry frames can come */
 static uint16_t _ready_mask;             /* channels with a complete attempt that the module did not read yet */
+static uint16_t _no_capture_mask;        /* BDShot channels of the request that are not used: ready at all times */
 
 /* Pull of the idle level: the line keeps this level when nothing drives it */
 static uint32_t pad_idle_pull(void)
@@ -283,6 +292,7 @@ static void release_all(void)
 	memset(_channels, 0, sizeof(_channels));
 	_armed = false;
 	_ready_mask = 0;
+	_no_capture_mask = 0;
 }
 
 /*
@@ -402,13 +412,23 @@ static void channel_decode_response(dshot_channel_t *channel, const uint32_t wor
 }
 
 /*
- * Complete the transaction that is in flight on a bidirectional channel.
+ * Complete the transaction that is in flight on a channel.
  *
  * @return false when the transaction is not complete: the caller must not
  *         send a new frame.
  */
 static bool channel_complete_transaction(dshot_channel_t *channel, unsigned index, hrt_abstime now)
 {
+	if (!_bidir) {
+		/* No response to read: the frame and its gap must be off the line */
+		if (now - channel->tx_started < _transaction_us) {
+			return false;
+		}
+
+		channel->in_flight = false;
+		return true;
+	}
+
 	if (rp23xx_pio_sm_get_rx_fifo_level(_pio, channel->sm) >= DSHOT_CODEC_SAMPLE_WORDS) {
 		/* The capture is complete, and the state machine has the line again */
 		uint32_t words[DSHOT_CODEC_SAMPLE_WORDS];
@@ -451,13 +471,6 @@ int up_dshot_init(uint32_t channel_mask, uint32_t bdshot_channel_mask, unsigned 
 		return -EINVAL;
 	}
 
-	/* The two PIO programs do not fit in one block together */
-	if (bdshot_channel_mask != 0 && bdshot_channel_mask != channel_mask) {
-		PX4_ERR("all DShot outputs must share one mode, DShot or BDShot");
-		return -EINVAL;
-	}
-
-	_bidir = (bdshot_channel_mask != 0);
 	_edt_enabled = edt_enable;
 
 	/* Find the channels that DShot can use */
@@ -493,6 +506,16 @@ int up_dshot_init(uint32_t channel_mask, uint32_t bdshot_channel_mask, unsigned 
 		PX4_ERR("no output can be used for DShot");
 		return -ENODEV;
 	}
+
+	/* The two PIO programs do not fit in one block together: the outputs that are used share one mode */
+	const uint32_t bidirectional = bdshot_channel_mask & usable;
+
+	if (bidirectional != 0 && bidirectional != usable) {
+		PX4_ERR("all DShot outputs must share one mode, DShot or BDShot");
+		return -EINVAL;
+	}
+
+	_bidir = (bidirectional != 0);
 
 	if (block >= DSHOT_PIO_ALLOCATOR_BLOCKS) {
 		PX4_ERR("PIO%u cannot be used: no allocator", block);
@@ -546,9 +569,19 @@ int up_dshot_init(uint32_t channel_mask, uint32_t bdshot_channel_mask, unsigned 
 	}
 
 	_rate = dshot_pwm_freq;
-	_transaction_us = div_ceil(DSHOT_FRAME_BITS * DSHOT_US_PER_S, _rate) + DSHOT_TURNAROUND_US
-			  + div_ceil(DSHOT_CAPTURE_PIO_CYCLES * DSHOT_US_PER_S, (uint64_t)DSHOT_PIO_CYCLES_PER_BIT * _rate)
-			  + DSHOT_TRANSACTION_MARGIN_US;
+
+	if (_bidir) {
+		_transaction_us = div_ceil(DSHOT_FRAME_BITS * DSHOT_US_PER_S, _rate) + DSHOT_TURNAROUND_US
+				  + div_ceil(DSHOT_CAPTURE_PIO_CYCLES * DSHOT_US_PER_S, (uint64_t)DSHOT_PIO_CYCLES_PER_BIT * _rate)
+				  + DSHOT_TRANSACTION_MARGIN_US;
+
+		/* The module waits for the ready bit of each BDShot output of its request. One that is not
+		 * used here never has a transaction, thus it is ready at all times. */
+		_no_capture_mask = (uint16_t)(bdshot_channel_mask & ~usable);
+
+	} else {
+		_transaction_us = div_ceil(DSHOT_UNI_FRAME_PIO_CYCLES * DSHOT_US_PER_S, (uint64_t)DSHOT_PIO_CYCLES_PER_BIT * _rate);
+	}
 
 	for (unsigned ch = 0; ch < DSHOT_ARRAY_SIZE(_channels); ch++) {
 		if (_channels[ch].claimed) {
@@ -574,8 +607,6 @@ void up_dshot_trigger(void)
 		return;
 	}
 
-	const hrt_abstime now = hrt_absolute_time();
-
 	for (unsigned ch = 0; ch < DSHOT_ARRAY_SIZE(_channels); ch++) {
 		dshot_channel_t *channel = &_channels[ch];
 
@@ -583,21 +614,24 @@ void up_dshot_trigger(void)
 			continue;
 		}
 
-		/* Read the response to the last frame. The ESC can still drive the line: do not start a new frame. */
+		/* The channels before this one took time (the decode of a response): read the clock for each one */
+		const hrt_abstime now = hrt_absolute_time();
+
+		/* Complete the last frame first. While it is on the line, or the ESC can drive the line, no new frame. */
 		if (channel->in_flight && !channel_complete_transaction(channel, ch, now)) {
 			channel->tx_skipped++;
 			continue;
 		}
 
-		/* A full FIFO: the control loop is faster than the line. Drop the frame, do not queue it. */
+		/* A full FIFO: the state machine does not take its frames. Drop the frame. */
 		if (rp23xx_pio_sm_is_tx_fifo_full(_pio, channel->sm)) {
 			channel->tx_skipped++;
 			continue;
 		}
 
 		rp23xx_pio_sm_put(_pio, channel->sm, channel->frame);
-		channel->tx_started = now;
-		channel->in_flight = _bidir;
+		channel->tx_started = hrt_absolute_time();
+		channel->in_flight = true;
 		channel->tx_count++;
 	}
 }
@@ -694,7 +728,7 @@ static bool channel_is_bidirectional(uint8_t channel)
 
 uint16_t up_bdshot_get_ready_mask(void)
 {
-	return _ready_mask;
+	return _ready_mask | _no_capture_mask;
 }
 
 int up_bdshot_num_errors(uint8_t channel)
