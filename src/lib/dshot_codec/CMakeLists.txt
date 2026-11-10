@@ -44,3 +44,15 @@ px4_add_unit_gtest(SRC DShotCodecTest.cpp LINKLIBS dshot_codec)
 px4_add_unit_gtest(SRC DShotPioProgramTest.cpp
 	INCLUDES ${PX4_SOURCE_DIR}/platforms/nuttx/src/px4/rpi/rpi_common/dshot
 )
+
+# The RP2350 backend itself, compiled for the host on a model of the PIO block.
+px4_add_unit_gtest(SRC DShotBackendTest.cpp
+	EXTRA_SRCS
+		test/dshot_host_fakes.c
+		${PX4_SOURCE_DIR}/platforms/nuttx/src/px4/rpi/rpi_common/dshot/dshot.c
+	COMPILE_FLAGS -DDSHOT_HOST_TEST=1
+	INCLUDES
+		${CMAKE_CURRENT_SOURCE_DIR}/test
+		${PX4_SOURCE_DIR}/platforms/nuttx/src/px4/rpi/rpi_common/dshot
+	LINKLIBS dshot_codec
+)
