@@ -104,6 +104,7 @@ void ICM56686::ConfigureODR(const int32_t odr_hz)
 		gyro_odr = GYRO_CONFIG0_BIT::GYRO_ODR_800_HZ;
 		odr = 800;
 		break;
+
 	case 400:
 		accel_odr = ACCEL_CONFIG0_BIT::ACCEL_ODR_400_HZ;
 		gyro_odr = GYRO_CONFIG0_BIT::GYRO_ODR_400_HZ;
@@ -343,9 +344,9 @@ void ICM56686::ConfigureSampleRate(const int sample_rate)
 {
 	const float minimum_interval = _fifo_sample_dt;
 	_fifo_empty_interval_us = math::max(roundf((1e6f / sample_rate) / minimum_interval) * minimum_interval,
-						    minimum_interval);
+					    minimum_interval);
 	_fifo_samples = roundf(math::min(_fifo_empty_interval_us / _fifo_sample_dt,
-						 static_cast<float>(FIFO_MAX_SAMPLES)));
+					 static_cast<float>(FIFO_MAX_SAMPLES)));
 	// Enforce a minimum watermark to prevent interrupt storms.
 	// _fifo_samples = math::max(_fifo_samples, 20);
 	_fifo_empty_interval_us = roundf(_fifo_samples * _fifo_sample_dt);

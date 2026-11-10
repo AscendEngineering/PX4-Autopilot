@@ -103,7 +103,7 @@ private:
 	hrt_abstime _last_idle_time {0};
 	hrt_abstime _last_idle_time_sample{0};
 #  ifdef CONFIG_SMP
-	bool _idle_sample_initialized{false};	///< an idle sum of zero is data, not the first sample
+	bool _idle_sample_initialized {false};	///< an idle sum of zero is data, not the first sample
 #  endif
 #endif
 

@@ -150,10 +150,10 @@ void rp23xx_boardinitialize(void)
 	 * pins. The NuttX driver uses whichever pins carry the UART function. */
 	rp23xx_gpio_set_function(GPIO_UART0_TX, RP23XX_GPIO_FUNC_UART);
 	rp23xx_gpio_set_function(GPIO_UART0_RX, RP23XX_GPIO_FUNC_UART);
-	rp23xx_gpio_set_pulls(GPIO_UART0_RX, true, false);
+	/* rp23xx_gpio_set_pulls(GPIO_UART0_RX, true, false); */
 	rp23xx_gpio_set_function(GPIO_UART1_TX, RP23XX_GPIO_FUNC_UART);
 	rp23xx_gpio_set_function(GPIO_UART1_RX, RP23XX_GPIO_FUNC_UART);
-	rp23xx_gpio_set_pulls(GPIO_UART1_RX, true, false);
+	/* rp23xx_gpio_set_pulls(GPIO_UART1_RX, true, false); */
 
 	/* I2C0 (barometer) and I2C1 (external), with pull-ups */
 	rp23xx_gpio_set_function(GPIO_I2C0_SDA, RP23XX_GPIO_FUNC_I2C);

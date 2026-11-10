@@ -46,7 +46,7 @@ static int rpi_flash_mtd_erase(struct mtd_dev_s *mtd, off_t startblock, size_t n
 }
 
 static ssize_t rpi_flash_mtd_bread(struct mtd_dev_s *mtd, off_t startblock,
-			      size_t nblocks, uint8_t *buffer)
+				   size_t nblocks, uint8_t *buffer)
 {
 	struct rpi_flash_mtd_s *priv = (struct rpi_flash_mtd_s *)mtd;
 	const size_t start = (size_t)startblock * BLOCK_SIZE;
@@ -61,7 +61,7 @@ static ssize_t rpi_flash_mtd_bread(struct mtd_dev_s *mtd, off_t startblock,
 }
 
 static ssize_t rpi_flash_mtd_bwrite(struct mtd_dev_s *mtd, off_t startblock,
-			       size_t nblocks, const uint8_t *buffer)
+				    size_t nblocks, const uint8_t *buffer)
 {
 	struct rpi_flash_mtd_s *priv = (struct rpi_flash_mtd_s *)mtd;
 	const size_t start = (size_t)startblock * BLOCK_SIZE;
@@ -186,7 +186,7 @@ const px4_mft_s *board_get_manifest(void)
 }
 
 
-struct mtd_dev_s* rpi_flash_mtd_initialize(uint32_t offset, size_t size)
+struct mtd_dev_s *rpi_flash_mtd_initialize(uint32_t offset, size_t size)
 {
 	if (size == 0 || (offset % ERASE_SIZE) != 0 || (size % ERASE_SIZE) != 0 || offset + size < offset) {
 		return NULL;
@@ -196,7 +196,7 @@ struct mtd_dev_s* rpi_flash_mtd_initialize(uint32_t offset, size_t size)
 		return NULL;
 	}
 
-	struct rpi_flash_mtd_s *priv = (rpi_flash_mtd_s*)kmm_zalloc(sizeof(*priv));
+	struct rpi_flash_mtd_s *priv = (rpi_flash_mtd_s *)kmm_zalloc(sizeof(*priv));
 
 	if (priv == NULL) {
 		return NULL;

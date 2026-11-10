@@ -334,7 +334,8 @@ void LoadMon::stack_usage()
 #endif
 			struct fdlist *fdlist = &system_load.tasks[_stack_task_index].tcb->group->tg_fdlist;
 
-			for (int fdr = 0; fdr < fdlist->fl_rows; fdr++) {
+			for (int fdr = 0; fdr < fdlist->fl_rows; fdr++)
+			{
 				for (int fdc = 0; fdc < CONFIG_NFILE_DESCRIPTORS_PER_BLOCK; fdc++) {
 					if (fdlist->fl_fds[fdr][fdc].f_file) {
 						++tcb_num_used_fds;
@@ -367,6 +368,7 @@ void LoadMon::stack_usage()
 	// Continue after last checked task next cycle
 	_stack_task_index = (_stack_task_index + 1) % CONFIG_FS_PROCFS_MAX_TASKS;
 }
+
 #endif
 
 int LoadMon::print_usage(const char *reason)

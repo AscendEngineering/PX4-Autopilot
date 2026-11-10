@@ -314,6 +314,7 @@ static bool flash_transaction(bool erase, uint32_t offset, const uint8_t *data, 
 			      uint32_t block_size, uint8_t block_cmd)
 {
 #if defined(CONFIG_SMP)
+
 	if (park.faulted) {
 		return false;
 	}
