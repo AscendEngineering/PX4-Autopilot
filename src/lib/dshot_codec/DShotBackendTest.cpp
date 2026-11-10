@@ -50,6 +50,7 @@ extern "C" {
 }
 
 #include "dshot.pio.h"
+#include "dshot_test_window.h"
 
 namespace
 {
@@ -62,6 +63,11 @@ constexpr unsigned kBidirLength = sizeof(dshot_bidir_program_instructions) / siz
 // One bidirectional transaction at 600 kbit/s: frame 27 us + turnaround 30 us + capture window 31 us + margin 50 us
 constexpr hrt_abstime kTransactionUs600 = 138;
 constexpr hrt_abstime kStartTime = 1000000;
+constexpr hrt_abstime kControlPeriodUs = 2500;   // a 400 Hz control loop
+constexpr unsigned kOnlineCount = 200;           // good or bad attempts in a row that change the online state
+constexpr uint32_t kGoodResponse = dshot_test::kVector;   // payload 0x064: a period of 100 us
+constexpr int kGoodErpm = 6000;                  // 600000 / 100, in units of 100 eRPM
+constexpr unsigned kBidirOffset = 32 - sizeof(dshot_bidir_program_instructions) / sizeof(uint16_t);
 constexpr unsigned kInstructionSlots = 32;
 const unsigned kGpio[kChannelCount] = {9, 8, 7, 6};   // M1 to M4
 
@@ -147,6 +153,52 @@ protected:
 	{
 		ASSERT_EQ(up_dshot_init(kAllChannels, bidirectional ? kAllChannels : 0, kRate600, false), (int)kAllChannels);
 		up_dshot_arm(true);
+	}
+
+	/** Put the four sample words of a response in the RX FIFO of a channel, as the PIO program does. */
+	static void respond(unsigned ch, uint32_t gcr = kGoodResponse)
+	{
+		uint32_t words[DSHOT_CODEC_SAMPLE_WORDS];
+		dshot_test::make_window(words, gcr, dshot_test::kBitCycles);
+
+		for (uint32_t word : words) {
+			dshot_fake_rx_push(ch, word);
+		}
+	}
+
+	/**
+	 * One control period. The state machines take the frames that the last trigger wrote, the ESCs
+	 * of `responding` answer, the period ends, and the next trigger reads the result and sends again.
+	 */
+	static void period(uint32_t responding, uint32_t gcr = kGoodResponse)
+	{
+		for (unsigned ch = 0; ch < kChannelCount; ch++) {
+			dshot_fake_tx_pop(ch, nullptr);
+
+			if (responding & (1u << ch)) {
+				respond(ch, gcr);
+			}
+		}
+
+		g_dshot_fake.now += kControlPeriodUs;
+		stageAll(DSHOT_CMD_MIN_THROTTLE + 100);
+		up_dshot_trigger();
+	}
+
+	/** Start in bidirectional mode and send the first frame on each channel. */
+	static void startBidirAndSend(bool edt = false)
+	{
+		ASSERT_EQ(up_dshot_init(kAllChannels, kAllChannels, kRate600, edt), (int)kAllChannels);
+		up_dshot_arm(true);
+		stageAll(DSHOT_CMD_MIN_THROTTLE + 100);
+		up_dshot_trigger();
+		ASSERT_EQ(putCount(), kChannelCount);
+	}
+
+	static bool opLogged(unsigned sm, dshot_fake_op_t op)
+	{
+		const uint8_t ops[] = {(uint8_t)op};
+		return dshot_fake_ops_contain(sm, ops, 1);
 	}
 
 	/** A disarm gives the pads back as inputs at the idle level and sends nothing that is old. */
@@ -512,4 +564,333 @@ TEST_F(DShotBackend, ReinitReleasesFirst)
 	EXPECT_EQ(g_dshot_fake.used_instruction_mask, ((1u << kUniLength) - 1) << (kInstructionSlots - kUniLength));
 	EXPECT_EQ(claimedCount(), kChannelCount);
 	EXPECT_FALSE(anyEnabled());   // a new init is not armed
+}
+
+// ---- capture, decode, completion and recovery ------------------------------
+
+TEST_F(DShotBackend, HarvestDecodes)
+{
+	startBidirAndSend();
+	EXPECT_EQ(up_bdshot_get_ready_mask(), 0);   // no attempt is complete yet
+
+	// The ESC of channel 0 answers. One control period later the next trigger reads the response.
+	ASSERT_TRUE(dshot_fake_tx_pop(0, nullptr));
+	respond(0);
+	g_dshot_fake.now += kControlPeriodUs;
+	const uint16_t next_value = DSHOT_CMD_MIN_THROTTLE + 321;
+	stageAll(next_value);
+	up_dshot_trigger();
+
+	EXPECT_NE(up_bdshot_get_ready_mask() & 0x1, 0);
+	EXPECT_EQ(g_dshot_fake.sm[0].rx_level, 0u);
+
+	// The next frame goes out in the same trigger: the telemetry is one control period old
+	ASSERT_EQ(g_dshot_fake.sm[0].put_count, 2u);
+	EXPECT_EQ(g_dshot_fake.sm[0].put_log[1], (uint32_t)dshot_codec_encode(next_value, false, true));
+	EXPECT_FALSE(opLogged(0, DSHOT_FAKE_OP_RESTART));   // a good response needs no restart
+
+	int erpm = -1;
+	EXPECT_EQ(up_bdshot_get_erpm(0, &erpm), 0);
+	EXPECT_EQ(erpm, kGoodErpm);
+	EXPECT_EQ(up_bdshot_get_ready_mask() & 0x1, 0);   // read: not ready until the next attempt
+
+	// The same value is not given two times as new
+	erpm = -1;
+	EXPECT_EQ(up_bdshot_get_erpm(0, &erpm), -1);
+	EXPECT_EQ(up_bdshot_num_errors(0), 0);
+}
+
+TEST_F(DShotBackend, HarvestsCompleteCaptureBeforeDeadline)
+{
+	startBidirAndSend();
+	ASSERT_TRUE(dshot_fake_tx_pop(0, nullptr));
+	respond(0);
+
+	// Four words in the FIFO: the capture is complete, and the state machine has the line again
+	g_dshot_fake.now += kTransactionUs600 - 20;
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 5);
+	up_dshot_trigger();
+
+	int erpm = -1;
+	EXPECT_EQ(up_bdshot_get_erpm(0, &erpm), 0);
+	EXPECT_EQ(erpm, kGoodErpm);
+	EXPECT_EQ(g_dshot_fake.sm[0].put_count, 2u);
+}
+
+TEST_F(DShotBackend, NoResponseRestarts)
+{
+	startBidirAndSend();
+	ASSERT_TRUE(dshot_fake_tx_pop(0, nullptr));
+	g_dshot_fake.sm[0].pc = kBidirOffset + dshot_bidir_offset_wait_zero;   // no ESC: the program waits for a falling edge
+
+	g_dshot_fake.now += kTransactionUs600;
+	const uint16_t next_value = DSHOT_CMD_MIN_THROTTLE + 77;
+	stageAll(next_value);
+	up_dshot_trigger();
+
+	// The state machine is stopped, emptied, put at the start with the pin driven high, and started again
+	const uint8_t restart_sequence[] = {
+		DSHOT_FAKE_OP_DISABLE, DSHOT_FAKE_OP_CLEAR_FIFOS, DSHOT_FAKE_OP_RESTART, DSHOT_FAKE_OP_EXEC_JMP,
+		DSHOT_FAKE_OP_SET_PIN_HIGH, DSHOT_FAKE_OP_SET_DIR_OUT, DSHOT_FAKE_OP_ENABLE, DSHOT_FAKE_OP_PUT
+	};
+	EXPECT_TRUE(dshot_fake_ops_contain(0, restart_sequence, sizeof(restart_sequence)));
+	EXPECT_TRUE(g_dshot_fake.sm[0].enabled);
+	EXPECT_EQ(g_dshot_fake.sm[0].pc, kBidirOffset + dshot_bidir_offset_pull_data);
+	EXPECT_NE(g_dshot_fake.pin_level & (1u << kGpio[0]), 0u);
+	EXPECT_NE(g_dshot_fake.pin_dir & (1u << kGpio[0]), 0u);
+
+	// The attempt is complete (the module waits for the ready bit), it has an error, and it gives no eRPM
+	EXPECT_NE(up_bdshot_get_ready_mask() & 0x1, 0);
+	EXPECT_EQ(up_bdshot_num_errors(0), 1);
+	int erpm = -1;
+	EXPECT_EQ(up_bdshot_get_erpm(0, &erpm), -1);
+
+	// The new frame goes out after the restart
+	ASSERT_EQ(g_dshot_fake.sm[0].put_count, 2u);
+	EXPECT_EQ(g_dshot_fake.sm[0].put_log[1], (uint32_t)dshot_codec_encode(next_value, false, true));
+	EXPECT_EQ(g_dshot_fake.sm[0].tx_level, 1u);
+}
+
+TEST_F(DShotBackend, EarlyTriggerWaits)
+{
+	startBidirAndSend();
+	ASSERT_TRUE(dshot_fake_tx_pop(0, nullptr));
+	dshot_fake_rx_push(0, 0x00FFFFFF);   // the capture is in progress: two of the four words
+	dshot_fake_rx_push(0, 0xFFFFFFFF);
+
+	g_dshot_fake.now += kTransactionUs600 - 1;
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 9);
+	up_dshot_trigger();
+
+	EXPECT_FALSE(opLogged(0, DSHOT_FAKE_OP_RESTART));
+	EXPECT_EQ(g_dshot_fake.sm[0].put_count, 1u);
+	EXPECT_EQ(g_dshot_fake.sm[0].rx_level, 2u);   // not read, not discarded
+	EXPECT_EQ(up_bdshot_get_ready_mask() & 0x1, 0);
+	EXPECT_EQ(up_bdshot_num_errors(0), 0);
+}
+
+TEST_F(DShotBackend, LateResponseIsDiscarded)
+{
+	// The response is not complete at the deadline. It is dropped with the restart, and its words
+	// are not read as the response to the next frame.
+	startBidirAndSend();
+	ASSERT_TRUE(dshot_fake_tx_pop(0, nullptr));
+	dshot_fake_rx_push(0, 0x00FFFFFF);
+	dshot_fake_rx_push(0, 0xFFFFFFFF);
+
+	g_dshot_fake.now += kTransactionUs600;
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 9);
+	up_dshot_trigger();
+
+	EXPECT_TRUE(opLogged(0, DSHOT_FAKE_OP_RESTART));
+	EXPECT_EQ(g_dshot_fake.sm[0].rx_level, 0u);
+	EXPECT_EQ(up_bdshot_num_errors(0), 1);
+	EXPECT_EQ(g_dshot_fake.sm[0].put_count, 2u);
+}
+
+TEST_F(DShotBackend, SilentChannelDoesNotBlockOthers)
+{
+	startBidirAndSend();
+	period(0x7);   // channels 0 to 2 answer, channel 3 has no ESC
+
+	EXPECT_EQ(up_bdshot_get_ready_mask(), 0xF);
+
+	for (unsigned ch = 0; ch < 3; ch++) {
+		int erpm = -1;
+		EXPECT_EQ(up_bdshot_get_erpm(ch, &erpm), 0) << "channel " << ch;
+		EXPECT_EQ(erpm, kGoodErpm);
+		EXPECT_EQ(up_bdshot_num_errors(ch), 0);
+	}
+
+	int erpm = -1;
+	EXPECT_EQ(up_bdshot_get_erpm(3, &erpm), -1);
+	EXPECT_EQ(up_bdshot_num_errors(3), 1);
+
+	// Each channel sends again, the silent one after a restart
+	for (const dshot_fake_sm_t &sm : g_dshot_fake.sm) {
+		EXPECT_EQ(sm.put_count, 2u);
+	}
+}
+
+TEST_F(DShotBackend, BadResponseCounted)
+{
+	startBidirAndSend();
+
+	// A glitch of one sample inside the response
+	ASSERT_TRUE(dshot_fake_tx_pop(0, nullptr));
+	uint32_t words[DSHOT_CODEC_SAMPLE_WORDS];
+	dshot_test::make_window(words, kGoodResponse, dshot_test::kBitCycles);
+	words[1] ^= 0x00800000u;
+
+	for (uint32_t word : words) {
+		dshot_fake_rx_push(0, word);
+	}
+
+	g_dshot_fake.now += kControlPeriodUs;
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 100);
+	up_dshot_trigger();
+
+	EXPECT_EQ(up_bdshot_num_errors(0), 1);
+	EXPECT_NE(up_bdshot_get_ready_mask() & 0x1, 0);
+	int erpm = -1;
+	EXPECT_EQ(up_bdshot_get_erpm(0, &erpm), -1);
+
+	// A response with good symbols and a bad checksum (the last nibble is B, not D)
+	period(0x1, 0x1CDBAB);
+	EXPECT_EQ(up_bdshot_num_errors(0), 2);
+	EXPECT_EQ(up_bdshot_get_erpm(0, &erpm), -1);
+
+	// A bad response does not need a restart: the state machine completed the capture
+	EXPECT_FALSE(opLogged(0, DSHOT_FAKE_OP_RESTART));
+}
+
+TEST_F(DShotBackend, OnlineAfter200)
+{
+	startBidirAndSend();
+
+	for (unsigned i = 0; i < kOnlineCount - 1; i++) {
+		period(0x1);
+	}
+
+	EXPECT_EQ(up_bdshot_channel_online(0), 0);
+	period(0x1);
+	EXPECT_EQ(up_bdshot_channel_online(0), 1);
+	EXPECT_EQ(up_bdshot_channel_online(3), 0);   // never an answer
+
+	// One bad attempt does not change the state
+	period(0x0);
+	EXPECT_EQ(up_bdshot_channel_online(0), 1);
+
+	for (unsigned i = 0; i < kOnlineCount - 2; i++) {
+		period(0x0);
+	}
+
+	EXPECT_EQ(up_bdshot_channel_online(0), 1);
+	period(0x0);
+	EXPECT_EQ(up_bdshot_channel_online(0), 0);
+}
+
+TEST_F(DShotBackend, ExtendedTelemetryStored)
+{
+	startBidirAndSend(true);
+
+	// Payload 0x223 is an extended frame: temperature 35 C
+	period(0x1, dshot_test::payload_to_gcr(0x223));
+
+	uint8_t value = 0;
+	EXPECT_EQ(up_bdshot_get_extended_telemetry(0, DSHOT_EDT_TEMPERATURE, &value), 0);
+	EXPECT_EQ(value, 35);
+	EXPECT_EQ(up_bdshot_get_extended_telemetry(0, DSHOT_EDT_TEMPERATURE, &value), -1);   // read one time
+	EXPECT_EQ(up_bdshot_get_extended_telemetry(0, DSHOT_EDT_VOLTAGE, &value), -1);
+	EXPECT_EQ(up_bdshot_num_errors(0), 0);   // an extended frame is a good response
+
+	int erpm = -1;
+	EXPECT_EQ(up_bdshot_get_erpm(0, &erpm), -1);   // this response had no eRPM
+
+	period(0x1, dshot_test::payload_to_gcr(0x464));   // voltage, 100 x 0.25 V
+	EXPECT_EQ(up_bdshot_get_extended_telemetry(0, DSHOT_EDT_VOLTAGE, &value), 0);
+	EXPECT_EQ(value, 100);
+
+	period(0x1, dshot_test::payload_to_gcr(0x60C));   // current, 12 A
+	EXPECT_EQ(up_bdshot_get_extended_telemetry(0, DSHOT_EDT_CURRENT, &value), 0);
+	EXPECT_EQ(value, 12);
+
+	period(0x1, dshot_test::payload_to_gcr(0xE00));   // state and event
+	EXPECT_EQ(up_bdshot_get_extended_telemetry(0, DSHOT_EDT_STATE_EVENT, &value), 0);
+	EXPECT_EQ(value, 0);
+}
+
+TEST_F(DShotBackend, ExtendedTelemetryOffReadsErpm)
+{
+	startBidirAndSend(false);
+	period(0x1, dshot_test::payload_to_gcr(0x223));   // exponent 1, period 70 us
+
+	int erpm = -1;
+	EXPECT_EQ(up_bdshot_get_erpm(0, &erpm), 0);
+	EXPECT_EQ(erpm, 8571);
+	uint8_t value = 0;
+	EXPECT_EQ(up_bdshot_get_extended_telemetry(0, DSHOT_EDT_TEMPERATURE, &value), -1);
+}
+
+TEST_F(DShotBackend, DisableDuringCapture)
+{
+	startBidirAndSend();
+
+	// Frame A is out, the ESC answers, and the state machine is in the sample loop with two words pushed
+	for (unsigned ch = 0; ch < kChannelCount; ch++) {
+		ASSERT_TRUE(dshot_fake_tx_pop(ch, nullptr));
+		g_dshot_fake.sm[ch].pc = kBidirOffset + 20;
+		dshot_fake_rx_push(ch, 0x0F83E0F8);
+		dshot_fake_rx_push(ch, 0x3E0F83E0);
+	}
+
+	const uint16_t ready_before = up_bdshot_get_ready_mask();
+	g_dshot_fake.now += 60;   // inside the capture window
+
+	EXPECT_EQ(up_dshot_arm(false), 0);
+
+	EXPECT_FALSE(anyEnabled());
+
+	for (unsigned ch = 0; ch < kChannelCount; ch++) {
+		SCOPED_TRACE(::testing::Message() << "channel " << ch);
+		const dshot_fake_pad_t &pad = g_dshot_fake.pad[kGpio[ch]];
+		EXPECT_EQ(pad.function, (uint32_t)RPI_GPIO_FUNC_SIO);   // not driven by the PIO block
+		EXPECT_FALSE(pad.sio_output);                           // not driven by the SIO
+		EXPECT_TRUE(pad.pull_up);                               // the idle level of bidirectional DShot
+		EXPECT_EQ(g_dshot_fake.sm[ch].tx_level, 0u);
+		EXPECT_EQ(g_dshot_fake.sm[ch].rx_level, 0u);            // the partial capture is gone
+		EXPECT_EQ(up_bdshot_num_errors(ch), 0);                 // and it was not counted or decoded
+		int erpm = -1;
+		EXPECT_EQ(up_bdshot_get_erpm(ch, &erpm), -1);
+	}
+
+	EXPECT_EQ(up_bdshot_get_ready_mask(), ready_before);
+
+	// A trigger while disabled does nothing, also after the deadline of the old transaction
+	g_dshot_fake.now += kControlPeriodUs;
+	stageAll(DSHOT_CMD_MIN_THROTTLE + 11);
+	up_dshot_trigger();
+	EXPECT_EQ(putCount(), kChannelCount);
+	EXPECT_FALSE(anyEnabled());
+	EXPECT_FALSE(opLogged(0, DSHOT_FAKE_OP_RESTART));
+
+	// Rearm, then stage frame B: exactly one frame goes out on each channel, and it is frame B
+	up_dshot_arm(true);
+
+	for (unsigned ch = 0; ch < kChannelCount; ch++) {
+		EXPECT_TRUE(g_dshot_fake.sm[ch].enabled);
+		EXPECT_EQ(g_dshot_fake.sm[ch].pc, kBidirOffset + dshot_bidir_offset_pull_data);
+		EXPECT_EQ(g_dshot_fake.pad[kGpio[ch]].function, (uint32_t)RP23XX_GPIO_FUNC_PIO0);
+		EXPECT_NE(g_dshot_fake.pin_level & (1u << kGpio[ch]), 0u);
+		EXPECT_NE(g_dshot_fake.pin_dir & (1u << kGpio[ch]), 0u);
+	}
+
+	const uint16_t frame_b = DSHOT_CMD_MIN_THROTTLE + 1234;
+	stageAll(frame_b);
+	up_dshot_trigger();
+
+	for (unsigned ch = 0; ch < kChannelCount; ch++) {
+		ASSERT_EQ(g_dshot_fake.sm[ch].put_count, 2u);
+		EXPECT_EQ(g_dshot_fake.sm[ch].put_log[1], (uint32_t)dshot_codec_encode(frame_b, false, true));
+		EXPECT_EQ(g_dshot_fake.sm[ch].tx_level, 1u);
+		EXPECT_EQ(up_bdshot_num_errors(ch), 0);   // the old transaction is not counted as a timeout
+	}
+}
+
+TEST_F(DShotBackend, RearmWithoutNewDataSendsNothing)
+{
+	startBidirAndSend();
+
+	for (unsigned ch = 0; ch < kChannelCount; ch++) {
+		ASSERT_TRUE(dshot_fake_tx_pop(ch, nullptr));
+		g_dshot_fake.sm[ch].pc = kBidirOffset + 20;
+		dshot_fake_rx_push(ch, 0x0F83E0F8);
+	}
+
+	up_dshot_arm(false);
+	up_dshot_arm(true);
+	g_dshot_fake.now += kControlPeriodUs;
+	up_dshot_trigger();
+
+	EXPECT_EQ(putCount(), kChannelCount);   // only the frames from before the disable
 }

@@ -40,6 +40,12 @@
  * motor, and one program for all the state machines (see dshot.pio). The
  * CPU makes the frames and writes them to the TX FIFO of each state machine.
  *
+ * In bidirectional mode the program releases the pin after the frame and
+ * takes 128 samples of the response of the ESC. The CPU reads the four
+ * sample words at the next up_dshot_trigger() and decodes them. The PIO
+ * program has no timeout: when no response came before the end of the
+ * transaction, the CPU starts the state machine again.
+ *
  * The PWM slices of the board stay the configuration groups (PWM_MAIN_TIMx).
  * A timer entry of the board names the PIO block that makes DShot for its
  * channels (initIOTimer(), io_timers[].dshot.pio).
@@ -103,12 +109,24 @@
 #define DSHOT_TRANSACTION_MARGIN_US 50u
 #define DSHOT_US_PER_S              1000000ull
 
+/* The telemetry capture of the bidirectional PIO program */
+#define DSHOT_SAMPLE_PIO_CYCLES     18u
+#define DSHOT_RESPONSE_BIT_CYCLES   100u /* the response is at 5/4 of the bit rate: 125 x 4 / 5 */
+
+/* This number of good, or bad, attempts in a row changes the online state of an ESC */
+#define BDSHOT_OFFLINE_COUNT        200u
+
 #define DSHOT_ARRAY_SIZE(a)         (sizeof(a) / sizeof((a)[0]))
 
 /* The clock divider has no fraction: the bit period must be exact */
 _Static_assert(BOARD_SYS_FREQ % (DSHOT_PIO_CYCLES_PER_BIT *DSHOT_RATE_600) == 0, "DShot600 needs an integer PIO divider");
 _Static_assert(BOARD_SYS_FREQ % (DSHOT_PIO_CYCLES_PER_BIT *DSHOT_RATE_300) == 0, "DShot300 needs an integer PIO divider");
 _Static_assert(BOARD_SYS_FREQ % (DSHOT_PIO_CYCLES_PER_BIT *DSHOT_RATE_150) == 0, "DShot150 needs an integer PIO divider");
+
+typedef struct {
+	uint8_t value;
+	bool    ready;             /* a new value that the module did not read yet */
+} dshot_edt_sample_t;
 
 typedef struct {
 	bool        claimed;       /* the state machine `sm` is claimed for this channel */
@@ -121,6 +139,21 @@ typedef struct {
 	bool        in_flight;
 	uint32_t    tx_count;
 	uint32_t    tx_skipped;
+
+	/* Bidirectional telemetry */
+	int32_t     erpm;          /* last eRPM, in units of 100 eRPM */
+	bool        erpm_valid;    /* `erpm` is new: the module did not read it yet */
+	dshot_edt_sample_t edt_temperature;
+	dshot_edt_sample_t edt_voltage;
+	dshot_edt_sample_t edt_current;
+	dshot_edt_sample_t edt_state_event;
+	bool        online;
+	uint32_t    consecutive_successes;
+	uint32_t    consecutive_failures;
+	uint32_t    crc_error_cnt;
+	uint32_t    frame_error_cnt;
+	uint32_t    no_response_cnt;
+	uint32_t    restart_cnt;
 } dshot_channel_t;
 
 static dshot_channel_t _channels[MAX_TIMER_IO_CHANNELS];
@@ -132,6 +165,8 @@ static bool _bidir;                      /* direction mode, the same for all the
 static unsigned _rate;                   /* bit/s */
 static hrt_abstime _transaction_us;      /* length of one bidirectional transaction */
 static bool _armed;
+static bool _edt_enabled;                /* extended telemetry frames can come */
+static uint16_t _ready_mask;             /* channels with a complete attempt that the module did not read yet */
 
 /* Pull of the idle level: the line keeps this level when nothing drives it */
 static uint32_t pad_idle_pull(void)
@@ -247,12 +282,167 @@ static void release_all(void)
 
 	memset(_channels, 0, sizeof(_channels));
 	_armed = false;
+	_ready_mask = 0;
+}
+
+/*
+ * Start a state machine again that waits for a response that did not come.
+ * Its FIFOs are emptied: an old frame or a part of a late response must not
+ * stay. Call this only after the end of the transaction, when the ESC does
+ * not drive the line.
+ */
+static void channel_restart(const dshot_channel_t *channel)
+{
+	const uint32_t pin_bit = 1u << channel->gpio;
+
+	rp23xx_pio_sm_set_enabled(_pio, channel->sm, false);
+	rp23xx_pio_sm_clear_fifos(_pio, channel->sm);
+	rp23xx_pio_sm_restart(_pio, channel->sm);
+	rp23xx_pio_sm_exec(_pio, channel->sm, pio_encode_jmp(_program_offset + program_entry()));
+	rp23xx_pio_sm_set_pins_with_mask(_pio, channel->sm, pin_bit, pin_bit);
+	rp23xx_pio_sm_set_consecutive_pindirs(_pio, channel->sm, channel->gpio, DSHOT_PIN_COUNT, true);
+	rp23xx_pio_sm_set_enabled(_pio, channel->sm, true);
+}
+
+static void channel_note_success(dshot_channel_t *channel)
+{
+	channel->consecutive_failures = 0;
+
+	if (channel->consecutive_successes < BDSHOT_OFFLINE_COUNT) {
+		channel->consecutive_successes++;
+	}
+
+	if (channel->consecutive_successes >= BDSHOT_OFFLINE_COUNT) {
+		channel->online = true;
+	}
+}
+
+static void channel_note_failure(dshot_channel_t *channel)
+{
+	channel->consecutive_successes = 0;
+
+	if (channel->consecutive_failures < BDSHOT_OFFLINE_COUNT) {
+		channel->consecutive_failures++;
+	}
+
+	if (channel->consecutive_failures >= BDSHOT_OFFLINE_COUNT) {
+		channel->online = false;
+	}
+}
+
+static void edt_store(dshot_edt_sample_t *sample, int32_t value)
+{
+	sample->value = (uint8_t)value;
+	sample->ready = true;
+}
+
+/* Decode the four sample words of a response and keep the result */
+static void channel_decode_response(dshot_channel_t *channel, const uint32_t words[DSHOT_CODEC_SAMPLE_WORDS])
+{
+	uint32_t gcr = 0;
+	uint16_t payload = 0;
+	dshot_codec_result_t result = dshot_codec_samples_to_gcr(words, DSHOT_SAMPLE_PIO_CYCLES, DSHOT_RESPONSE_BIT_CYCLES,
+				      &gcr);
+
+	if (result == DSHOT_CODEC_OK) {
+		result = dshot_codec_gcr_to_payload(gcr, &payload);
+	}
+
+	switch (result) {
+	case DSHOT_CODEC_OK:
+		break;
+
+	case DSHOT_CODEC_ERR_NO_EDGES:
+		channel->no_response_cnt++;
+		channel_note_failure(channel);
+		return;
+
+	case DSHOT_CODEC_ERR_CHECKSUM:
+		channel->crc_error_cnt++;
+		channel_note_failure(channel);
+		return;
+
+	default:
+		channel->frame_error_cnt++;
+		channel_note_failure(channel);
+		return;
+	}
+
+	dshot_codec_telemetry_t telemetry;
+	dshot_codec_decode_payload(payload, _edt_enabled, &telemetry);
+
+	switch (telemetry.type) {
+	case DSHOT_EDT_ERPM:
+		channel->erpm = telemetry.value;
+		channel->erpm_valid = true;
+		break;
+
+	case DSHOT_EDT_TEMPERATURE:
+		edt_store(&channel->edt_temperature, telemetry.value);
+		break;
+
+	case DSHOT_EDT_VOLTAGE:
+		edt_store(&channel->edt_voltage, telemetry.value);
+		break;
+
+	case DSHOT_EDT_CURRENT:
+		edt_store(&channel->edt_current, telemetry.value);
+		break;
+
+	case DSHOT_EDT_STATE_EVENT:
+		edt_store(&channel->edt_state_event, telemetry.value);
+		break;
+
+	default:
+		/* A debug frame: a good response with nothing to keep */
+		break;
+	}
+
+	channel_note_success(channel);
+}
+
+/*
+ * Complete the transaction that is in flight on a bidirectional channel.
+ *
+ * @return false when the transaction is not complete: the caller must not
+ *         send a new frame.
+ */
+static bool channel_complete_transaction(dshot_channel_t *channel, unsigned index, hrt_abstime now)
+{
+	if (rp23xx_pio_sm_get_rx_fifo_level(_pio, channel->sm) >= DSHOT_CODEC_SAMPLE_WORDS) {
+		/* The capture is complete, and the state machine has the line again */
+		uint32_t words[DSHOT_CODEC_SAMPLE_WORDS];
+
+		for (unsigned i = 0; i < DSHOT_CODEC_SAMPLE_WORDS; i++) {
+			words[i] = rp23xx_pio_sm_get(_pio, channel->sm);
+		}
+
+		while (!rp23xx_pio_sm_is_rx_fifo_empty(_pio, channel->sm)) {
+			(void)rp23xx_pio_sm_get(_pio, channel->sm);
+		}
+
+		channel_decode_response(channel, words);
+
+	} else if (now - channel->tx_started < _transaction_us) {
+		/* The ESC can still drive the line */
+		return false;
+
+	} else {
+		/* No response, or a response that was not complete at the deadline */
+		channel_restart(channel);
+		channel->no_response_cnt++;
+		channel->restart_cnt++;
+		channel_note_failure(channel);
+	}
+
+	/* The module waits for each bidirectional channel: an attempt without a result is complete too */
+	_ready_mask |= (uint16_t)(1u << index);
+	channel->in_flight = false;
+	return true;
 }
 
 int up_dshot_init(uint32_t channel_mask, uint32_t bdshot_channel_mask, unsigned dshot_pwm_freq, bool edt_enable)
 {
-	(void)edt_enable;
-
 	/* A second init (dshot stop, dshot start) starts from nothing */
 	release_all();
 
@@ -268,6 +458,7 @@ int up_dshot_init(uint32_t channel_mask, uint32_t bdshot_channel_mask, unsigned 
 	}
 
 	_bidir = (bdshot_channel_mask != 0);
+	_edt_enabled = edt_enable;
 
 	/* Find the channels that DShot can use */
 	uint32_t usable = 0;
@@ -392,13 +583,11 @@ void up_dshot_trigger(void)
 			continue;
 		}
 
-		/* The ESC can still drive the line: do not start a new frame */
-		if (_bidir && channel->in_flight && now - channel->tx_started < _transaction_us) {
+		/* Read the response to the last frame. The ESC can still drive the line: do not start a new frame. */
+		if (channel->in_flight && !channel_complete_transaction(channel, ch, now)) {
 			channel->tx_skipped++;
 			continue;
 		}
-
-		channel->in_flight = false;
 
 		/* A full FIFO: the control loop is faster than the line. Drop the frame, do not queue it. */
 		if (rp23xx_pio_sm_is_tx_fifo_full(_pio, channel->sm)) {
@@ -461,6 +650,11 @@ int up_dshot_arm(bool armed)
 
 void up_bdshot_status(void)
 {
+	if (sm_mask(true) == 0) {
+		PX4_INFO("no DShot output is set up");
+		return;
+	}
+
 	PX4_INFO("%s %u bit/s on PIO%lu, %s", _bidir ? "BDShot" : "DShot", _rate, (unsigned long)_pio,
 		 _armed ? "armed" : "not armed");
 
@@ -471,17 +665,27 @@ void up_bdshot_status(void)
 			continue;
 		}
 
-		PX4_INFO("Channel %u: init sm %u gpio %u pc %u tx_count %lu tx_skipped %lu", ch, channel->sm, channel->gpio,
-			 rp23xx_pio_sm_get_pc(_pio, channel->sm), (unsigned long)channel->tx_count,
-			 (unsigned long)channel->tx_skipped);
+		const uint32_t pc = rp23xx_pio_sm_get_pc(_pio, channel->sm);
+		const char *parked = "";
+
+		if (_bidir && pc == _program_offset + dshot_bidir_offset_wait_one) {
+			parked = " parked at wait_one (line low)";
+
+		} else if (_bidir && pc == _program_offset + dshot_bidir_offset_wait_zero) {
+			parked = " parked at wait_zero (no response)";
+		}
+
+		PX4_INFO("Channel %u: sm %u gpio %u pc %lu%s tx_count %lu tx_skipped %lu", ch, channel->sm, channel->gpio,
+			 (unsigned long)pc, parked, (unsigned long)channel->tx_count, (unsigned long)channel->tx_skipped);
+
+		if (_bidir) {
+			PX4_INFO("Channel %u: %s erpm %ld crc %lu frame %lu no_resp %lu restart %lu", ch,
+				 channel->online ? "online" : "offline", (long)channel->erpm * 100,
+				 (unsigned long)channel->crc_error_cnt, (unsigned long)channel->frame_error_cnt,
+				 (unsigned long)channel->no_response_cnt, (unsigned long)channel->restart_cnt);
+		}
 	}
 }
-
-/*
- * The capture of the response is not in this backend yet. The module waits
- * for the ready bit of each bidirectional channel, thus each one is always
- * reported as ready, with no new eRPM.
- */
 
 static bool channel_is_bidirectional(uint8_t channel)
 {
@@ -490,35 +694,78 @@ static bool channel_is_bidirectional(uint8_t channel)
 
 uint16_t up_bdshot_get_ready_mask(void)
 {
-	uint16_t mask = 0;
-
-	for (unsigned ch = 0; ch < DSHOT_ARRAY_SIZE(_channels); ch++) {
-		if (channel_is_bidirectional((uint8_t)ch)) {
-			mask |= (uint16_t)(1u << ch);
-		}
-	}
-
-	return mask;
+	return _ready_mask;
 }
 
 int up_bdshot_num_errors(uint8_t channel)
 {
-	return 0;
+	if (!channel_is_bidirectional(channel)) {
+		return 0;
+	}
+
+	return (int)(_channels[channel].crc_error_cnt + _channels[channel].frame_error_cnt + _channels[channel].no_response_cnt);
 }
 
 int up_bdshot_get_erpm(uint8_t channel, int *erpm)
 {
-	return -1;
+	if (!channel_is_bidirectional(channel)) {
+		return -1;
+	}
+
+	int status = -1;
+
+	if (_channels[channel].erpm_valid) {
+		*erpm = _channels[channel].erpm;
+		status = 0;
+	}
+
+	/* An old value is not given again as a new one, and the attempt is read */
+	_channels[channel].erpm_valid = false;
+	_ready_mask &= (uint16_t)~(1u << channel);
+	return status;
 }
 
 int up_bdshot_get_extended_telemetry(uint8_t channel, int type, uint8_t *value)
 {
-	return -1;
+	if (!channel_is_bidirectional(channel)) {
+		return -1;
+	}
+
+	dshot_edt_sample_t *sample = NULL;
+
+	switch (type) {
+	case DSHOT_EDT_TEMPERATURE:
+		sample = &_channels[channel].edt_temperature;
+		break;
+
+	case DSHOT_EDT_VOLTAGE:
+		sample = &_channels[channel].edt_voltage;
+		break;
+
+	case DSHOT_EDT_CURRENT:
+		sample = &_channels[channel].edt_current;
+		break;
+
+	case DSHOT_EDT_STATE_EVENT:
+		sample = &_channels[channel].edt_state_event;
+		break;
+
+	default:
+		return -1;
+	}
+
+	if (!sample->ready) {
+		return -1;
+	}
+
+	*value = sample->value;
+	sample->ready = false;
+	return 0;
 }
 
 int up_bdshot_channel_online(uint8_t channel)
 {
-	return 0;
+	return (channel_is_bidirectional(channel) && _channels[channel].online) ? 1 : 0;
 }
 
 int up_bdshot_channel_capture_supported(uint8_t channel)

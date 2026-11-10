@@ -37,6 +37,8 @@ extern "C" {
 #include "dshot_codec.h"
 }
 
+#include "dshot_test_window.h"
+
 TEST(DShotCodec, EncodeThrottle)
 {
 	EXPECT_EQ(dshot_codec_encode(1046, false, false), 0x82C6);
@@ -60,60 +62,7 @@ TEST(DShotCodec, EncodeTelemetryBit)
 
 // ---- telemetry decode ----------------------------------------------------
 
-namespace
-{
-
-constexpr unsigned kSampleCycles = 18;   // PIO cycles between two samples
-constexpr unsigned kBitCycles = 100;     // nominal PIO cycles in one response bit
-constexpr unsigned kSamples = 32 * DSHOT_CODEC_SAMPLE_WORDS;
-constexpr uint32_t kVector = 0x1CDBAD;   // payload 0x064: nibbles 0, 6, 4, D -> quintets 19, 16, 1D, 0D
-
-/**
- * Make the sample window that the PIO program gives for a response.
- *
- * @param gcr                  the 21-bit transition word of the response
- * @param bit_cycles           cycles in one response bit (the ESC clock)
- * @param sample_cycles        cycles between two samples
- * @param first_sample_cycles  cycles from the start-bit falling edge to the first sample.
- *                             The PIO program takes it 18 cycles after the edge.
- */
-void make_window(uint32_t words[DSHOT_CODEC_SAMPLE_WORDS], uint32_t gcr, unsigned bit_cycles,
-		 unsigned sample_cycles = kSampleCycles, unsigned first_sample_cycles = 18)
-{
-	bool line[DSHOT_CODEC_FRAME_BITS];
-	line[0] = false;   // the start bit is low
-
-	for (unsigned i = 0; i + 1 < DSHOT_CODEC_FRAME_BITS; i++) {
-		line[i + 1] = line[i] ^ (((gcr >> (19 - i)) & 1u) != 0);
-	}
-
-	for (unsigned w = 0; w < DSHOT_CODEC_SAMPLE_WORDS; w++) {
-		words[w] = 0;
-	}
-
-	for (unsigned k = 0; k < kSamples; k++) {
-		const unsigned bit = (first_sample_cycles + k * sample_cycles) / bit_cycles;
-		const bool level = (bit < DSHOT_CODEC_FRAME_BITS) ? line[bit] : true;   // idle high after the frame
-
-		if (level) {
-			words[k / 32] |= 1u << (31 - k % 32);
-		}
-	}
-}
-
-/** The transition word that an ESC sends for a 12-bit payload. */
-uint32_t payload_to_gcr(unsigned payload)
-{
-	static const uint8_t quintet[16] = {
-		0x19, 0x1B, 0x12, 0x13, 0x1D, 0x15, 0x16, 0x17, 0x1A, 0x09, 0x0A, 0x0B, 0x1E, 0x0D, 0x0E, 0x0F
-	};
-	const unsigned checksum = ~(payload ^ (payload >> 4) ^ (payload >> 8)) & 0xFu;
-	const unsigned data = (payload << 4) | checksum;
-	return (1u << 20) | (uint32_t)(quintet[(data >> 12) & 0xF] << 15) | (uint32_t)(quintet[(data >> 8) & 0xF] << 10)
-	       | (uint32_t)(quintet[(data >> 4) & 0xF] << 5) | quintet[data & 0xF];
-}
-
-} // namespace
+using namespace dshot_test;
 
 TEST(DShotCodec, GcrToPayloadKnownVector)
 {
