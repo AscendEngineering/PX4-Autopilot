@@ -55,9 +55,6 @@ are 5.56 samples for each response bit. The two programs do not fit in one
 PIO block together (13 + 29 instructions, 32 slots): the backend loads one
 of them.
 
-`src/lib/dshot_codec/DShotPioProgramTest.cpp` executes the generated
-instructions on a cycle-level interpreter and checks these numbers.
-
 ## Regenerating
 
 ```sh

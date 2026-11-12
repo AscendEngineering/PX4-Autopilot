@@ -34,8 +34,7 @@
 /**
  * @file dshot_codec.h
  *
- * Portable DShot frame arithmetic. No hardware access: the functions are
- * the same on the target and in the host unit tests.
+ * Portable DShot frame arithmetic. No hardware access.
  */
 
 #pragma once

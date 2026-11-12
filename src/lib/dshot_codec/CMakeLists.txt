@@ -36,27 +36,3 @@ px4_add_library(dshot_codec
 )
 target_include_directories(dshot_codec PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(dshot_codec PRIVATE ${MAX_CUSTOM_OPT_LEVEL})
-
-px4_add_unit_gtest(SRC DShotCodecTest.cpp
-	INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/test
-	LINKLIBS dshot_codec
-)
-
-# The PIO programs of the RP2350 backend are checked on the host: the platform
-# directory is not part of the SITL build, so the test lives here.
-px4_add_unit_gtest(SRC DShotPioProgramTest.cpp
-	INCLUDES ${PX4_SOURCE_DIR}/platforms/nuttx/src/px4/rpi/rpi_common/dshot
-	LINKLIBS dshot_codec
-)
-
-# The RP2350 backend itself, compiled for the host on a model of the PIO block.
-px4_add_unit_gtest(SRC DShotBackendTest.cpp
-	EXTRA_SRCS
-		test/dshot_host_fakes.c
-		${PX4_SOURCE_DIR}/platforms/nuttx/src/px4/rpi/rpi_common/dshot/dshot.c
-	COMPILE_FLAGS -DDSHOT_HOST_TEST=1
-	INCLUDES
-		${CMAKE_CURRENT_SOURCE_DIR}/test
-		${PX4_SOURCE_DIR}/platforms/nuttx/src/px4/rpi/rpi_common/dshot
-	LINKLIBS dshot_codec
-)

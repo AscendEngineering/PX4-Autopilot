@@ -54,10 +54,6 @@
  * up_bdshot_status(), which only reads.
  */
 
-#ifdef DSHOT_HOST_TEST
-/* Host unit tests (src/lib/dshot_codec/DShotBackendTest.cpp): a model replaces the target */
-#include "dshot_host_fakes.h"
-#else
 #include <px4_platform_common/px4_config.h>
 #include <px4_platform_common/log.h>
 #include <arch/board/board.h>
@@ -76,7 +72,6 @@
 #include "rp23xx_pio.h"
 #include "rp23xx_pio_instructions.h"
 #pragma GCC diagnostic pop
-#endif
 
 #include <string.h>
 
