@@ -77,13 +77,14 @@
  * and friends are applied only by boards/arm/rp23xx/common, which this
  * image does not link, and their Kconfig ranges stop at GPIO29 (RP2350A):
  * UART0's default there is GPIO0/1, the LED pins. Never link that code. */
-#define GPIO_UART0_TX		36	/* DVTX_UART0_TX, DJI air unit connector */
-#define GPIO_UART0_RX		37	/* DVTX_UART0_RX */
-//TODO: Use PIOUART0 for GPS, PIOUART1 for TELEM1
-// #define GPIO_UART1_TX		36	/* GPS_UART1_TX */
-// #define GPIO_UART1_RX		37	/* GPS_UART1_RX */
-#define GPIO_UART1_TX           42     /* Radio Receiver TX */
-#define GPIO_UART1_RX           43     /* Radio Receiver RX */
+#define GPIO_UART0_TX		44	/* DVTX_UART0_TX, DJI air unit connector */
+#define GPIO_UART0_RX		45	/* DVTX_UART0_RX */
+
+#define GPIO_UART1_TX		36	/* GPS_UART1_TX */
+#define GPIO_UART1_RX		37	/* GPS_UART1_RX */
+//TODO: Use PIOUART0 for Radio RX
+// #define GPIO_UART1_TX           42     /* Radio Receiver TX */
+// #define GPIO_UART1_RX           43     /* Radio Receiver RX */
 
 /* I2C0 (internal): barometer DPS368, address 0x76. I2C1 (external connector). */
 #define GPIO_I2C0_SDA		24
