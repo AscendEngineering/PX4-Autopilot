@@ -30,6 +30,7 @@ def find_matching_brackets(brackets, s, verbose):
 
 def extract_timer(line):
     # Try format: initIOTimer(Timer::Timer5, DMA{DMA::Index1, DMA::Stream0, DMA::Channel6}),
+    # or, for a PIO block that makes DShot: initIOTimer(Timer::Timer3, PIO{PIO::Block0}),
     search = re.search('Timer::([0-9a-zA-Z_]+)[,)]', line, re.IGNORECASE)
     if search:
         return search.group(1), 'generic'
@@ -92,7 +93,7 @@ def get_timer_groups(timer_config_file, verbose=False):
             timers.append(str(len(timers)))
         elif timer:
             if verbose: print('found timer def: {:}'.format(timer))
-            dshot_support[timer] = 'DMA' in line
+            dshot_support[timer] = ('DMA' in line) or ('PIO{' in line)
             timers.append(timer)
         else:
             # Make sure we don't miss anything (e.g. for different syntax) or misparse (e.g. multi-line comments)

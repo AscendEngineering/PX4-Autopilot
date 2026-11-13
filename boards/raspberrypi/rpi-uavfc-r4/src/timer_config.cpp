@@ -36,8 +36,9 @@
 /* Motor pads M1 to M4 are GPIO9, 8, 7, 6: PWM slices 4B, 4A, 3B, 3A
  * (GPIO n is slice (n / 2) % 8, channel A for even n). */
 constexpr io_timers_t io_timers[MAX_IO_TIMERS] = {
-	initIOTimer(Timer::Timer3),
-	initIOTimer(Timer::Timer4),
+	// PIO0 drives DShot on M1-M4; the PWM slices stay for plain PWM.
+	initIOTimer(Timer::Timer3, PIO{PIO::Block0}),
+	initIOTimer(Timer::Timer4, PIO{PIO::Block0}),
 };
 
 constexpr timer_io_channels_t timer_io_channels[MAX_TIMER_IO_CHANNELS] = {

@@ -5,4 +5,10 @@ add_subdirectory(../rpi_common/board_reset board_reset)
 add_subdirectory(../rpi_common/board_critmon board_critmon)
 add_subdirectory(../rpi_common/spi spi)
 add_subdirectory(../rpi_common/io_pins io_pins)
+
+# PIO DShot backend: only for boards that enable the DShot driver
+if(CONFIG_DRIVERS_DSHOT)
+	add_subdirectory(../rpi_common/dshot dshot)
+endif()
+
 add_subdirectory(../rpi_common/flash flash)
