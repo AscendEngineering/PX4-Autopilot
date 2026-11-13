@@ -72,6 +72,17 @@ struct TimerChannel {
 };
 }
 
+/* PIO block that makes DShot for the channels of a timer (see initIOTimer()) */
+struct PIO {
+	enum Block {
+		Block0 = 0,
+		Block1 = 1,
+		Block2 = 2,	// RP2350 only; the NuttX PIO allocator has tables for blocks 0 and 1 only
+		Invalid = 0xff,	// same value as DSHOT_PIO_NONE: the timer has no DShot
+	};
+	Block block{Invalid};
+};
+
 static inline constexpr uint32_t timerBaseRegister(Timer::Timer timer)
 {
 	// Timer0 is 1 so that an unset io_timers_t entry (0) is invalid

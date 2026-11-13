@@ -1,0 +1,147 @@
+;
+; DShot PIO programs for the PX4 RP2350 DShot backend.
+;
+; From ArduPilot, libraries/AP_HAL_ChibiOS/rp2350/pio/dshot.pio, at
+; https://github.com/davidbuzz/ardupilot commit
+; e45dae01b13a8bd61d9098f4c8b55d43b6cd9f53, which took it from Betaflight,
+; src/platform/PICO/dshot.pio. Regenerate dshot.pio.h with pioasm.sh after
+; editing.
+;
+; Copyright (c) Betaflight contributors.
+; Written by Matthew Selby, with later work by Andy Piper and qqqlab.
+;
+; This program is free software: you can redistribute it and/or modify it
+; under the terms of the GNU General Public License as published by the
+; Free Software Foundation, either version 3 of the License, or (at your
+; option) any later version.
+;
+; This program is distributed in the hope that it will be useful, but WITHOUT
+; ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+; FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+; more details.
+;
+; You should have received a copy of the GNU General Public License along
+; with this program. If not, see <http://www.gnu.org/licenses/>.
+;
+; Local modifications (PX4):
+;
+; - dshot_uni replaces the upstream dshot_600 program. It uses 125 PIO
+;   cycles for each bit, not 40, and the protocol nominal pulse widths
+;   (75 % and 37.5 % of the bit), not 67 % and 33 %. The bit rate is set
+;   by the clock divider only: PIO clock = 125 x bit rate. After a frame
+;   it holds the line low for 250 cycles (two bit times), thus two frames
+;   in the FIFO do not go out back to back.
+; - dshot_bidir is the upstream dshot_600_bidir program with these changes:
+;   - The name. The clock divider sets the bit rate.
+;   - The transmit delays give the protocol nominal pulse widths (94 and
+;     47 cycles of 125), not 84 and 41.
+;   - The delay after the capture is a loop that counts (jmp y--). The
+;     upstream instruction (jmp !y) did not loop, thus the delay was
+;     30 cycles and not the 150 cycles of its comment.
+;   The receive section has no change.
+;
+
+; Unidirectional DShot. Idle low, active high.
+;
+; The host writes one 32-bit word for each frame, with the 16-bit frame in
+; the low half. The shift direction is left, so the most significant bit
+; goes out first. Autopull is off and the pull threshold is 32.
+;
+; One bit is 125 cycles:
+;   bit 1: 94 cycles high, 31 cycles low
+;   bit 0: 47 cycles high, 78 cycles low
+; After the last bit the line stays low for 250 cycles more, two bit times,
+; before the next frame can start. An ESC finds the start of a frame by the
+; gap before it.
+; The number at the start of each comment is the instruction index.
+.program dshot_uni
+
+.wrap_target
+PUBLIC pull_data:
+    pull   block                 ; 0  wait for a frame; the line stays low
+    out    y, 16                 ; 1  discard the empty high half
+bitloop:
+    out    y, 1                  ; 2  next bit (1 low cycle of the previous bit)
+    set    pins, 1        [31]   ; 3  32 high
+    jmp    !y, outzero    [14]   ; 4  15 high
+    nop                   [31]   ; 5  32 high
+    nop                   [14]   ; 6  15 high  -> bit 1: 94 high
+    set    pins, 0        [28]   ; 7  29 low
+    jmp    !osre, bitloop        ; 8  1 low + out 1 = 31 low; loop while bits remain
+    jmp    frame_gap             ; 9  frame done after a 1
+outzero:
+    set    pins, 0        [31]   ; 10 32 low   (bit 0: 47 high)
+    nop                   [31]   ; 11 32 low
+    jmp    !osre, bitloop [12]   ; 12 13 low + out 1 = 78 low; falls through after the last bit
+frame_gap:
+    set    y, 9                  ; 13
+gap_loop:
+    jmp    y--, gap_loop  [24]   ; 14 10 x 25 = 250 cycles low before the next frame
+.wrap
+
+
+; Bidirectional DShot. Idle high, active low. The ESC answers on the same
+; line after each frame.
+;
+; Transmit is as in dshot_uni with the levels inverted:
+;   bit 1: 94 cycles low, 31 cycles high
+;   bit 0: 47 cycles low, 78 cycles high
+;
+; After the last bit the program releases the pin and waits for the ESC.
+; The pull-up of the pad holds the released line high. The response has
+; 21 bits at 5/4 of the transmit bit rate: 100 cycles for each bit. The
+; program takes 128 samples, one sample each 18 cycles (5.56 samples for
+; each bit), and autopush gives them to the host as four 32-bit words. The
+; first sample is 18 cycles after the falling edge of the start bit
+; (17 cycles of `wait`, then 1 cycle of `set`).
+;
+; The two `wait` instructions have no timeout. A line that is held low
+; stops the program at wait_one, and a line with no response stops it at
+; wait_zero. The host must restart the state machine after its deadline.
+;
+; Instructions 0-13 transmit, 14-24 turn the line and capture, 25-28 take
+; the line again.
+.program dshot_bidir
+
+.wrap_target
+PUBLIC pull_data:
+    pull   block                       ; 0  wait for a frame; the line is driven high
+    set    pindirs, 1                  ; 1  drive the line
+    out    y, 16                       ; 2  discard the empty high half
+bitloop_tx:
+    out    y, 1                        ; 3  next bit (1 high cycle of the previous bit)
+    set    pins, 0               [31]  ; 4  32 low
+    jmp    !y, outzero_tx        [14]  ; 5  15 low
+    nop                          [31]  ; 6  32 low
+    nop                          [14]  ; 7  15 low   -> bit 1: 94 low
+    set    pins, 1               [28]  ; 8  29 high
+    jmp    !osre, bitloop_tx           ; 9  1 high + out 1 = 31 high; loop while bits remain
+    jmp    receive                     ; 10 frame done after a 1
+outzero_tx:
+    set    pins, 1               [31]  ; 11 32 high  (bit 0: 47 low)
+    nop                          [31]  ; 12 32 high
+    jmp    !osre, bitloop_tx     [12]  ; 13 13 high + out 1 = 78 high; falls through after the last bit
+receive:
+    nop                          [20]  ; 14 21 cycles for the line to settle, driven high
+    set    pindirs, 0                  ; 15 release the line
+PUBLIC wait_one:
+    wait   1 pin 0                     ; 16 the line must be high before the response
+    set    x, 3                        ; 17 4 outer loops
+PUBLIC wait_zero:
+    wait   0 pin 0               [16]  ; 18 falling edge of the start bit, then 17 cycles
+outer_loop:
+    set    y, 31                       ; 19 32 samples for each word
+inner_loop:
+    in     pins, 1               [14]  ; 20 take a sample; autopush after 32
+    jmp    y--, delayed_inner_loop     ; 21
+    jmp    x--, outer_loop             ; 22
+    jmp    complete                    ; 23 128 samples taken
+delayed_inner_loop:
+    jmp    inner_loop            [1]   ; 24 18 cycles for each sample on the two paths
+PUBLIC complete:
+    set    pindirs, 1                  ; 25 drive the line again
+    set    pins, 1                     ; 26 idle high
+    set    y, 4                        ; 27
+delay_next_output:
+    jmp    y--, delay_next_output [29] ; 28 5 x 30 = 150 cycles before the next frame
+.wrap

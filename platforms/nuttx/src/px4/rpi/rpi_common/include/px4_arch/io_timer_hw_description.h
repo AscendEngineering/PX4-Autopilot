@@ -98,7 +98,7 @@ static inline constexpr timer_io_channels_t initIOTimerChannel(const io_timers_t
 	return ret;
 }
 
-static inline constexpr io_timers_t initIOTimer(Timer::Timer timer)
+static inline constexpr io_timers_t initIOTimer(Timer::Timer timer, PIO pio = {})
 {
 	// NuttX's own PWM lower-half driver claims a slice with CONFIG_RP2040_PWMn /
 	// CONFIG_RP23XX_PWMn; a slice cannot be driven by both NuttX and io_timer.
@@ -198,6 +198,14 @@ static inline constexpr io_timers_t initIOTimer(Timer::Timer timer)
 	// This is not strictly required, but for consistency let's make sure NuttX timers are disabled
 	constexpr_assert(!nuttx_config_timer_enabled,
 			 "IO Timer requires the NuttX PWM slice to be disabled (CONFIG_RP2040_PWMn / CONFIG_RP23XX_PWMn)");
+
+#if defined(CONFIG_DRIVERS_DSHOT)
+	// DSHOT_PIO_NONE unless the board names a PIO block for DShot
+	ret.dshot.pio = pio.block;
+#else
+	// The DShot driver is not in the build: the PIO block is not used
+	(void)pio;
+#endif
 
 	return ret;
 }

@@ -90,12 +90,21 @@ typedef uint32_t io_timer_channel_allocation_t; /* big enough to hold MAX_TIMER_
  *** Other prescaler rates can be achieved by fore instance by setting the clock_freq = 1Mhz
  *** the resulting PSC will be one and the timer will count at it's clock frequency.
  */
+#if defined(CONFIG_DRIVERS_DSHOT)
+/* PIO block that makes DShot for the channels of a timer. The PWM slice stays
+ * the configuration group; the PIO block makes the signal. */
+#define DSHOT_PIO_NONE 0xff
+
+typedef struct dshot_conf_t {
+	uint8_t pio;	/* PIO block index, DSHOT_PIO_NONE when the timer has no DShot */
+} dshot_conf_t;
+#endif /* CONFIG_DRIVERS_DSHOT */
+
 typedef struct io_timers_t {
 	uint32_t		base;
-	// uint32_t		clock_register;		// Not required for RP2040/RP2350
-	// uint32_t		clock_bit;
-	// uint32_t		vectorno;
-	// dshot_conf_t	dshot;
+#if defined(CONFIG_DRIVERS_DSHOT)
+	dshot_conf_t		dshot;
+#endif
 } io_timers_t;
 
 typedef struct io_timers_channel_mapping_element_t {
