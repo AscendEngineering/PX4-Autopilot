@@ -667,7 +667,7 @@ bool ICM56686::IregSetAndClearBits(const uint16_t reg, const uint8_t set_bits, c
 	return IregRead(reg, check) && check == new_value;
 }
 
-uint16_t RAMFUNC ICM56686::FIFOReadCount()
+uint16_t  ICM56686::FIFOReadCount()
 {
 	uint8_t fifo_count[3] {
 		static_cast<uint8_t>(static_cast<uint8_t>(Register::BANK_0::FIFO_COUNT_0) | DIR_READ), 0, 0
@@ -815,7 +815,7 @@ void ICM56686::ProcessGyro(const hrt_abstime &timestamp_sample, const FIFO::DATA
 	}
 }
 
-bool RAMFUNC ICM56686::ProcessTemperature(const FIFO::DATA fifo[], const uint8_t samples)
+bool  ICM56686::ProcessTemperature(const FIFO::DATA fifo[], const uint8_t samples)
 {
 	int16_t temperature_samples[FIFO_MAX_SAMPLES] {};
 	float temperature_sum{0};
