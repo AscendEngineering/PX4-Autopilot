@@ -7,17 +7,11 @@
  * RP2350 PIO UART driver -- 8N1 or 8N2, no-DMA, IRQ-driven RX and TX.
  */
 
-#include "PIOUART.h"
-#include "RP2350_pio1.h"
+#include "pio_serial.h"
+#include "rp2350_pio.h"
 
 //#if defined(HAL_HAVE_PIO_UARTS) && HAL_HAVE_PIO_UARTS > 0
 
-#include <AP_HAL/AP_HAL.h>
-#include <AP_Common/ExpandingString.h>
-#include <hal.h>
-#include <hrt.h>
-
-#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
 
 using namespace ChibiOS;
 

@@ -94,7 +94,7 @@
 
 #include "rp2350_pio.h"
 #include "uart.pio.h"
-
+#include <px4_arch/SerialImpl.hpp>
 // --------------------------------------------------------------------------- PIO UART protocol constants ---------------------------------------------------------------------------
 
 #define PIO_UART_CYCLES_PER_BIT  8U
@@ -124,11 +124,11 @@ static_assert(PIO_UART_TX_PROG_OFFSET + PIO_UART_TX_PROG_LEN <= PIO_UART_RX_PROG
 #define PIO_UART_INSTR_SET_Y(n)       (0xE040u | (n))  // set y, n
 #define PIO_UART_INSTR_JMP(addr)      ((uint16_t)(addr))
 
-//TODO:
-// #ifdef HAL_HAVE_PIO_UARTS
-// #define PIO_NUM_INSTANCES  HAL_HAVE_PIO_UARTS
-// #else
-// #define PIO_NUM_INSTANCES  4U
+#ifdef BOARD_NUM_PIO
+#define PIO_NUM_INSTANCES  BOARD_NUM_PIO
+#else
+#define PIO_NUM_INSTANCES  4U
+#endif
 
 
 namespace device { namespace rp2350 {
@@ -292,6 +292,5 @@ private:
     static void _calc_clkdiv(uint32_t baud, uint32_t &int_div, uint32_t &frac_div);
 };
 
-} // namespace ChibiOS
-
-#endif // HAL_HAVE_PIO_UARTS
+}
+}

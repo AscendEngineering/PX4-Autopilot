@@ -52,6 +52,10 @@ elseif(UNIX AND NOT APPLE) #TODO: add linux PX4 platform type
 	)
 endif()
 
+if (${PX4_CONFIG} MATCHES "raspberrypi_rpi-uavfc-r4_default")
+	list(APPEND SRCS_PLATFORM nuttx/pio/pio_serial.cpp)	
+endif()
+
 px4_add_library(drivers__device
 	CDev.cpp
 	${SRCS_PLATFORM}
@@ -65,5 +69,6 @@ if (${PX4_PLATFORM} STREQUAL "nuttx")
 		target_link_libraries(drivers__device PRIVATE nuttx_arch)
 	endif()
 endif()
+
 
 target_link_libraries(drivers__device PRIVATE cdev)

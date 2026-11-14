@@ -36,7 +36,7 @@
 #include <unistd.h>
 
 #include <px4_platform_common/SerialCommon.hpp>
-
+#include <board_config.h>
 using device::SerialConfig::ByteSize;
 using device::SerialConfig::Parity;
 using device::SerialConfig::StopBits;
