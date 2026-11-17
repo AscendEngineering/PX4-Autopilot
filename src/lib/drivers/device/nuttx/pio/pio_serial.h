@@ -103,14 +103,14 @@
 // Instruction memory layout (30 of 32 words used per PIO), assembled from
 // rp2350/pio/uart.pio: [0..10] uart_tx, [11..19] uart_rx, [20..29] uart_rx_sbus
 #define PIO_UART_TX_PROG_OFFSET       0U
-#define PIO_UART_TX_PROG_LEN         ARRAY_SIZE(uart_tx_program_instructions)
 #define PIO_UART_RX_PROG_OFFSET      11U
-#define PIO_UART_RX_PROG_LEN         ARRAY_SIZE(uart_rx_program_instructions)
 #define PIO_UART_RX_SBUS_PROG_OFFSET 20U
-#define PIO_UART_RX_SBUS_PROG_LEN    ARRAY_SIZE(uart_rx_sbus_program_instructions)
-static_assert(PIO_UART_TX_PROG_OFFSET + PIO_UART_TX_PROG_LEN <= PIO_UART_RX_PROG_OFFSET &&
-              PIO_UART_RX_PROG_OFFSET + PIO_UART_RX_PROG_LEN <= PIO_UART_RX_SBUS_PROG_OFFSET &&
-              PIO_UART_RX_SBUS_PROG_OFFSET + PIO_UART_RX_SBUS_PROG_LEN <= 32U,
+//TODO: verify
+#define UART_ARRAY_SIZE(a)           (sizeof(a) / sizeof((a)[0]))
+
+static_assert(PIO_UART_TX_PROG_OFFSET + UART_ARRAY_SIZE(uart_tx_program_instructions) <= PIO_UART_RX_PROG_OFFSET &&
+              PIO_UART_RX_PROG_OFFSET + UART_ARRAY_SIZE(uart_rx_program_instructions) <= PIO_UART_RX_SBUS_PROG_OFFSET &&
+              PIO_UART_RX_SBUS_PROG_OFFSET + UART_ARRAY_SIZE(uart_rx_sbus_program_instructions) <= 32U,
               "uart.pio programs overlap or overflow instruction memory");
 
 // Executed through SMx_INSTR while the state machine is stopped, to set up the
@@ -125,82 +125,75 @@ static_assert(PIO_UART_TX_PROG_OFFSET + PIO_UART_TX_PROG_LEN <= PIO_UART_RX_PROG
 #else
 #define PIO_NUM_INSTANCES  4U
 #endif
+
 static uint32_t      _pio;
 static rp23xx_pio_program_t _program;    /* the loaded program */
 static bool _program_loaded;
 static uint32_t _program_offset;
 static hrt_abstime _transaction_us;      /* time from the write of a frame to the earliest write of the next one */
 static uint16_t _ready_mask;             /* channels with a complete attempt that the module did not read yet */
-static uint16_t _no_capture_mask;  
-uint8_t       sm_tx;
-uint8_t       sm_rx;
-uint8_t       tx_pin;
-uint8_t       rx_pin;
-uint8_t       irq_num;
+static uint16_t _no_capture_mask; 
 
+typedef struct {
+	bool          claimed;
+	bool          init;
+	uint8_t       pio_base;
+	uint8_t       sm;
+	uint8_t       gpio;
+	uint8_t       sm_tx;
+	uint8_t       sm_rx;
+	uint8_t       tx_pin;
+	uint8_t       rx_pin;
+	uint8_t       irq_num;
 
+} pio_uart_t;
 
 namespace device { namespace rp2350 {
 
-class PIORXDriver final : public SerialImpl {
+class PIOUartDriver final : public SerialImpl {
 public:
-    explicit PIORXDriver(const char *port, uint32_t baudrate, uint8_t instance);
+    explicit PIOUartDriver(const char *port, uint32_t baudrate, uint8_t instance);
     
 
-    // ---- ISR dispatch handlers ----
-    static void _irq_pio0_0();
-    static void _irq_pio0_1();
-    static void _irq_pio1_0();
-    static void _irq_pio1_1();
+    /* ISR dispatch handlers */
+    static void irq_pio0_0();
+    static void irq_pio0_1();
+    static void irq_pio1_0();
+    static void irq_pio1_1();
 
-    // ---- ISR worker ----
-    void _service_rx_fifo();
+    /* ISR worker */
+    void service_rx_fifo();
 
 protected:
-    // ---- Protected pure-virtual overrides from AP_HAL::UARTDriver ----
-    bool open() override;
-    ssize_t write(const void *buffer, size_t buffer_size) override;
-    ssize_t read(uint8_t *buffer, size_t buffer_size) override;
-    bool close() override;
-    void flush() override;
-    ssize_t bytesAvailable() override;
+    // void begin(uint32_t b, uint16_t rxSpace, uint16_t txSpace;
+    bool init(uint32_t b, uint16_t rxSpace, uint16_t txSpace);
+    ssize_t write_bytes(const void *buffer, size_t buffer_size);
+    ssize_t read_bytes(uint8_t *buffer, size_t buffer_size);
+    bool close_uart();
+    void flush_buffer();
+    ssize_t bytesAvailable();
     
-    
-    
-    // the transmit program has no parity bit, so with parity set nothing is
-    // sent rather than a frame the far end would reject; SBUS output needs a
-    // hardware UART. Receive is unaffected: SBUS input has its own program
-    
-
 private:
 
-    static const InstanceConfig _cfg_table[PIO_NUM_INSTANCES];
-    static PIORXDriver          *_instances[PIO_NUM_INSTANCES];
-    static bool                  _pgm_loaded[2];   // [0]=PIO0, [1]=PIO1
+    static PIOUartDriver          *_instances[PIO_NUM_INSTANCES];
 
-    const uint8_t _instance;
-    bool  _initialized;
-    bool  _active_rxinv;
-    bool  _active_hdplex;
-    uint32_t _active_baud;
-    // the 8E2 receive program is for SBUS only: inverted at 100000 baud. FPort
-    // is inverted too but 8N1, and the parity skip would eat its stop bit
-    bool  _sbus_rx_prog;
-    // half duplex: both state machines work the transmit pin, and the
-    // transmit program releases it between frames
-    bool  _hd_enabled;
+    const uint8_t _instance{0};
+    bool  _active_rxinv{false};
+    bool  _active_hdplex{false};
+    uint32_t _active_baud{0};
+    /* The 8E2 receive program is for SBUS only: inverted at 100000 baud. FPort
+    is inverted 8N1 */
+    bool  _sbus_rx_prog{false};
+    // half duplex: both state machines work the transmit pin
+    bool  _hd_enabled{false};
     // set while our own transmission is coming back at us on the shared pin
-    bool  _hd_echo_active;
-    bool  _parity_requested;
-    bool  _parity_warned;
-    // the stop bits _begin() last loaded into Y; the requested count is the
-    // base class's _stop_bits, which SmartAudio sets to two
-    uint8_t _active_stop_bits;
-    // _write() only ever fills this and returns; the transmit interrupt
-    // empties it. Nothing waits on the wire.
-    
+    bool  _hd_echo_active{false};
+    bool  _parity_requested{false};
+    bool  _parity_warned{false};
+    uint8_t _active_stop_bits{0};
     uint8_t _readbuf[512];
     uint8_t _writebuf[512];
+    bool _initialized{false};
 
     struct {
         uint8_t buf[25];
@@ -208,33 +201,21 @@ private:
         uint32_t last_byte_us;
     } _sbus_rx;
 
-    // when bytes last arrived, double buffered as in UARTDriver
     uint64_t _receive_timestamp[2];
-    uint8_t _receive_timestamp_idx;
+    uint8_t _receive_timestamp_idx{0};
 
-    const InstanceConfig &cfg() const { return _cfg_table[_instance]; }
-
-    // false when PIO1 is already owned by the OSD scan-out or the LED
-    // driver; the caller must not go on to configure pins or start SMs
-    bool _upload_programs();
-    void _start_tx_sm(uint32_t clkdiv_int, uint32_t clkdiv_frac);
-    void _start_rx_sm(uint32_t clkdiv_int, uint32_t clkdiv_frac);
-    void _configure_gpio(uint8_t pin, bool is_output);
-    // the receive program in use, which half duplex needs to restart the
-    // receiver from the top once the line is handed back
-    uint32_t _rx_prog_offset() const;
-    // drop what we just said back to ourselves, once the transmitter flags
-    // that it has all come back; called from the interrupt
-    void _hd_echo_check();
-    void _enable_rx_irq();
-    void _drain_tx_fifo();
-    // one entry point for the shared PIO vector: errors, then RX, then TX
-    void _service_irq();
-    // sticky fault flags, polled where they will be seen even when no byte
-    // has arrived - a line stuck low raises framing errors and nothing else
-    void _poll_pio_errors();
-    void _enable_tx_irq();
-    volatile uint32_t *_inte_reg() const;
+    void start_tx_sm(uint32_t clkdiv_int, uint32_t clkdiv_frac);
+    void start_rx_sm(uint32_t clkdiv_int, uint32_t clkdiv_frac);
+    void configure_gpio(uint8_t pin, bool is_output);
+    uint32_t rx_prog_offset() const;
+    void hd_echo_check();
+    void enable_rx_irq();
+    void drain_tx_fifo();
+    void service_irq();
+    void poll_pio_errors();
+    void enable_tx_irq();
+    void upload_programs();
+    volatile uint32_t *inte_reg() const;
     /*
       this port's own lock between its interrupt and its callers, on either
       core, so they stay apart without the kernel spinlock. The thread side
@@ -244,26 +225,27 @@ private:
       spin for ever on a lock held on its own core
      */
     uint32_t _lock;
+    	//TODO: figure out unlock_isr, purge_rx_fifo
     // inline so the interrupt, which runs from Scratch X, does not call into flash
-    __attribute__((always_inline)) void _lock_isr() {
-        while (__atomic_exchange_n(&_lock, 1U, __ATOMIC_ACQUIRE) != 0U) {
-        }
-    }
-    __attribute__((always_inline)) void _unlock_isr() { __atomic_store_n(&_lock, 0U, __ATOMIC_RELEASE); }
-    // empty the receive FIFO, reading at most PIO_RX_FIFO_MAX_READS entries;
-    // inline, like _lock_isr(), so the interrupt does not call into flash
-    __attribute__((always_inline)) void _purge_rx_fifo() {
-        PIO_TypeDef *const pio = cfg().pio;
-        const uint8_t      sm  = cfg().sm_rx;
-        for (uint8_t n = 0; n < PIO_RX_FIFO_MAX_READS
-             && !(pio->FSTAT & (1u << (PIO_FSTAT_RXEMPTY_LSB + sm))); n++) {
-            (void)pio->RXF[sm];
-        }
-    }
-    uint32_t _lock_thread();
-    void _unlock_thread(uint32_t basepri);
+    // __attribute__((always_inline)) void lock_isr() {
+    //     while (__atomic_exchange_n(&_lock, 1U, __ATOMIC_ACQUIRE) != 0U) {
+    //     }
+    // }
+    // __attribute__((always_inline)) void unlock_isr() { __atomic_store_n(&_lock, 0U, __ATOMIC_RELEASE); }
+    // // empty the receive FIFO, reading at most PIO_RX_FIFO_MAX_READS entries;
+    // // inline, like _lock_isr(), so the interrupt does not call into flash
+    // __attribute__((always_inline)) void purge_rx_fifo() {
+    //     PIO_TypeDef *const pio = cfg().pio;
+    //     const uint8_t      sm  = cfg().sm_rx;
+    //     for (uint8_t n = 0; n < PIO_RX_FIFO_MAX_READS
+    //          && !(pio->FSTAT & (1u << (PIO_FSTAT_RXEMPTY_LSB + sm))); n++) {
+    //         (void)pio->RXF[sm];
+    //     }
+    // }
+    uint32_t lock_thread();
+    void unlock_thread(uint32_t basepri);
 
-    static void _calc_clkdiv(uint32_t baud, uint32_t &int_div, uint32_t &frac_div);
+    static void calc_clkdiv(uint32_t baud, uint32_t &int_div, uint32_t &frac_div);
 };
 
 }

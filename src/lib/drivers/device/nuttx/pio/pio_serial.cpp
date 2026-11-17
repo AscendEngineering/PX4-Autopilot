@@ -42,40 +42,43 @@ static const uint16_t PIO_UART_TX_BUF = 512;
 
 // TX FIFO depth per state machine (joined)
 static const uint8_t PIO_TX_FIFO_DEPTH = 8U;   // FJOIN_TX, see _start_tx_sm()
-// silence that starts an SBUS frame, the same 2 ms AP_RCProtocol_SBUS uses
+// silence that starts an SBUS frame, 2 ms 
 static const uint32_t PIO_SBUS_FRAME_GAP_US = 2000U;
 
 // Extract TX fill level for SM sm from PIO FLEVEL register.
 // FLEVEL layout: bits [sm*8+3:sm*8] = TX fill, bits [sm*8+7:sm*8+4] = RX fill
-static inline uint32_t pio_tx_level(PIO_TypeDef *pio, uint8_t sm)
+// TODO: verify
+static inline uint32_t pio_tx_level(uint8_t base, uint8_t sm)
 {
-    return (pio->FLEVEL >> (sm * 8U)) & 0xFU;
+    return (RP23XX_PIO_FLEVEL(base) >> (sm * 8U)) & 0xFU;
+    // return (pio->FLEVEL >> (sm * 8U)) & 0xFU;
 }
 
+//TODO: verify
 // NVIC priority for PIO UART RX IRQ
 #define PIO_UART_IRQ_PRIO  5
 
 // --------------------------------------------------------------------------- Static members ---------------------------------------------------------------------------
 
-PIORXDriver *PIORXDriver::_instances[PIO_NUM_INSTANCES];
-bool         PIORXDriver::_pgm_loaded[2];
+PIOUartDriver *PIOUartDriver::_instances[PIO_NUM_INSTANCES];
+// bool         PIOUartDriver::_pgm_loaded[2];
 
 
 // InstanceConfig: pin numbers from hwdef.h PIORXDRIVERn_TX/RX_PIN defines
-const PIORXDriver::InstanceConfig PIORXDriver::_cfg_table[PIO_NUM_INSTANCES] = {
-#if PIO_NUM_INSTANCES >= 1
-    { PIO0, 0, 1, PIOUART0_TX_PIN, PIOUART0_RX_PIN, RP_PIO0_IRQ_0_NUMBER },
-#endif  // PIO_NUM_INSTANCES >= 1
-#if PIO_NUM_INSTANCES >= 2
-    { PIO0, 2, 3, PIOUART1_TX_PIN, PIOUART1_RX_PIN, RP_PIO0_IRQ_1_NUMBER },
-#endif  // PIO_NUM_INSTANCES >= 2
-#if PIO_NUM_INSTANCES >= 3
-    { PIO1, 0, 1, PIOUART2_TX_PIN, PIOUART2_RX_PIN, RP_PIO1_IRQ_0_NUMBER },
-#endif  // PIO_NUM_INSTANCES >= 3
-#if PIO_NUM_INSTANCES >= 4
-    { PIO1, 2, 3, PIOUART3_TX_PIN, PIOUART3_RX_PIN, RP_PIO1_IRQ_1_NUMBER },
-#endif  // PIO_NUM_INSTANCES >= 4
-};
+// const PIOUartDriver::InstanceConfig PIORXDriver::_cfg_table[PIO_NUM_INSTANCES] = {
+// #if PIO_NUM_INSTANCES >= 1
+//     { PIO0, 0, 1, PIOUART0_TX_PIN, PIOUART0_RX_PIN, RP_PIO0_IRQ_0_NUMBER },
+// #endif  // PIO_NUM_INSTANCES >= 1
+// #if PIO_NUM_INSTANCES >= 2
+//     { PIO0, 2, 3, PIOUART1_TX_PIN, PIOUART1_RX_PIN, RP_PIO0_IRQ_1_NUMBER },
+// #endif  // PIO_NUM_INSTANCES >= 2
+// #if PIO_NUM_INSTANCES >= 3
+//     { PIO1, 0, 1, PIOUART2_TX_PIN, PIOUART2_RX_PIN, RP_PIO1_IRQ_0_NUMBER },
+// #endif  // PIO_NUM_INSTANCES >= 3
+// #if PIO_NUM_INSTANCES >= 4
+//     { PIO1, 2, 3, PIOUART3_TX_PIN, PIOUART3_RX_PIN, RP_PIO1_IRQ_1_NUMBER },
+// #endif  // PIO_NUM_INSTANCES >= 4
+// };
 
 // --------------------------------------------------------------------------- ChibiOS IRQ handlers (C linkage, vector table entries) ---------------------------------------------------------------------------
 
@@ -97,14 +100,14 @@ extern "C" {
 CH_IRQ_HANDLER(RP_PIO0_IRQ_0_HANDLER)
 {
     CH_IRQ_PROLOGUE();
-    PIORXDriver::_irq_pio0_0();
+    PIOUartDriver::_irq_pio0_0();
     CH_IRQ_EPILOGUE();
 }
 
 CH_IRQ_HANDLER(RP_PIO0_IRQ_1_HANDLER)
 {
     CH_IRQ_PROLOGUE();
-    PIORXDriver::_irq_pio0_1();
+    PIOUartDriver::_irq_pio0_1();
     CH_IRQ_EPILOGUE();
 }
 
@@ -118,7 +121,7 @@ CH_IRQ_HANDLER(RP_PIO0_IRQ_1_HANDLER)
 CH_IRQ_HANDLER(RP_PIO1_IRQ_0_HANDLER)
 {
     CH_IRQ_PROLOGUE();
-    PIORXDriver::_irq_pio1_0();
+    PIOUartDriver::irq_pio1_0();
     CH_IRQ_EPILOGUE();
 }
 #endif  // PIO_NUM_INSTANCES >= 3
@@ -127,53 +130,53 @@ CH_IRQ_HANDLER(RP_PIO1_IRQ_0_HANDLER)
 CH_IRQ_HANDLER(RP_PIO1_IRQ_1_HANDLER)
 {
     CH_IRQ_PROLOGUE();
-    PIORXDriver::_irq_pio1_1();
+    PIOUartDriver::irq_pio1_1();
     CH_IRQ_EPILOGUE();
 }
 #endif  // PIO_NUM_INSTANCES >= 4
 
 } // extern "C"
 
-void PIORXDriver::_irq_pio0_0()
+void PIOUartDriver::irq_pio0_0()
 {
 #if PIO_NUM_INSTANCES > 0
     if (_instances[0]) {
-        _instances[0]->_service_irq();
+        _instances[0]->service_irq();
     }
 #endif  // PIO_NUM_INSTANCES > 0
 }
 
-void PIORXDriver::_irq_pio0_1()
+void PIOUartDriver::irq_pio0_1()
 {
 #if PIO_NUM_INSTANCES > 1
     if (_instances[1]) {
-        _instances[1]->_service_irq();
+        _instances[1]->service_irq();
     }
 #endif  // PIO_NUM_INSTANCES > 1
 }
 
-void PIORXDriver::_irq_pio1_0()
+void PIOUartDriver::irq_pio1_0()
 {
 #if PIO_NUM_INSTANCES > 2
     if (_instances[2]) {
-        _instances[2]->_service_irq();
+        _instances[2]->service_irq();
     }
 #endif  // PIO_NUM_INSTANCES > 2
 }
 
-void PIORXDriver::_irq_pio1_1()
+void PIOUartDriver::irq_pio1_1()
 {
 #if PIO_NUM_INSTANCES > 3
     if (_instances[3]) {
-        _instances[3]->_service_irq();
+        _instances[3]->service_irq();
     }
 #endif  // PIO_NUM_INSTANCES > 3
 }
 
 // --------------------------------------------------------------------------- Constructor ---------------------------------------------------------------------------
 
-PIORXDriver::PIORXDriver(uint8_t instance)
-    : _instance(instance)
+PIOUartDriver::PIORXDriver(uint8_t instance)
+    : _instance(instance), _initialized(false)
 {
     if (instance < PIO_NUM_INSTANCES) {
         _instances[instance] = this;
@@ -182,12 +185,12 @@ PIORXDriver::PIORXDriver(uint8_t instance)
 
 // --------------------------------------------------------------------------- Private helpers ---------------------------------------------------------------------------
 
-void PIORXDriver::_calc_clkdiv(uint32_t baud, uint32_t &int_div, uint32_t &frac_div)
+void PIOUartDriver::calc_clkdiv(uint32_t baud, uint32_t &int_div, uint32_t &frac_div)
 {
 // Use the runtime-configured clk_sys value so PIO UART baud generation stays aligned with the actual RP2350 clock tree, even if the board overrides PLL/post-divider settings from the rp_clocks.h defaults.
-    uint32_t sys_clk = rp_clock_get_hz(RP_CLK_SYS);
+    uint32_t sys_clk = BOARD_SYS_FREQ;
     if (sys_clk == 0U) {
-        sys_clk = RP_CLK_SYS_FREQ;
+        sys_clk = 150 * 1000000;
     }
     const uint32_t divisor  = PIO_UART_CYCLES_PER_BIT * baud;
     int_div  = sys_clk / divisor;
@@ -197,7 +200,7 @@ void PIORXDriver::_calc_clkdiv(uint32_t baud, uint32_t &int_div, uint32_t &frac_
     if (frac_div > 255U) { frac_div = 255U; }
 }
 
-void PIORXDriver::_configure_gpio(uint8_t pin, bool is_output)
+void PIOUartDriver::configure_gpio(uint8_t pin, bool is_output)
 {
     const uint32_t funcsel = (cfg().pio == PIO0) ? RP_GPIO_FUNCSEL_PIO0
                                                  : RP_GPIO_FUNCSEL_PIO1;
@@ -211,6 +214,7 @@ void PIORXDriver::_configure_gpio(uint8_t pin, bool is_output)
   for the same thing, commented "the SA protocol usually requires pulldowns".
   A pull-up here looks harmless and leaves the far end unable to talk.
  */
+    //TODO: sub PAL_RP_IOCTRL_FUNCSEL, palSetPadMode, and option_is_set
     const bool half_duplex = _hd_enabled && (pin == cfg().tx_pin);
     const bool drive = is_output && !half_duplex;
     const bool pulldown = half_duplex
@@ -244,6 +248,7 @@ void PIORXDriver::_configure_gpio(uint8_t pin, bool is_output)
         palSetPadMode(IOPORT2, pin - 32U, mode);
     }
 
+// TODO: SIO is not a valid struct here, substitute
 // Keep GPIO direction sane even when routed to PIO function.
 // RP2350: bring-up, explicitly setting SIO OE avoids silent TX pins staying as inputs when PIO pin-direction state is not latched yet.
     if (pin < 32U) {
@@ -278,6 +283,7 @@ void PIORXDriver::_configure_gpio(uint8_t pin, bool is_output)
         // A half-duplex pad needs both overrides, which is also why either
         // inversion option implies the other there - the same convention the
         // ST driver uses.
+        //TODO: use nuttx hardware/rp23xx registers
         uint32_t ctrl = IO_BANK0->GPIO[pin].CTRL;
         if (half_duplex || is_output) {
             ctrl = (ctrl & ~PAL_RP_IOCTRL_OUTOVER_DRVHIGH) | PAL_RP_IOCTRL_OUTOVER_DRVINVPERI;
@@ -289,8 +295,9 @@ void PIORXDriver::_configure_gpio(uint8_t pin, bool is_output)
     }
 }
 
-bool PIORXDriver::_upload_programs()
+bool PIOUartDriver::upload_programs()
 {
+    //TODO: program loaded and cfg() does not exist
     const uint8_t pio_idx = (cfg().pio == PIO0) ? 0U : 1U;
     if (_pgm_loaded[pio_idx]) {
         return true;
@@ -300,17 +307,19 @@ bool PIORXDriver::_upload_programs()
       three claims are blind writes to INSTR_MEM with nothing in the hardware
       to detect a collision. Ask before writing.
      */
+    //TODO: substitute 
     if (pio_idx == 1U && !pio1_claim(PIO1Owner::PIOUART)) {
         return false;
     }
-    PIO_TypeDef *const pio = cfg().pio;
+    // PIO_TypeDef *const pio = cfg().pio;
 
 // RP2350 keeps many peripherals asserted in reset until explicitly released.
 // Ensure the selected PIO block is live before touching any PIO registers, otherwise register writes are ignored.
+	//TODO:
     rp_peripheral_unreset((pio_idx == 0U) ? RESETS_ALLREG_PIO0
                                            : RESETS_ALLREG_PIO1);
 
-    pio->CTRL = 0U; // stop all SMs
+    // pio->CTRL = 0U; // stop all SMs
 
     // RP2350 PIO PINCTRL BASE fields are 5-bit (0-31). With GPIOBASE=0 (default),
     // GPIO32+ is inaccessible -- a 5-bit value truncates modulo 32, so GPIO34
@@ -321,10 +330,10 @@ bool PIORXDriver::_upload_programs()
     (*reinterpret_cast<volatile uint32_t *>(reinterpret_cast<uintptr_t>(pio) + 0x168U)) = 16U;
 
     // Start from a known IRQ mask state; each instance arms its own sources.
-    pio->IRQ0_INTE = 0U;
-    pio->IRQ1_INTE = 0U;
+    // pio->IRQ0_INTE = 0U;
+    // pio->IRQ1_INTE = 0U;
 
-	//TODO:
+	//TODO: fix function parameters
     rp23xx_pio_add_program(pio->INSTR_MEM, PIO_UART_TX_PROG_OFFSET,
                     uart_tx_program_instructions, PIO_UART_TX_PROG_LEN);
     rp23xx_pio_add_program(pio->INSTR_MEM, PIO_UART_RX_PROG_OFFSET,
@@ -332,15 +341,16 @@ bool PIORXDriver::_upload_programs()
     rp23xx_pio_add_program(pio->INSTR_MEM, PIO_UART_RX_SBUS_PROG_OFFSET,
                     uart_rx_sbus_program_instructions, PIO_UART_RX_SBUS_PROG_LEN);
 
-    _pgm_loaded[pio_idx] = true;
+    // _pgm_loaded[pio_idx] = true;
 
     return true;
 }
 
-void PIORXDriver::_start_tx_sm(uint32_t int_div, uint32_t frac_div)
+void PIOUartDriver::start_tx_sm(uint32_t int_div, uint32_t frac_div)
 {
-    const InstanceConfig &c = cfg();
-    PIO_TypeDef *const pio   = c.pio;
+    // const InstanceConfig &c = cfg();
+    // PIO_TypeDef *const pio   = c.pio;
+    	// TODO:
     const uint8_t      sm    = c.sm_tx;
     const uint8_t      tx_pin = c.tx_pin;
 
@@ -404,22 +414,23 @@ void PIORXDriver::_start_tx_sm(uint32_t int_div, uint32_t frac_div)
   the line is handed back, and after a restart the PC reads 0 - the transmit
   program - so it has to be pointed at the right entry point explicitly.
  */
-uint32_t PIORXDriver::_rx_prog_offset() const
+uint32_t PIOUartDriver::rx_prog_offset() const
 {
     return _sbus_rx_prog ? PIO_UART_RX_SBUS_PROG_OFFSET
                          : PIO_UART_RX_PROG_OFFSET;
 }
 
-void PIORXDriver::_start_rx_sm(uint32_t int_div, uint32_t frac_div)
+void PIOUartDriver::start_rx_sm(uint32_t int_div, uint32_t frac_div)
 {
-    PIO_TypeDef *const pio   = cfg().pio;
+    // PIO_TypeDef *const pio   = cfg().pio;
+    	// TODO:
     const uint8_t      sm    = cfg().sm_rx;
     // half duplex listens on the wire it transmits on
     const uint8_t      rx_pin = _hd_enabled ? cfg().tx_pin : cfg().rx_pin;
 
     // Choose between the standard 8N1/8N2 RX program and the SBUS 8E2 program
     // (which adds a parity-bit skip after the 8 data bits).
-    const uint32_t rx_offset = _rx_prog_offset();
+    const uint32_t rx_offset = rx_prog_offset();
     const uint32_t rx_len = _sbus_rx_prog ? PIO_UART_RX_SBUS_PROG_LEN
                                          : PIO_UART_RX_PROG_LEN;
 
@@ -484,9 +495,10 @@ void PIORXDriver::_start_rx_sm(uint32_t int_div, uint32_t frac_div)
   If this interrupt is itself held off past the far end's turnaround, the
   first bytes of the reply are in the FIFO with the echo and go with it.
  */
-void PIORXDriver::_hd_echo_check()
+void PIOUartDriver::hd_echo_check()
 {
-    PIO_TypeDef *const pio   = cfg().pio;
+    // PIO_TypeDef *const pio   = cfg().pio;
+    	// TODO:
     const uint8_t      sm_tx = cfg().sm_tx;
 
     if ((pio->IRQ & PIO_IRQ_TX_DONE_FLAG(sm_tx)) == 0U) {
@@ -503,13 +515,14 @@ void PIORXDriver::_hd_echo_check()
         && pc < PIO_UART_TX_PROG_OFFSET + PIO_UART_TX_PROG_LEN - 1U) {
         return;
     }
-    _purge_rx_fifo();
+    purge_rx_fifo();
     _hd_echo_active = false;
 }
 
-void PIORXDriver::_enable_rx_irq()
+void PIOUartDriver::enable_rx_irq()
 {
-    PIO_TypeDef *const pio   = cfg().pio;
+    // PIO_TypeDef *const pio   = cfg().pio;
+    	// TODO:
     const uint8_t      sm_rx = cfg().sm_rx;
     uint32_t rx_mask = PIO_INTE_RX_NOTEMPTY(sm_rx);
     if (_hd_enabled) {
@@ -521,7 +534,7 @@ void PIORXDriver::_enable_rx_irq()
 
 // Drop any stale pending data before enabling IRQ-driven RX.
 // During bring-up, random FIFO residue can otherwise cause an immediate IRQ retrigger loop before the driver is fully initialized.
-    _purge_rx_fifo();
+    purge_rx_fifo();
 
     if (sm_rx <= 1U) {
 // Enable exactly one RXNEMPTY source for this instance.
@@ -533,7 +546,7 @@ void PIORXDriver::_enable_rx_irq()
         pio->IRQ1_INTE = rx_mask;
     }
 
-    nvicEnableVector(cfg().irq_num, PIO_UART_IRQ_PRIO);
+    // nvicEnableVector(cfg().irq_num, PIO_UART_IRQ_PRIO);
 }
 
 /*
@@ -541,23 +554,26 @@ void PIORXDriver::_enable_rx_irq()
   is chosen per instance in the config table and the two PIO0 UARTs take one
   each, so the register follows the receive state machine index.
  */
-volatile uint32_t *PIORXDriver::_inte_reg() const
+volatile uint32_t *PIOUartDriver::inte_reg() const
 {
-    PIO_TypeDef *const pio = cfg().pio;
+    // PIO_TypeDef *const pio = cfg().pio;
+    	// TODO:
     return (cfg().sm_rx <= 1U) ? &pio->IRQ0_INTE : &pio->IRQ1_INTE;
 }
 
-uint32_t PIORXDriver::_lock_thread()
+uint32_t PIOUartDriver::lock_thread()
 {
+	//TODO:
     const uint32_t basepri = __get_BASEPRI();
     __set_BASEPRI_MAX(CORTEX_BASEPRI_KERNEL);
-    _lock_isr();
+    lock_isr();
     return basepri;
 }
 
-void PIORXDriver::_unlock_thread(uint32_t basepri)
+void PIOUartDriver::unlock_thread(uint32_t basepri)
 {
-    _unlock_isr();
+	//TODO:
+    unlock_isr();
     __set_BASEPRI(basepri);
 }
 
@@ -574,46 +590,33 @@ void PIORXDriver::_unlock_thread(uint32_t basepri)
   interrupt and from _available(), which the protocol layers poll whether or
   not anything is being received.
  */
-void PIORXDriver::_poll_pio_errors()
+void PIOUartDriver::poll_pio_errors()
 {
-    PIO_TypeDef *const pio = cfg().pio;
+    // PIO_TypeDef *const pio = cfg().pio;
+    	// TODO:
     const uint8_t      sm  = cfg().sm_rx;
 
     if ((pio->FDEBUG & PIO_FDEBUG_RXSTALL(sm)) != 0U) {
         pio->FDEBUG = PIO_FDEBUG_RXSTALL(sm);
-#if HAL_UART_STATS_ENABLED
-        _rx_stats_overruns++;
-#endif  // HAL_UART_STATS_ENABLED
     }
     if ((pio->IRQ & PIO_IRQ_FRAMING_FLAG(sm)) != 0U) {
         pio->IRQ = PIO_IRQ_FRAMING_FLAG(sm);
-#if HAL_UART_STATS_ENABLED
-        _rx_stats_framing_errors++;
-#endif  // HAL_UART_STATS_ENABLED
     }
 }
 
 // Both directions share one vector, so both are checked on every entry.
-void PIORXDriver::_service_irq()
+void PIOUartDriver::service_irq()
 {
 
     // apart from the purges and _write() on either core; masking the vector
     // only reaches the core that does it
-    _lock_isr();
-    _poll_pio_errors();
-    _service_rx_fifo();
-    _drain_tx_fifo();
-    _hd_echo_check();
-    _unlock_isr();
+    lock_isr();
+    poll_pio_errors();
+    service_rx_fifo();
+    drain_tx_fifo();
+    hd_echo_check();
+    unlock_isr();
 
-#if HAL_UART_STATS_ENABLED
-    // RXNEMPTY has no watermark, so at 420 kbaud this runs once per byte
-    const uint32_t spent = TIMER0->TIMERAWL - entry_us;
-    _irq_stats_us += spent;
-    if (spent > _irq_stats_max_us) {
-        _irq_stats_max_us = spent;
-    }
-#endif  // HAL_UART_STATS_ENABLED
 }
 
 /*
@@ -622,17 +625,18 @@ void PIORXDriver::_service_irq()
   otherwise TXNFULL is true whenever the FIFO has room, which is almost
   always, and the interrupt never stops firing.
  */
-void PIORXDriver::_enable_tx_irq()
+void PIOUartDriver::enable_tx_irq()
 {
+	//TODO:
     *_inte_reg() |= PIO_INTE_TX_NOTFULL(cfg().sm_tx);
 }
 
 // --------------------------------------------------------------------------- ISR: drain RX FIFO into ring buffer ---------------------------------------------------------------------------
 
-void PIORXDriver::_service_rx_fifo()
+void PIOUartDriver::service_rx_fifo()
 {
-    PIO_TypeDef *const pio = cfg().pio;
-    const uint8_t      sm  = cfg().sm_rx;
+    // PIO_TypeDef *const pio = cfg().pio;
+    // const uint8_t      sm  = cfg().sm_rx;
 
     volatile uint8_t *const rxfifo_byte = ((volatile uint8_t *)&pio->RXF[sm]) + 3;
     uint32_t drained = 0;
@@ -640,7 +644,7 @@ void PIORXDriver::_service_rx_fifo()
     uint32_t lost = 0;
     const bool sbus_sanitize = _sbus_rx_prog;
     // Alignment needs the wire timing. Master's decoder starts a frame only
-    // after HAL_SBUS_FRAME_GAP (2000 us) of silence, and by the time these
+    // after (2000 us) of silence, and by the time these
     // bytes reach it they are a batch out of a ring buffer with the gaps gone,
     // so this layer is the last one that can apply the test. The flags nibble
     // alone accepts a misaligned window 1 time in 16.
@@ -721,7 +725,7 @@ void PIORXDriver::_service_rx_fifo()
     }
 
     if (received != 0U) {
-        _receive_timestamp[_receive_timestamp_idx ^ 1U] = AP_HAL::micros64();
+        _receive_timestamp[_receive_timestamp_idx ^ 1U] = hrt_absolute_time();
         _receive_timestamp_idx ^= 1U;
     }
 }
@@ -731,7 +735,7 @@ void PIORXDriver::_service_rx_fifo()
   UARTDriver::receive_time_constraint_us() works it out. FPort, SRXL2 and
   GHST use it to skip a reply that would be too late
  */
-uint64_t PIORXDriver::receive_time_constraint_us(uint16_t nbytes)
+uint64_t PIOUartDriver::receive_time_constraint_us(uint16_t nbytes)
 {
     uint64_t last_receive_us = _receive_timestamp[_receive_timestamp_idx];
     if (_active_baud > 0) {
@@ -742,9 +746,7 @@ uint64_t PIORXDriver::receive_time_constraint_us(uint16_t nbytes)
     return last_receive_us;
 }
 
-// --------------------------------------------------------------------------- AP_HAL::UARTDriver protected virtual overrides ---------------------------------------------------------------------------
-
-void PIORXDriver::_begin(uint32_t b, uint16_t rxSpace, uint16_t txSpace)
+void PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace)
 {
     if (_instance >= PIO_NUM_INSTANCES) {
         return;
@@ -758,6 +760,7 @@ void PIORXDriver::_begin(uint32_t b, uint16_t rxSpace, uint16_t txSpace)
 
 // SERIAL_CONTROL commonly calls begin() repeatedly with unchanged parameters.
 // Reinitializing PIO SMs on each packet disrupts RX/TX and can inject framing noise into loopback tests.
+	// TODO:
     const bool rxinv = option_is_set(Option::OPTION_RXINV);
     const bool hdplex = option_is_set(Option::OPTION_HDPLEX);
     if (_initialized && _active_baud == b && _active_rxinv == rxinv
@@ -786,7 +789,7 @@ void PIORXDriver::_begin(uint32_t b, uint16_t rxSpace, uint16_t txSpace)
         }
     }
 
-    if (!_upload_programs()) {
+    if (!upload_programs()) {
         // PIO1 belongs to something else; leaving the pins alone is the only
         // safe answer, and the broker has already said who won
         return;
@@ -795,34 +798,34 @@ void PIORXDriver::_begin(uint32_t b, uint16_t rxSpace, uint16_t txSpace)
     _hd_enabled = hdplex;
     _hd_echo_active = false;
 
-    _configure_gpio(cfg().tx_pin, true);
+    configure_gpio(cfg().tx_pin, true);
     if (!hdplex) {
         // in half duplex the receive pad is not ours; leave it as the hwdef
         // left it rather than routing a second pin to a state machine that is
         // now listening somewhere else
-        _configure_gpio(cfg().rx_pin, false);
+        configure_gpio(cfg().rx_pin, false);
     }
 
     uint32_t int_div, frac_div;
-    _calc_clkdiv(b, int_div, frac_div);
+    calc_clkdiv(b, int_div, frac_div);
 
     _sbus_rx_prog = rxinv && (b == 100000U);
 
-    _start_tx_sm(int_div, frac_div);
-    _start_rx_sm(int_div, frac_div);
+    start_tx_sm(int_div, frac_div);
+    start_rx_sm(int_div, frac_div);
 
 // Start each session from a clean RX state.
 // During clock/pin bring-up, the RX SM can capture transient bits
     // on a re-begin the RX IRQ is still live and writes _readbuf, so purge
     // under the port lock as _discard_input() does
-    const uint32_t basepri = _lock_thread();
+    const uint32_t basepri = lock_thread();
     {
-        _purge_rx_fifo();
+        purge_rx_fifo();
         if (_readbuf) {
             _readbuf->clear();
         }
     }
-    _unlock_thread(basepri);
+    unlock_thread(basepri);
 
     // Mark initialized before enabling RX IRQ so ISR writes can safely append
     // into the software ring buffer as soon as bytes start arriving.
@@ -831,28 +834,30 @@ void PIORXDriver::_begin(uint32_t b, uint16_t rxSpace, uint16_t txSpace)
     _active_rxinv = rxinv;
     _active_hdplex = hdplex;
     _active_stop_bits = _stop_bits;
-    _enable_rx_irq();
+    enable_rx_irq();
 }
 
-void PIORXDriver::_end()
+void PIOUartDriver::close_uart()
 {
     if (!_initialized) {
         return;
     }
-    PIO_TypeDef *const pio   = cfg().pio;
-    const uint8_t      sm_tx = cfg().sm_tx;
-    const uint8_t      sm_rx = cfg().sm_rx;
+    // PIO_TypeDef *const pio   = cfg().pio;
+    // const uint8_t      sm_tx = cfg().sm_tx;
+    // const uint8_t      sm_rx = cfg().sm_rx;
 
-    pio->CTRL &= ~((1u << (PIO_CTRL_SM_ENABLE_LSB + sm_tx))
-                 | (1u << (PIO_CTRL_SM_ENABLE_LSB + sm_rx)));
+    // pio->CTRL &= ~((1u << (PIO_CTRL_SM_ENABLE_LSB + sm_tx))
+    //              | (1u << (PIO_CTRL_SM_ENABLE_LSB + sm_rx)));
 
-    nvicDisableVector(cfg().irq_num);
+    // nvicDisableVector(cfg().irq_num);
+    
     // the PIO's own enables reach both cores, unlike the vector; a stopped
     // transmitter's FIFO is never full, so its source would fire for ever
-    const uint32_t basepri = _lock_thread();
+    	// TODO:
+    const uint32_t basepri = lock_thread();
     *_inte_reg() &= ~(PIO_INTE_RX_NOTEMPTY(sm_rx) | PIO_INTE_TX_NOTFULL(sm_tx)
                       | PIO_IRQ_SM(sm_tx));
-    _unlock_thread(basepri);
+    unlock_thread(basepri);
 
     _initialized = false;
     _active_baud = 0;
@@ -865,7 +870,7 @@ void PIORXDriver::_end()
     _sbus_rx.ofs = 0;
 }
 
-void PIORXDriver::_flush()
+void PIOUartDriver::flush_buffer()
 {
     if (!_initialized) {
         return;
@@ -873,16 +878,16 @@ void PIORXDriver::_flush()
 
     // Wait for the hardware FIFO/shift engine to become idle so callers that
     // require synchronous transmission semantics can force completion.
-    const uint32_t start_ms = AP_HAL::millis();
-    while (tx_pending() && (AP_HAL::millis() - start_ms) < 50U) {
-        hal.scheduler->delay_microseconds(50);
+    const uint32_t start_ms = hrt_absolute_time() / 1000;
+    while (tx_pending() && ((hrt_absolute_time() / 1000) - start_ms) < 50U) {
+        ScheduleDelayed(50);
     }
 }
 
-uint32_t PIORXDriver::_available()
+ssize_t PIOUartDriver::bytesAvailable()
 {
     if (_initialized) {
-        _poll_pio_errors();
+        poll_pio_errors();
     }
     if (!_initialized || !_readbuf) {
         return 0;
@@ -890,7 +895,7 @@ uint32_t PIORXDriver::_available()
     return _readbuf->available();
 }
 
-bool PIORXDriver::_discard_input()
+bool PIOUartDriver::discard_input()
 {
     if (!_initialized || !_readbuf) {
         return false;
@@ -898,16 +903,17 @@ bool PIORXDriver::_discard_input()
 // ByteBuffer::clear() (head=tail=0) is not ISR-safe
 // the RX ISR also writes to _readbuf via _service_rx_fifo().
 // _begin() does the same purge, also under the port lock.
-    const uint32_t basepri = _lock_thread();
+	// TODO:
+    const uint32_t basepri = lock_thread();
     {
-        _purge_rx_fifo();
+        purge_rx_fifo();
         _readbuf->clear();
     }
-    _unlock_thread(basepri);
+    unlock_thread(basepri);
     return true;
 }
 
-ssize_t PIORXDriver::_read(uint8_t *buffer, uint16_t count)
+ssize_t PIOUartDriver::read_bytes(uint8_t *buffer, uint16_t count)
 {
     if (!_initialized || !_readbuf || !buffer) {
         return -1;
@@ -915,16 +921,17 @@ ssize_t PIORXDriver::_read(uint8_t *buffer, uint16_t count)
     return (ssize_t)_readbuf->read(buffer, count);
 }
 
-void PIORXDriver::_drain_tx_fifo()
+void PIOUartDriver::drain_tx_fifo()
 {
     if (!_writebuf || !_initialized) {
         return;
     }
-    PIO_TypeDef *const pio = cfg().pio;
-    const uint8_t      sm  = cfg().sm_tx;
+    // PIO_TypeDef *const pio = cfg().pio;
+    // const uint8_t      sm  = cfg().sm_tx;
 
     // Move as many bytes as the TX FIFO has free slots
     uint8_t byte;
+    	//TODO:
     while (pio_tx_level(pio, sm) < PIO_TX_FIFO_DEPTH
            && _writebuf->read_byte(&byte)) {
         // in half duplex the byte comes back to us; see _hd_echo_check()
@@ -935,6 +942,7 @@ void PIORXDriver::_drain_tx_fifo()
     }
 
     if (_writebuf->available() == 0) {
+    		
         *_inte_reg() &= ~PIO_INTE_TX_NOTFULL(sm);
     }
 }
@@ -950,14 +958,14 @@ void PIORXDriver::_drain_tx_fifo()
   FIFO here and arming the interrupt covers that case without blocking: the
   first eight bytes go immediately and the interrupt carries the rest.
  */
-size_t PIORXDriver::_write(const uint8_t *buffer, size_t size)
+size_t PIOUartDriver::write_bytes(const uint8_t *buffer, size_t size)
 {
     if (!_initialized || !_writebuf || buffer == nullptr || size == 0) {
         return 0;
     }
     if (_parity_requested) {
         if (!_parity_warned) {
-            DEV_PRINTF("PIO%u: no parity on transmit, use a UART for SBUS output\n", unsigned(_instance));
+            PX4_WARN("PIO%u: no parity on transmit, use a UART for SBUS output\n", unsigned(_instance));
             _parity_warned = true;
         }
         return 0;
@@ -965,6 +973,7 @@ size_t PIORXDriver::_write(const uint8_t *buffer, size_t size)
 
     size_t written;
     {
+    		//TODO:
         WITH_SEMAPHORE(_write_mutex);
         written = _writebuf->write(buffer, size);
     }
@@ -975,22 +984,20 @@ size_t PIORXDriver::_write(const uint8_t *buffer, size_t size)
     // reads a byte and then writes it, and the interrupt draining in between
     // puts later bytes on the wire first.
     {
-        const uint32_t basepri = _lock_thread();
-        _drain_tx_fifo();
+        const uint32_t basepri = lock_thread();
+        drain_tx_fifo();
         // inside the lock as well: the drain clears PIO_INTE_TX_NOTFULL when it
         // empties the ring, so testing out here would re-arm it for nothing
         if (_writebuf->available() > 0) {
-            _enable_tx_irq();
+            enable_tx_irq();
         }
-        _unlock_thread(basepri);
+        unlock_thread(basepri);
     }
 
     return written;
 }
 
-// --------------------------------------------------------------------------- AP_HAL::UARTDriver public virtual overrides ---------------------------------------------------------------------------
-
-uint32_t PIORXDriver::txspace()
+uint32_t PIOUartDriver::txspace()
 {
     if (!_initialized) {
         return 0;
@@ -1019,7 +1026,7 @@ uint32_t PIORXDriver::txspace()
   switching a half duplex line around the instant this returns false could
   clip it. Wait a bit time if that matters.
  */
-bool PIORXDriver::tx_pending()
+bool PIOUartDriver::tx_pending()
 {
     if (!_initialized) {
         return false;
@@ -1027,8 +1034,8 @@ bool PIORXDriver::tx_pending()
     if (_writebuf != nullptr && _writebuf->available() > 0) {
         return true;
     }
-
-    PIO_TypeDef *const pio = cfg().pio;
+	//TODO:
+    // PIO_TypeDef *const pio = cfg().pio;
     const uint8_t      sm  = cfg().sm_tx;
     if (!(pio->FSTAT & (1u << (PIO_FSTAT_TXEMPTY_LSB + sm)))) {
         return true;
@@ -1046,7 +1053,7 @@ bool PIORXDriver::tx_pending()
   Pull direction is fixed by the pad configuration each mode needs, and there
   is no DMA on this path, so those options are accepted and do nothing.
  */
-bool PIORXDriver::_set_options(uint16_t options)
+bool PIOUartDriver::set_options(uint16_t options)
 {
     const uint16_t supported = OPTION_RXINV | OPTION_TXINV | OPTION_HDPLEX
                              | OPTION_PULLDOWN_RX | OPTION_PULLUP_RX
@@ -1067,23 +1074,21 @@ bool PIORXDriver::_set_options(uint16_t options)
 
 /*
   Stop bits reach the wire through Y in the transmit program, so a change only
-  takes effect at the next _begin(). AP_SmartAudio sets this before it calls
-  begin() from its own thread, which is the order that matters; a later change
-  on a running port is picked up by the guard in _begin().
+  takes effect at the next open
  */
-void PIORXDriver::_set_stop_bits(int n)
+void PIOUartDriver::set_stop_bits(int n)
 {
     _stop_bits = (n >= 2) ? 2 : 1;
 }
 
-bool PIORXDriver::wait_timeout(uint16_t n, uint32_t timeout_ms)
+bool PIOUartDriver::wait_timeout(uint16_t n, uint32_t timeout_ms)
 {
-    const uint32_t start = AP_HAL::millis();
-    while (AP_HAL::millis() - start < timeout_ms) {
+    const uint32_t start = hrt_absolute_time() / 1000;
+    while ((hrt_absolute_time() / 1000) - start < timeout_ms) {
         if (_available() >= n) {
             return true;
         }
-        hal.scheduler->delay_microseconds(100);
+        ScheduleDelayed(100);
     }
     return _available() >= n;
 }
