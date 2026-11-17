@@ -16,7 +16,7 @@
  * checks out -> ISR ring buffer.
  * Baud clock: sys_clk / (8 cycles_per_bit * baud_rate).
  *
- * Programs in rp2350/pio/uart.pio.
+ * Programs in uart.pio.
  */
 #pragma once
 
@@ -24,9 +24,6 @@
 #if defined(CONFIG_ARCH_CHIP_RP23XX)
 
 // --------------------------------------------------------------------------- PIO register bit-field constants ---------------------------------------------------------------------------
-// RCOutput_pico.cpp and AP_OSD_pico.cpp use these too, so they are defined
-// whether or not the board has PIO UARTs.
-
 #define PIO_CTRL_SM_ENABLE_LSB        0u
 #define PIO_CTRL_SM_RESTART_LSB       4u
 #define PIO_CTRL_CLKDIV_RESTART_LSB   8u
@@ -89,10 +86,9 @@
 // RP2350 maps SM0..SM3 RXNEMPTY to bits 0..3.
 #define PIO_INTE_RX_NOTEMPTY(sm)  (1u << (sm))
 #define PIO_INTE_TX_NOTFULL(sm)   (1u << ((sm) + 4u))
-#endif  // defined(RP2350)
+#endif  // CONFIG_ARCH_CHIP RP23XX
 
 
-#include "rp2350_pio.h"
 #include "uart.pio.h"
 #include <px4_arch/SerialImpl.hpp>
 // --------------------------------------------------------------------------- PIO UART protocol constants ---------------------------------------------------------------------------
@@ -129,6 +125,19 @@ static_assert(PIO_UART_TX_PROG_OFFSET + PIO_UART_TX_PROG_LEN <= PIO_UART_RX_PROG
 #else
 #define PIO_NUM_INSTANCES  4U
 #endif
+static uint32_t      _pio;
+static rp23xx_pio_program_t _program;    /* the loaded program */
+static bool _program_loaded;
+static uint32_t _program_offset;
+static hrt_abstime _transaction_us;      /* time from the write of a frame to the earliest write of the next one */
+static uint16_t _ready_mask;             /* channels with a complete attempt that the module did not read yet */
+static uint16_t _no_capture_mask;  
+uint8_t       sm_tx;
+uint8_t       sm_rx;
+uint8_t       tx_pin;
+uint8_t       rx_pin;
+uint8_t       irq_num;
+
 
 
 namespace device { namespace rp2350 {
@@ -137,14 +146,6 @@ class PIORXDriver final : public SerialImpl {
 public:
     explicit PIORXDriver(const char *port, uint32_t baudrate, uint8_t instance);
     
-
-//TODO:
-// #if HAL_UART_STATS_ENABLED
-//     
-//     // cumulative receive counters for a PIO UART; false if it is not running
-//     static bool get_rx_stats(uint8_t instance, uint32_t &bytes, uint32_t &dropped,
-//                              uint32_t &overruns, uint32_t &framing);
-// #endif  // HAL_UART_STATS_ENABLED
 
     // ---- ISR dispatch handlers ----
     static void _irq_pio0_0();
@@ -170,22 +171,8 @@ protected:
     // sent rather than a frame the far end would reject; SBUS output needs a
     // hardware UART. Receive is unaffected: SBUS input has its own program
     
-//TODO:
-// #if HAL_UART_STATS_ENABLED
-//     
-//     
-//     
-// #endif  // HAL_UART_STATS_ENABLED
 
 private:
-    struct InstanceConfig {
-        PIO_TypeDef  *pio;
-        uint8_t       sm_tx;
-        uint8_t       sm_rx;
-        uint8_t       tx_pin;
-        uint8_t       rx_pin;
-        uint8_t       irq_num;
-    };
 
     static const InstanceConfig _cfg_table[PIO_NUM_INSTANCES];
     static PIORXDriver          *_instances[PIO_NUM_INSTANCES];
@@ -214,19 +201,6 @@ private:
     
     uint8_t _readbuf[512];
     uint8_t _writebuf[512];
-//TODO:
-// #if HAL_UART_STATS_ENABLED
-//     uint32_t _tx_stats_bytes;
-//     uint32_t _rx_stats_bytes;
-//     // receive ring full
-//     uint32_t _rx_stats_dropped_bytes;
-//     // RXSTALL events: the state machine's own FIFO was full
-//     uint32_t _rx_stats_overruns;
-//     uint32_t _rx_stats_framing_errors;
-//     // time in _service_irq() since the last uart_info()
-//     uint32_t _irq_stats_us;
-//     uint32_t _irq_stats_max_us;
-// #endif  // HAL_UART_STATS_ENABLED
 
     struct {
         uint8_t buf[25];

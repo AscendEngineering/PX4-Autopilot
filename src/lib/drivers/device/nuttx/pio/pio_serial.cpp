@@ -7,15 +7,30 @@
  * RP2350 PIO UART driver -- 8N1 or 8N2, no-DMA, IRQ-driven RX and TX.
  */
 
+#include <px4_platform_common/px4_config.h>
+#include <px4_platform_common/log.h>
+#include <arch/board/board.h>
+#include <px4_arch/io_timer.h>
+#include <px4_arch/micro_hal.h>
+#include <drivers/drv_hrt.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include "arm_internal.h"
+#include "hardware/rp23xx_pio.h"
+#include "rp23xx_gpio.h"
+/* The NuttX PIO header compares an enum with a limit in a parameter check: -Wtype-limits stops the build */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wtype-limits"
+#include "rp23xx_pio.h"
+#include "rp23xx_pio_instructions.h"
+#pragma GCC diagnostic pop
+
 #include "pio_serial.h"
-#include "rp2350_pio.h"
-
-//#if defined(HAL_HAVE_PIO_UARTS) && HAL_HAVE_PIO_UARTS > 0
-
-
-using namespace ChibiOS;
-
-extern const AP_HAL::HAL &hal;
+#include <string.h>
+#include "uart.pio.h"
+using namespace device;
+using namespace rp2350;
 
 // GPIO funcsel for PIO0=6, PIO1=7
 #define RP_GPIO_FUNCSEL_PIO0  6U
@@ -309,11 +324,12 @@ bool PIORXDriver::_upload_programs()
     pio->IRQ0_INTE = 0U;
     pio->IRQ1_INTE = 0U;
 
-    rp2350_pio_load(pio->INSTR_MEM, PIO_UART_TX_PROG_OFFSET,
+	//TODO:
+    rp23xx_pio_add_program(pio->INSTR_MEM, PIO_UART_TX_PROG_OFFSET,
                     uart_tx_program_instructions, PIO_UART_TX_PROG_LEN);
-    rp2350_pio_load(pio->INSTR_MEM, PIO_UART_RX_PROG_OFFSET,
+    rp23xx_pio_add_program(pio->INSTR_MEM, PIO_UART_RX_PROG_OFFSET,
                     uart_rx_program_instructions, PIO_UART_RX_PROG_LEN);
-    rp2350_pio_load(pio->INSTR_MEM, PIO_UART_RX_SBUS_PROG_OFFSET,
+    rp23xx_pio_add_program(pio->INSTR_MEM, PIO_UART_RX_SBUS_PROG_OFFSET,
                     uart_rx_sbus_program_instructions, PIO_UART_RX_SBUS_PROG_LEN);
 
     _pgm_loaded[pio_idx] = true;
@@ -580,9 +596,6 @@ void PIORXDriver::_poll_pio_errors()
 // Both directions share one vector, so both are checked on every entry.
 void PIORXDriver::_service_irq()
 {
-#if HAL_UART_STATS_ENABLED
-    const uint32_t entry_us = TIMER0->TIMERAWL;
-#endif  // HAL_UART_STATS_ENABLED
 
     // apart from the purges and _write() on either core; masking the vector
     // only reaches the core that does it
@@ -711,11 +724,6 @@ void PIORXDriver::_service_rx_fifo()
         _receive_timestamp[_receive_timestamp_idx ^ 1U] = AP_HAL::micros64();
         _receive_timestamp_idx ^= 1U;
     }
-
-#if HAL_UART_STATS_ENABLED
-    _rx_stats_bytes += received;
-    _rx_stats_dropped_bytes += lost;
-#endif  // HAL_UART_STATS_ENABLED
 }
 
 /*
@@ -977,10 +985,6 @@ size_t PIORXDriver::_write(const uint8_t *buffer, size_t size)
         _unlock_thread(basepri);
     }
 
-#if HAL_UART_STATS_ENABLED
-    _tx_stats_bytes += written;
-#endif  // HAL_UART_STATS_ENABLED
-
     return written;
 }
 
@@ -1083,52 +1087,3 @@ bool PIORXDriver::wait_timeout(uint16_t n, uint32_t timeout_ms)
     }
     return _available() >= n;
 }
-
-#if HAL_UART_STATS_ENABLED
-// same leading columns as UARTDriver::uart_info(); PIO has no noise flag or flow control
-void PIORXDriver::uart_info(ExpandingString &str, StatsTracker &stats, const uint32_t dt_ms)
-{
-    const uint32_t tx_bytes = stats.tx.update(_tx_stats_bytes);
-    const uint32_t rx_bytes = stats.rx.update(_rx_stats_bytes);
-    const uint32_t rx_dropped_bytes = stats.rx_dropped.update(_rx_stats_dropped_bytes);
-
-    // interrupt time since the last report; a byte landing between the read
-    // and the reset is lost from these, which is fine for a load figure
-    const uint32_t irq_us = _irq_stats_us;
-    const uint32_t irq_max_us = _irq_stats_max_us;
-    _irq_stats_us = 0;
-    _irq_stats_max_us = 0;
-
-    str.printf("PIO%u  TX =%8u RX =%8u TXBD=%6u RXBD=%6u RXDRP=%8u FE=%u OE=%u IRQ=%uus/s,max=%uus\n",
-               unsigned(_instance),
-               unsigned(tx_bytes),
-               unsigned(rx_bytes),
-               unsigned((tx_bytes * 10000) / dt_ms),
-               unsigned((rx_bytes * 10000) / dt_ms),
-               unsigned(rx_dropped_bytes),
-               unsigned(_rx_stats_framing_errors),
-               unsigned(_rx_stats_overruns),
-               unsigned(irq_us * 1000.0f / dt_ms),
-               unsigned(irq_max_us));
-}
-
-bool PIORXDriver::get_rx_stats(uint8_t instance, uint32_t &bytes, uint32_t &dropped,
-                               uint32_t &overruns, uint32_t &framing)
-{
-    if (instance >= PIO_NUM_INSTANCES) {
-        return false;
-    }
-    const PIORXDriver *d = _instances[instance];
-    if (d == nullptr || !d->_initialized) {
-        return false;
-    }
-    bytes = d->_rx_stats_bytes;
-    dropped = d->_rx_stats_dropped_bytes;
-    overruns = d->_rx_stats_overruns;
-    framing = d->_rx_stats_framing_errors;
-    return true;
-}
-#endif  // HAL_UART_STATS_ENABLED
-
-#endif // CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
-//#endif // HAL_HAVE_PIO_UARTS
