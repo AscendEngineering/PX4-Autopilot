@@ -48,7 +48,7 @@ static const uint32_t PIO_SBUS_FRAME_GAP_US = 2000U;
 // Extract TX fill level for SM sm from PIO FLEVEL register.
 // FLEVEL layout: bits [sm*8+3:sm*8] = TX fill, bits [sm*8+7:sm*8+4] = RX fill
 // TODO: verify
-static inline uint32_t pio_tx_level(uint8_t base, uint8_t sm)
+static inline uint32_t pio_tx_level(uint32_t base, uint8_t sm)
 {
     return (RP23XX_PIO_FLEVEL(base) >> (sm * 8U)) & 0xFU;
     // return (pio->FLEVEL >> (sm * 8U)) & 0xFU;

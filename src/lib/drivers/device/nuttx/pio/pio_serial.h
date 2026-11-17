@@ -19,7 +19,41 @@
  * Programs in uart.pio.
  */
 #pragma once
-
+//TODO: remove -for reference only
+//   struct {
+//     __IO uint32_t       CTRL;
+//     __I  uint32_t       FSTAT;
+//     __IO uint32_t       FDEBUG;
+//     __I  uint32_t       FLEVEL;
+//     __IO uint32_t       TXF[4];
+//     __I  uint32_t       RXF[4];
+//     __IO uint32_t       IRQ;
+//     __IO uint32_t       IRQ_FORCE;
+//     __IO uint32_t       INPUT_SYNC_BYPASS;
+//     __IO uint32_t       DBG_PADOUT;
+//     __IO uint32_t       DBG_PADOE;
+//     __IO uint32_t       DBG_CFGINFO;
+//     __IO uint32_t       INSTR_MEM[32];
+//     struct {
+//       __IO uint32_t     CLKDIV;
+//       __IO uint32_t     EXECCTRL;
+//       __IO uint32_t     SHIFTCTRL;
+//       __I  uint32_t     ADDR;
+//       __IO uint32_t     INSTR;
+//       __IO uint32_t     PINCTRL;
+//     } SM[4];
+//     __IO uint32_t       RXF_PUTGET[4][4];
+//     __I  uint32_t       GPIOBASE;
+//     __IO uint32_t       INTR;
+//     __IO uint32_t       IRQ0_INTE;
+//     __IO uint32_t       IRQ0_INTF;
+//     __I  uint32_t       IRQ0_INTS;
+//     __IO uint32_t       IRQ1_INTE;
+//     __IO uint32_t       IRQ1_INTF;
+//     __I  uint32_t       IRQ1_INTS;
+//     __I  uint32_t       resvd188[926];
+//   } CLR;
+// } PIO_TypeDef;
 
 #if defined(CONFIG_ARCH_CHIP_RP23XX)
 
