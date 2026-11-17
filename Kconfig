@@ -115,6 +115,14 @@ menu "Toolchain"
         help
             flag to exclude metadata to reduce flash
 
+    config BOARD_EMBED_ACTUATORS_METADATA
+        bool "Embed actuators metadata on constrained flash"
+        depends on BOARD_CONSTRAINED_FLASH && !BOARD_EXTERNAL_METADATA
+        help
+            Include actuators.json.xz (about 3 KB) in the ROMFS of a constrained flash board.
+            The ground station needs this file to show the actuator configuration.
+            Set this flag for a board that has no metadata on the official build server.
+
     config BOARD_LINKER_PREFIX
         string "linker prefix"
         help
