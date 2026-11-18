@@ -1,9 +1,10 @@
 ;
-; Analogue OSD scan-out for RP2350, loaded at offset 0 by AP_OSD_pico.cpp.
+; Analogue OSD scan-out for RP2350, loaded by pio_osd.c at the offset that
+; the NuttX PIO allocator gives.
 ;
 ; From Betaflight, src/platform/PICO/osd/osd_tx.pio, unchanged below this
 ; header apart from trailing whitespace. Only osd_tx_pal and osd_tx_ntsc are
-; used. Regenerate osd_tx.pio.h with Tools/scripts/rp2350_pioasm.py after
+; used. Regenerate osd_tx.pio.h with "Tools/pioasm/pioasm.sh osd" after
 ; editing.
 ;
 ; Copyright (c) Betaflight contributors.
