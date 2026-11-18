@@ -37,9 +37,17 @@ px4_add_module(
 	SRCS
 		pio_osd.cpp
 		pio_osd.hpp
+		char_grid.cpp
+		char_grid.h
 		osd_canvas.cpp
 		osd_canvas.h
+		osd_fields.h
+		osd_font.cpp
+		osd_font.h
 		standard_detector.h
+		symbols.h
+	MODULE_CONFIG
+		params.yaml
 	DEPENDS
 		arch_pio_osd
 		px4_work_queue

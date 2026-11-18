@@ -1,0 +1,13 @@
+module_name: pio_osd
+parameters:
+- group: OSD
+  definitions:
+    OSD_PIO_EN:
+      description:
+        short: Enable the PIO analog OSD
+        long: |-
+          Start the analog OSD of boards with an RP2350 and no OSD chip. The
+          start also sets the power rail of the video transmitter on.
+      type: boolean
+      default: 0
+      reboot_required: true
