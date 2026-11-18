@@ -132,6 +132,7 @@ static uint32_t _framebuffer[OSD_FIELD_WORDS_MAX];
 
 static spinlock_t _lock = SP_UNLOCKED;   /* the field handler against a restart or a status read on the other CPU */
 static bool _initialised;
+static bool _irq_attached;
 static rp23xx_pio_program_t _program;
 static uint32_t _program_offset;
 static uint32_t _sm;
@@ -380,8 +381,17 @@ int pio_osd_init(void)
 	px4_arch_configgpio(GPIO_OSD_SYNC | GPIO_FUN(RPI_GPIO_FUNC_SIO));
 	rp23xx_gpio_set_input_hysteresis_enabled(GPIO_OSD_SYNC, true);
 
-	irq_attach(RP23XX_PIO1_IRQ_0, field_interrupt, NULL);
-	up_enable_irq(RP23XX_PIO1_IRQ_0);
+	/*
+	 * The handler stays attached after pio_osd_deinit(). An interrupt that is
+	 * pending in the interrupt controller when the source is masked can come
+	 * after a detach, and an interrupt with no handler stops the system. The
+	 * handler does nothing while the source is masked.
+	 */
+	if (!_irq_attached) {
+		irq_attach(RP23XX_PIO1_IRQ_0, field_interrupt, NULL);
+		up_enable_irq(RP23XX_PIO1_IRQ_0);
+		_irq_attached = true;
+	}
 
 	flags = spin_lock_irqsave(&_lock);
 	_initialised = true;
@@ -405,9 +415,6 @@ void pio_osd_deinit(void)
 	rp23xx_pio_sm_set_enabled(OSD_PIO, _sm, false);
 	rp23xx_pio_sm_exec(OSD_PIO, _sm, pio_encode_set(pio_pins, 0));
 	spin_unlock_irqrestore(&_lock, flags);
-
-	up_disable_irq(RP23XX_PIO1_IRQ_0);
-	irq_detach(RP23XX_PIO1_IRQ_0);
 
 	/* The two outputs stay low without the PIO block: the camera signal goes through */
 	px4_arch_configgpio(PX4_MAKE_GPIO_OUTPUT_CLEAR(GPIO_OSD_W));
