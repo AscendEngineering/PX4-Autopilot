@@ -22,6 +22,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wtype-limits"
 #include "rp23xx_pio.h"
+#include "hardware/rp23xx_resets.h"
 #include "rp23xx_pio_instructions.h"
 #pragma GCC diagnostic pop
 
@@ -31,7 +32,6 @@
 
 using namespace device;
 using namespace rp2350;
-
 #define RP_GPIO_FUNCSEL_PIO0  6U
 #define RP_GPIO_FUNCSEL_PIO1  7U
 
@@ -50,69 +50,23 @@ static inline uint32_t pio_tx_level(uint32_t base, uint8_t sm)
 PIOUartDriver *PIOUartDriver::_instances[PIO_NUM_INSTANCES];
 
 // Static configuration table for PIO UART instances
+// PIOUART0 and PIOUART1 pins need to be all either in range 0-31 or range 16-47
+// Each PIO base can accomodate two UART tx/rx pairs each
 static const pio_uart_t _cfg_table[PIO_NUM_INSTANCES] = {
-    { .pio_base = 0, .sm_tx = 0, .sm_rx = 1, .tx_pin = 20, .rx_pin = 21, .irq_num = 0 }, // PIOUART0
-    { .pio_base = 0, .sm_tx = 2, .sm_rx = 3, .tx_pin = 34, .rx_pin = 35, .irq_num = 1 }, // PIOUART1
-    { .pio_base = 1, .sm_tx = 0, .sm_rx = 1, .tx_pin = 4,  .rx_pin = 5,  .irq_num = 0 }, // PIOUART2
-    { .pio_base = 1, .sm_tx = 2, .sm_rx = 3, .tx_pin = 6,  .rx_pin = 7,  .irq_num = 1 }, // PIOUART3
+    { .pio_base = 0, .sm_tx = 0, .sm_rx = 1, .tx_pin = 16, .rx_pin = 17, .irq_num = 0 }, // PIOUART0
+    { .pio_base = 0, .sm_tx = 2, .sm_rx = 3, .tx_pin = 42, .rx_pin = 43, .irq_num = 1 }, // PIOUART1
 };
 
-extern "C" {
-CH_IRQ_HANDLER(RP_PIO0_IRQ_0_HANDLER) {
-    CH_IRQ_PROLOGUE();
-    PIOUartDriver::_irq_pio0_0();
-    CH_IRQ_EPILOGUE();
-}
-
-CH_IRQ_HANDLER(RP_PIO0_IRQ_1_HANDLER) {
-    CH_IRQ_PROLOGUE();
-    PIOUartDriver::_irq_pio0_1();
-    CH_IRQ_EPILOGUE();
-}
-
-#if PIO_NUM_INSTANCES >= 3
-CH_IRQ_HANDLER(RP_PIO1_IRQ_0_HANDLER) {
-    CH_IRQ_PROLOGUE();
-    PIOUartDriver::irq_pio1_0();
-    CH_IRQ_EPILOGUE();
-}
-#endif
-
-#if PIO_NUM_INSTANCES >= 4
-CH_IRQ_HANDLER(RP_PIO1_IRQ_1_HANDLER) {
-    CH_IRQ_PROLOGUE();
-    PIOUartDriver::irq_pio1_1();
-    CH_IRQ_EPILOGUE();
-}
-#endif
-}
-
-void PIOUartDriver::irq_pio0_0() {
-#if PIO_NUM_INSTANCES > 0
-    if (_instances[0]) { _instances[0]->service_irq(); }
-#endif
-}
-
-void PIOUartDriver::irq_pio0_1() {
-#if PIO_NUM_INSTANCES > 1
-    if (_instances[1]) { _instances[1]->service_irq(); }
-#endif
-}
-
-void PIOUartDriver::irq_pio1_0() {
-#if PIO_NUM_INSTANCES > 2
-    if (_instances[2]) { _instances[2]->service_irq(); }
-#endif
-}
-
-void PIOUartDriver::irq_pio1_1() {
-#if PIO_NUM_INSTANCES > 3
-    if (_instances[3]) { _instances[3]->service_irq(); }
-#endif
+static void pio_uart_isr(void *arg)
+{
+    auto *driver = static_cast<PIOUartDriver *>(arg);
+    if (driver) {
+        driver->service_irq();
+    }
 }
 
 PIOUartDriver::PIOUartDriver(const char *port, uint32_t baudrate, uint8_t instance)
-    : SerialImpl(port, baudrate), _instance(instance), _initialized(false)
+    : SerialImpl(port, baudrate, ByteSize::EightBits, Parity::None, StopBits::One, FlowControl::Disabled), _instance(instance), _initialized(false)
 {
     if (instance < PIO_NUM_INSTANCES) {
         _cfg = _cfg_table[instance];
@@ -133,42 +87,34 @@ void PIOUartDriver::calc_clkdiv(uint32_t baud, uint32_t &int_div, uint32_t &frac
 
 void PIOUartDriver::configure_gpio(uint8_t pin, bool is_output)
 {
-    const uint32_t funcsel = (_cfg.pio_base == 0) ? RP_GPIO_FUNCSEL_PIO0 : RP_GPIO_FUNCSEL_PIO1;
+    const uint32_t funcsel = (_cfg.pio_base == 0) ? RP23XX_GPIO_FUNC_PIO0 : RP23XX_GPIO_FUNC_PIO1;
     const bool half_duplex = _hd_enabled && (pin == _cfg.tx_pin);
     const bool drive = is_output && !half_duplex;
     const bool pulldown = half_duplex
-        ? (option_is_set(Option::OPTION_PULLDOWN_TX) || option_is_set(Option::OPTION_PULLDOWN_RX))
-        : option_is_set(Option::OPTION_PULLDOWN_RX);
+        ? (option_is_set(_last_options, Option::OPTION_PULLDOWN_TX) || option_is_set(_last_options, Option::OPTION_PULLDOWN_RX))
+        : option_is_set(_last_options, Option::OPTION_PULLDOWN_RX);
 
-    iomode_t mode = PAL_RP_IOCTRL_FUNCSEL(funcsel) | PAL_RP_PAD_IE | PAL_RP_PAD_SCHMITT;
-    if (half_duplex) {
-        mode |= PAL_RP_PAD_DRIVE4 | (pulldown ? PAL_RP_PAD_PDE : PAL_RP_PAD_PUE);
-    } else if (is_output) {
-        mode |= PAL_RP_PAD_DRIVE4;
-    } else {
-        mode |= (pulldown ? PAL_RP_PAD_PDE : PAL_RP_PAD_PUE);
-    }
+    rp23xx_gpio_set_function(pin, funcsel);
+    rp23xx_gpio_set_pulls(pin, 0, pulldown);
 
     if (pin < 32U) {
-        palSetPadMode(IOPORT1, pin, mode);
-        if (drive) RP23XX_SIO_GPIO_OE_SET = (1u << pin);
-        else RP23XX_SIO_GPIO_OE_CLR = (1u << pin);
+        if (drive) putreg32(1u << pin, RP23XX_SIO_GPIO_OE_SET);
+        else putreg32(1u << pin, RP23XX_SIO_GPIO_OE_CLR);
     } else {
-        palSetPadMode(IOPORT2, pin - 32U, mode);
         const uint32_t bit = 1u << (pin - 32U);
-        if (drive) RP23XX_SIO_GPIO_HI_OE_SET = bit;
-        else RP23XX_SIO_GPIO_HI_OE_CLR = bit;
+        if (drive) putreg32(bit, RP23XX_SIO_GPIO_HI_OE_SET);
+        else putreg32(bit, RP23XX_SIO_GPIO_HI_OE_CLR);
     }
 
     const bool invert = half_duplex
-        ? (option_is_set(Option::OPTION_TXINV) || option_is_set(Option::OPTION_RXINV))
-        : (is_output ? option_is_set(Option::OPTION_TXINV) : option_is_set(Option::OPTION_RXINV));
+        ? (option_is_set(_last_options, Option::OPTION_TXINV) || option_is_set(_last_options, Option::OPTION_RXINV))
+        : (is_output ? option_is_set(_last_options, Option::OPTION_TXINV) : option_is_set(_last_options, Option::OPTION_RXINV));
 
     if (invert) {
-        uint32_t ctrl = RP23XX_IO_BANK0_GPIO_CTRL(pin);
-        if (half_duplex || is_output) ctrl = (ctrl & ~PAL_RP_IOCTRL_OUTOVER_DRVHIGH) | PAL_RP_IOCTRL_OUTOVER_DRVINVPERI;
-        if (half_duplex || !is_output) ctrl = (ctrl & ~PAL_RP_IOCTRL_INOVER_DRVHIGH) | PAL_RP_IOCTRL_INOVER_INV;
-        RP23XX_IO_BANK0_GPIO_CTRL(pin) = ctrl;
+        uint32_t ctrl = (*(volatile uint32_t *)RP23XX_IO_BANK0_GPIO_CTRL(pin));
+        if (half_duplex || is_output) ctrl = (ctrl & ~RP23XX_IO_BANK0_GPIO_CTRL_OUTOVER_MASK) | RP23XX_IO_BANK0_GPIO_CTRL_OUTOVER_INVERT;
+        if (half_duplex || !is_output) ctrl = (ctrl & ~RP23XX_IO_BANK0_GPIO_CTRL_INOVER_MASK) | RP23XX_IO_BANK0_GPIO_CTRL_INOVER_INVERT;
+        *(volatile uint32_t *)RP23XX_IO_BANK0_GPIO_CTRL(pin) = ctrl;
     }
 }
 
@@ -176,19 +122,30 @@ bool PIOUartDriver::upload_programs()
 {
     const uint8_t pio_idx = (_cfg.pio_base == 0) ? 0U : 1U;
     // Resource claiming via NuttX API
-    if (pio_idx == 1U && !rp23xx_pio_claim_sm_mask(1, (1u << _cfg.sm_tx) | (1u << _cfg.sm_rx))) {
-        return false;
+    if (pio_idx == 1U) {
+        rp23xx_pio_claim_sm_mask(1, (1u << _cfg.sm_tx) | (1u << _cfg.sm_rx));
     }
 
-    rp_peripheral_unreset((pio_idx == 0U) ? RESETS_ALLREG_PIO0 : RESETS_ALLREG_PIO1);
+    // De-assert reset for the PIO peripheral
+    uint32_t reset_mask = (pio_idx == 0U) ? RP23XX_RESETS_RESET_PIO0 : RP23XX_RESETS_RESET_PIO1;
+    putreg32(getreg32(RP23XX_RESETS_RESET) & ~reset_mask, RP23XX_RESETS_RESET);
+
+    // Wait for reset to complete
+    uint32_t done_mask = (pio_idx == 0U) ? RP23XX_RESETS_RESET_DONE_PIO0 : RP23XX_RESETS_RESET_DONE_PIO1;
+    while (!(getreg32(RP23XX_RESETS_RESET_DONE) & done_mask));
 
     // Set GPIOBASE to 16 to reach GPIO 16-47
     uint32_t pio_base = _cfg.pio_base;
     *reinterpret_cast<volatile uint32_t *>(pio_base + 0x168U) = 16U;
 
-    rp23xx_pio_add_program(pio_base + 0x48, PIO_UART_TX_PROG_OFFSET, uart_tx_program_instructions, PIO_UART_TX_PROG_LEN);
-    rp23xx_pio_add_program(pio_base + 0x48, PIO_UART_RX_PROG_OFFSET, uart_rx_program_instructions, PIO_UART_RX_PROG_LEN);
-    rp23xx_pio_add_program(pio_base + 0x48, PIO_UART_RX_SBUS_PROG_OFFSET, uart_rx_sbus_program_instructions, PIO_UART_RX_SBUS_PROG_LEN);
+    // Note: the NuttX rp23xx_pio_add_program takes the program_t struct which already contains length
+    rp23xx_pio_program_t tx_prog = { .instructions = uart_tx_program_instructions, .length = PIO_UART_TX_PROG_LEN, .origin = -1 };
+    rp23xx_pio_program_t rx_prog = { .instructions = uart_rx_program_instructions, .length = PIO_UART_RX_PROG_LEN, .origin = -1 };
+    rp23xx_pio_program_t rx_sbus_prog = { .instructions = uart_rx_sbus_program_instructions, .length = PIO_UART_RX_SBUS_PROG_LEN, .origin = -1 };
+
+    rp23xx_pio_add_program(pio_base, &tx_prog);
+    rp23xx_pio_add_program(pio_base, &rx_prog);
+    rp23xx_pio_add_program(pio_base, &rx_sbus_prog);
 
     return true;
 }
@@ -199,12 +156,12 @@ void PIOUartDriver::start_tx_sm(uint32_t int_div, uint32_t frac_div)
     const uint8_t sm = _cfg.sm_tx;
     const uint8_t tx_pin = _cfg.tx_pin;
 
-    RP23XX_PIO_CTRL(pio_base) &= ~(1u << (PIO_CTRL_SM_ENABLE_LSB + sm));
-    RP23XX_PIO_SM_CLKDIV(pio_base, sm) = (int_div << PIO_CLKDIV_INT_LSB) | (frac_div << PIO_CLKDIV_FRAC_LSB);
-    RP23XX_PIO_SM_EXECCTRL(pio_base, sm) = ((uint32_t)(PIO_UART_TX_PROG_OFFSET + PIO_UART_TX_PROG_LEN - 1) << PIO_EXECCTRL_WRAP_TOP_LSB)
+    putreg32(getreg32(RP23XX_PIO_CTRL(pio_base)) & ~(1u << (PIO_CTRL_SM_ENABLE_LSB + sm)), RP23XX_PIO_CTRL(pio_base));
+    putreg32((int_div << PIO_CLKDIV_INT_LSB) | (frac_div << PIO_CLKDIV_FRAC_LSB), RP23XX_PIO_SM_CLKDIV(pio_base, sm));
+    putreg32(((uint32_t)(PIO_UART_TX_PROG_OFFSET + PIO_UART_TX_PROG_LEN - 1) << PIO_EXECCTRL_WRAP_TOP_LSB)
                                           | ((uint32_t)PIO_UART_TX_PROG_OFFSET << PIO_EXECCTRL_WRAP_BOT_LSB)
-                                          | PIO_EXECCTRL_STATUS_TX_EMPTY | (1u << 30);
-    RP23XX_PIO_SM_SHIFTCTRL(pio_base, sm) = PIO_SHIFTCTRL_OUT_SHIFTDIR | PIO_SHIFTCTRL_FJOIN_TX;
+                                          | PIO_EXECCTRL_STATUS_TX_EMPTY | (1u << 30), RP23XX_PIO_SM_EXECCTRL(pio_base, sm));
+    putreg32(PIO_SHIFTCTRL_OUT_SHIFTDIR | PIO_SHIFTCTRL_FJOIN_TX, RP23XX_PIO_SM_SHIFTCTRL(pio_base, sm));
 
     const uint8_t rel_tx = tx_pin - 16U;
     const uint32_t pinctrl_base = (2u << PIO_PINCTRL_SIDESET_COUNT_LSB)
@@ -213,14 +170,14 @@ void PIOUartDriver::start_tx_sm(uint32_t int_div, uint32_t frac_div)
                                 | (1u << PIO_PINCTRL_OUT_COUNT_LSB)
                                 | ((uint32_t)rel_tx << PIO_PINCTRL_SET_BASE_LSB);
 
-    RP23XX_PIO_SM_PINCTRL(pio_base, sm) = pinctrl_base | (1u << PIO_PINCTRL_SET_COUNT_LSB);
-    RP23XX_PIO_SM_INSTR(pio_base, sm) = PIO_UART_INSTR_SET_PINS_1;
-    RP23XX_PIO_SM_INSTR(pio_base, sm) = PIO_UART_INSTR_SET_PINDIRS(_hd_enabled ? 0u : 1u);
-    RP23XX_PIO_SM_PINCTRL(pio_base, sm) = pinctrl_base | ((_hd_enabled ? 1u : 0u) << PIO_PINCTRL_SET_COUNT_LSB);
-    RP23XX_PIO_CTRL(pio_base) |= (1u << (PIO_CTRL_CLKDIV_RESTART_LSB + sm)) | (1u << (PIO_CTRL_SM_RESTART_LSB + sm));
-    RP23XX_PIO_SM_INSTR(pio_base, sm) = PIO_UART_INSTR_SET_Y((_stop_bits >= 2) ? 1u : 0u);
-    RP23XX_PIO_SM_INSTR(pio_base, sm) = PIO_UART_INSTR_JMP(PIO_UART_TX_PROG_OFFSET);
-    RP23XX_PIO_CTRL(pio_base) |= (1u << (PIO_CTRL_SM_ENABLE_LSB + sm));
+    putreg32(pinctrl_base | (1u << PIO_PINCTRL_SET_COUNT_LSB), RP23XX_PIO_SM_PINCTRL(pio_base, sm));
+    putreg32(PIO_UART_INSTR_SET_PINS_1, RP23XX_PIO_SM_INSTR(pio_base, sm));
+    putreg32(PIO_UART_INSTR_SET_PINDIRS(_hd_enabled ? 0u : 1u), RP23XX_PIO_SM_INSTR(pio_base, sm));
+    putreg32(pinctrl_base | ((_hd_enabled ? 1u : 0u) << PIO_PINCTRL_SET_COUNT_LSB), RP23XX_PIO_SM_PINCTRL(pio_base, sm));
+    putreg32((1u << (PIO_CTRL_CLKDIV_RESTART_LSB + sm)) | (1u << (PIO_CTRL_SM_RESTART_LSB + sm)), RP23XX_PIO_CTRL(pio_base));
+    putreg32(PIO_UART_INSTR_SET_Y((_active_stop_bits >= 2) ? 1u : 0u), RP23XX_PIO_SM_INSTR(pio_base, sm));
+    putreg32(PIO_UART_INSTR_JMP(PIO_UART_TX_PROG_OFFSET), RP23XX_PIO_SM_INSTR(pio_base, sm));
+    putreg32(getreg32(RP23XX_PIO_CTRL(pio_base)) | (1u << (PIO_CTRL_SM_ENABLE_LSB + sm)), RP23XX_PIO_CTRL(pio_base));
 }
 
 uint32_t PIOUartDriver::rx_prog_offset() const {
@@ -235,17 +192,17 @@ void PIOUartDriver::start_rx_sm(uint32_t int_div, uint32_t frac_div)
     const uint32_t rx_offset = rx_prog_offset();
     const uint32_t rx_len = _sbus_rx_prog ? PIO_UART_RX_SBUS_PROG_LEN : PIO_UART_RX_PROG_LEN;
 
-    RP23XX_PIO_CTRL(pio_base) &= ~(1u << (PIO_CTRL_SM_ENABLE_LSB + sm));
-    RP23XX_PIO_SM_CLKDIV(pio_base, sm) = (int_div << PIO_CLKDIV_INT_LSB) | (frac_div << PIO_CLKDIV_FRAC_LSB);
+    putreg32(getreg32(RP23XX_PIO_CTRL(pio_base)) & ~(1u << (PIO_CTRL_SM_ENABLE_LSB + sm)), RP23XX_PIO_CTRL(pio_base));
+    putreg32((int_div << PIO_CLKDIV_INT_LSB) | (frac_div << PIO_CLKDIV_FRAC_LSB), RP23XX_PIO_SM_CLKDIV(pio_base, sm));
     const uint8_t rel_rx = rx_pin - 16U;
-    RP23XX_PIO_SM_EXECCTRL(pio_base, sm) = ((uint32_t)(rx_offset + rx_len - 1) << PIO_EXECCTRL_WRAP_TOP_LSB)
+    putreg32(((uint32_t)(rx_offset + rx_len - 1) << PIO_EXECCTRL_WRAP_TOP_LSB)
                                           | ((uint32_t)rx_offset << PIO_EXECCTRL_WRAP_BOT_LSB)
-                                          | ((uint32_t)rel_rx << PIO_EXECCTRL_JMP_PIN_LSB);
-    RP23XX_PIO_SM_SHIFTCTRL(pio_base, sm) = PIO_SHIFTCTRL_IN_SHIFTDIR | PIO_SHIFTCTRL_FJOIN_RX;
-    RP23XX_PIO_SM_PINCTRL(pio_base, sm) = ((uint32_t)rel_rx << PIO_PINCTRL_IN_BASE_LSB);
-    RP23XX_PIO_CTRL(pio_base) |= (1u << (PIO_CTRL_CLKDIV_RESTART_LSB + sm)) | (1u << (PIO_CTRL_SM_RESTART_LSB + sm));
-    RP23XX_PIO_SM_INSTR(pio_base, sm) = (rx_offset & 0x1FU);
-    RP23XX_PIO_CTRL(pio_base) |= (1u << (PIO_CTRL_SM_ENABLE_LSB + sm));
+                                          | ((uint32_t)rel_rx << PIO_EXECCTRL_JMP_PIN_LSB), RP23XX_PIO_SM_EXECCTRL(pio_base, sm));
+    putreg32(PIO_SHIFTCTRL_IN_SHIFTDIR | PIO_SHIFTCTRL_FJOIN_RX, RP23XX_PIO_SM_SHIFTCTRL(pio_base, sm));
+    putreg32(((uint32_t)rel_rx << PIO_PINCTRL_IN_BASE_LSB), RP23XX_PIO_SM_PINCTRL(pio_base, sm));
+    putreg32((1u << (PIO_CTRL_CLKDIV_RESTART_LSB + sm)) | (1u << (PIO_CTRL_SM_RESTART_LSB + sm)), RP23XX_PIO_CTRL(pio_base));
+    putreg32(rx_offset & 0x1FU, RP23XX_PIO_SM_INSTR(pio_base, sm));
+    putreg32(getreg32(RP23XX_PIO_CTRL(pio_base)) | (1u << (PIO_CTRL_SM_ENABLE_LSB + sm)), RP23XX_PIO_CTRL(pio_base));
 }
 
 void PIOUartDriver::hd_echo_check()
@@ -253,7 +210,7 @@ void PIOUartDriver::hd_echo_check()
     uint32_t pio_base = _cfg.pio_base;
     const uint8_t sm_tx = _cfg.sm_tx;
     if ((RP23XX_PIO_IRQ(pio_base) & PIO_IRQ_TX_DONE_FLAG(sm_tx)) == 0U) return;
-    RP23XX_PIO_IRQ(pio_base) = PIO_IRQ_TX_DONE_FLAG(sm_tx);
+    putreg32(PIO_IRQ_TX_DONE_FLAG(sm_tx), RP23XX_PIO_IRQ(pio_base));
     if (!_hd_echo_active || !(RP23XX_PIO_FSTAT(pio_base) & (1u << (PIO_FSTAT_TXEMPTY_LSB + sm_tx)))) return;
     const uint32_t pc = RP23XX_PIO_SM_ADDR(pio_base, sm_tx);
     if (pc > PIO_UART_TX_PROG_OFFSET + 1U && pc < PIO_UART_TX_PROG_OFFSET + PIO_UART_TX_PROG_LEN - 1U) return;
@@ -267,16 +224,16 @@ void PIOUartDriver::enable_rx_irq()
     const uint8_t sm_rx = _cfg.sm_rx;
     uint32_t rx_mask = PIO_INTE_RX_NOTEMPTY(sm_rx);
     if (_hd_enabled) {
-        RP23XX_PIO_IRQ(pio_base) = PIO_IRQ_TX_DONE_FLAG(_cfg.sm_tx);
+        putreg32(PIO_IRQ_TX_DONE_FLAG(_cfg.sm_tx), RP23XX_PIO_IRQ(pio_base));
         rx_mask |= PIO_IRQ_SM(_cfg.sm_tx);
     }
     purge_rx_fifo();
     if (sm_rx <= 1U) {
-        RP23XX_PIO_IRQ0_INTF(pio_base) = 0U;
-        RP23XX_PIO_IRQ0_INTE(pio_base) = rx_mask;
+        putreg32(0U, RP23XX_PIO_IRQ0_INTF(pio_base));
+        putreg32(rx_mask, RP23XX_PIO_IRQ0_INTE(pio_base));
     } else {
-        RP23XX_PIO_IRQ1_INTF(pio_base) = 0U;
-        RP23XX_PIO_IRQ1_INTE(pio_base) = rx_mask;
+        putreg32(0U, RP23XX_PIO_IRQ1_INTF(pio_base));
+        putreg32(rx_mask, RP23XX_PIO_IRQ1_INTE(pio_base));
     }
 }
 
@@ -386,8 +343,8 @@ bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
     if (_instance >= PIO_NUM_INSTANCES) return false;
     if (b == 0) b = 57600;
     _sbus_rx.ofs = 0;
-    const bool rxinv = option_is_set(Option::OPTION_RXINV);
-    const bool hdplex = option_is_set(Option::OPTION_HDPLEX);
+    const bool rxinv = option_is_set(_last_options, Option::OPTION_RXINV);
+    const bool hdplex = option_is_set(_last_options, Option::OPTION_HDPLEX);
     if (_initialized && _active_baud == b && _active_rxinv == rxinv && _active_hdplex == hdplex && _active_stop_bits == _stop_bits) return true;
     if (rxSpace == 0) rxSpace = PIO_UART_RX_BUF;
     if (_readbuf == nullptr) {
@@ -419,6 +376,11 @@ bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
     _active_hdplex = hdplex;
     _active_stop_bits = _stop_bits;
     enable_rx_irq();
+
+    if (request_irq(_cfg.irq_num, pio_uart_isr, this) < 0) {
+        _initialized = false;
+        return false;
+    }
     return true;
 }
 
@@ -427,6 +389,9 @@ bool PIOUartDriver::close_uart() {
     const uint32_t basepri = lock_thread();
     *_inte_reg() &= ~(PIO_INTE_RX_NOTEMPTY(_cfg.sm_rx) | PIO_INTE_TX_NOTFULL(_cfg.sm_tx) | PIO_IRQ_SM(_cfg.sm_tx));
     unlock_thread(basepri);
+
+    release_irq(_cfg.irq_num);
+
     _initialized = false;
     _active_baud = 0;
     _active_rxinv = false;

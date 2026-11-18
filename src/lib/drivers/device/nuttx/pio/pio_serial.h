@@ -58,6 +58,7 @@
 #endif
 #define PIO_IRQ_FRAMING_FLAG(sm)     (1u << (4u + (sm)))
 #define PIO_IRQ_TX_DONE_FLAG(sm)     (1u << (sm))
+#define PIO_IRQ_SM(sm)               (1u << (sm))
 #define PIO_SHIFTCTRL_PULL_THRESH_LSB 25u
 
 #define PIO_PINCTRL_OUT_BASE_LSB      0u
@@ -76,14 +77,33 @@
 #include "uart.pio.h"
 #include <px4_arch/SerialImpl.hpp>
 
+enum class Option : uint16_t {
+    OPTION_RXINV = 1 << 0,
+    OPTION_TXINV = 1 << 1,
+    OPTION_HDPLEX = 1 << 2,
+    OPTION_PULLDOWN_RX = 1 << 3,
+    OPTION_PULLUP_RX = 1 << 4,
+    OPTION_PULLDOWN_TX = 1 << 5,
+    OPTION_PULLUP_TX = 1 << 6,
+    OPTION_NODMA_RX = 1 << 7,
+    OPTION_NODMA_TX = 1 << 8,
+};
+
+inline bool option_is_set(uint16_t current_options, Option opt) {
+    return (current_options & static_cast<uint16_t>(opt)) != 0;
+}
+
 // --------------------------------------------------------------------------- PIO UART protocol constants ---------------------------------------------------------------------------
 
 #define PIO_UART_CYCLES_PER_BIT  8U
 #define PIO_RX_FIFO_MAX_READS   16U
 
 #define PIO_UART_TX_PROG_OFFSET       0U
+#define PIO_UART_TX_PROG_LEN             UART_ARRAY_SIZE(uart_tx_program_instructions)
 #define PIO_UART_RX_PROG_OFFSET      11U
+#define PIO_UART_RX_PROG_LEN             UART_ARRAY_SIZE(uart_rx_program_instructions)
 #define PIO_UART_RX_SBUS_PROG_OFFSET 20U
+#define PIO_UART_RX_SBUS_PROG_LEN        UART_ARRAY_SIZE(uart_rx_sbus_program_instructions)
 #define UART_ARRAY_SIZE(a)           (sizeof(a) / sizeof((a)[0]))
 
 static_assert(PIO_UART_TX_PROG_OFFSET + UART_ARRAY_SIZE(uart_tx_program_instructions) <= PIO_UART_RX_PROG_OFFSET &&
@@ -99,7 +119,7 @@ static_assert(PIO_UART_TX_PROG_OFFSET + UART_ARRAY_SIZE(uart_tx_program_instruct
 #ifdef BOARD_NUM_PIO
 #define PIO_NUM_INSTANCES  BOARD_NUM_PIO
 #else
-#define PIO_NUM_INSTANCES  4U
+#define PIO_NUM_INSTANCES  3U
 #endif
 
 typedef struct {
@@ -119,12 +139,8 @@ class PIOUartDriver final : public SerialImpl {
 public:
     explicit PIOUartDriver(const char *port, uint32_t baudrate, uint8_t instance);
 
-    static void irq_pio0_0();
-    static void irq_pio0_1();
-    static void irq_pio1_0();
-    static void irq_pio1_1();
-
     void service_rx_fifo();
+    void service_irq();
 
 protected:
     bool init(uint32_t b, uint16_t rxSpace, uint16_t txSpace);
@@ -168,13 +184,13 @@ private:
     void hd_echo_check();
     void enable_rx_irq();
     void drain_tx_fifo();
-    void service_irq();
     void poll_pio_errors();
     void enable_tx_irq();
     bool upload_programs();
     volatile uint32_t *inte_reg() const;
 
     uint32_t _lock;
+    uint16_t _last_options{0};
     __attribute__((always_inline)) void lock_isr() {
         while (__atomic_exchange_n(&_lock, 1U, __ATOMIC_ACQUIRE) != 0U) {
             __asm__("nop");
