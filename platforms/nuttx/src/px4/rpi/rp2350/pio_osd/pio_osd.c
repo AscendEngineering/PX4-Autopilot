@@ -451,6 +451,7 @@ void pio_osd_get_status(struct pio_osd_status_s *status, bool reset_max_interval
 	status->late_arm_warnings = _late_arm_warnings;
 	status->max_field_interval_us = _max_field_interval_us;
 	status->lines = _lines;
+	status->program_counter = _initialised ? (uint8_t)(getreg32(RP23XX_PIO_SM_ADDR(OSD_PIO, _sm)) - _program_offset) : 0;
 	status->pal = _pal;
 
 	if (reset_max_interval) {
@@ -458,4 +459,24 @@ void pio_osd_get_status(struct pio_osd_status_s *status, bool reset_max_interval
 	}
 
 	spin_unlock_irqrestore(&_lock, flags);
+}
+
+uint32_t pio_osd_count_sync_pulses(uint32_t window_us)
+{
+	const hrt_abstime start = hrt_absolute_time();
+	const uint32_t pin = GPIO_OSD_SYNC;
+	uint32_t pulses = 0;
+	bool last = px4_arch_gpioread(pin);
+
+	while (hrt_elapsed_time(&start) < window_us) {
+		const bool level = px4_arch_gpioread(pin);
+
+		if (last && !level) {
+			pulses++;
+		}
+
+		last = level;
+	}
+
+	return pulses;
 }

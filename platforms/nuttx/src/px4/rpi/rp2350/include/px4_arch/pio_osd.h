@@ -57,6 +57,7 @@ struct pio_osd_status_s {
 	uint32_t late_arm_warnings;     /* fields with the state machine near or in the visible lines when the transfer was armed */
 	uint32_t max_field_interval_us; /* longest time between two field interrupts */
 	uint16_t lines;                 /* visible lines of the current video standard */
+	uint8_t  program_counter;       /* instruction of the program that the state machine is at, without the load offset */
 	bool     pal;
 };
 
@@ -93,5 +94,12 @@ int pio_osd_set_standard(bool pal);
  * @param reset_max_interval start a new measurement of max_field_interval_us
  */
 void pio_osd_get_status(struct pio_osd_status_s *status, bool reset_max_interval);
+
+/**
+ * Count the falling edges on OSD_SYNC for the given time. A camera gives one
+ * sync pulse for each line: approximately 15.6 edges in each millisecond.
+ * This is a busy wait, for the status output only.
+ */
+uint32_t pio_osd_count_sync_pulses(uint32_t window_us);
 
 __END_DECLS

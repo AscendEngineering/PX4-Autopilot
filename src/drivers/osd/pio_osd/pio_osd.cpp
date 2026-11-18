@@ -161,6 +161,9 @@ int PioOsd::print_status()
 	PX4_INFO("standard: %s, %u lines", status.pal ? "PAL" : "NTSC", (unsigned)status.lines);
 	PX4_INFO("fields: %lu, rate: %lu.%lu Hz", (unsigned long)status.fields, (unsigned long)(rate_x10 / 10),
 		 (unsigned long)(rate_x10 % 10));
+	/* A camera gives approximately 156 sync pulses in 10 ms */
+	PX4_INFO("sync pulses in 10 ms: %lu, program counter: %u", (unsigned long)pio_osd_count_sync_pulses(10000),
+		 (unsigned)status.program_counter);
 	PX4_INFO("short fields: %lu", (unsigned long)status.short_fields);
 	PX4_INFO("late-arm warnings: %lu", (unsigned long)status.late_arm_warnings);
 	PX4_INFO("longest field interval since the last status: %lu us", (unsigned long)status.max_field_interval_us);
