@@ -76,6 +76,8 @@
 #include "arm_internal.h"
 #include "hardware/rp23xx_pio.h"
 #include "hardware/rp23xx_dma.h"
+#include "hardware/rp23xx_dreq.h"
+#include "hardware/rp23xx_sio.h"
 #include "rp23xx_gpio.h"
 #include "rp23xx_dmac.h"
 /* The NuttX PIO header compares an enum with a limit in a parameter check: -Wtype-limits stops the build */
@@ -160,7 +162,8 @@ static void flush_tx_fifo(void)
 static void dma_setup_field(void)
 {
 	const dma_config_t config = {
-		.dreq = (uint8_t)rp23xx_pio_get_dreq(OSD_PIO, _sm, true),
+		/* Not rp23xx_pio_get_dreq(): it gives the request of PIO2 for PIO1 */
+		.dreq = (uint8_t)(RP23XX_DMA_DREQ_PIO1_TX0 + _sm),
 		.size = RP23XX_DMA_SIZE_WORD,
 		.noincr = 0,
 	};
@@ -461,22 +464,20 @@ void pio_osd_get_status(struct pio_osd_status_s *status, bool reset_max_interval
 	spin_unlock_irqrestore(&_lock, flags);
 }
 
-uint32_t pio_osd_count_sync_pulses(uint32_t window_us)
+uint32_t pio_osd_count_sync_pulses(uint32_t samples, uint32_t *elapsed_us)
 {
 	const hrt_abstime start = hrt_absolute_time();
-	const uint32_t pin = GPIO_OSD_SYNC;
 	uint32_t pulses = 0;
-	bool last = px4_arch_gpioread(pin);
+	uint32_t last = 1;
 
-	while (hrt_elapsed_time(&start) < window_us) {
-		const bool level = px4_arch_gpioread(pin);
+	/* No call in the loop: a sync pulse is low for less than 5 us */
+	for (uint32_t i = 0; i < samples; i++) {
+		const uint32_t level = (getreg32(RP23XX_SIO_GPIO_IN) >> GPIO_OSD_SYNC) & 1u;
 
-		if (last && !level) {
-			pulses++;
-		}
-
+		pulses += last & ~level;
 		last = level;
 	}
 
+	*elapsed_us = (uint32_t)hrt_elapsed_time(&start);
 	return pulses;
 }

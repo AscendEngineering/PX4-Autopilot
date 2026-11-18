@@ -96,10 +96,12 @@ int pio_osd_set_standard(bool pal);
 void pio_osd_get_status(struct pio_osd_status_s *status, bool reset_max_interval);
 
 /**
- * Count the falling edges on OSD_SYNC for the given time. A camera gives one
- * sync pulse for each line: approximately 15.6 edges in each millisecond.
- * This is a busy wait, for the status output only.
+ * Count the falling edges on OSD_SYNC in the given number of samples of the
+ * pin. A camera gives one sync pulse for each line: approximately 15.6 pulses
+ * in each millisecond. This is a busy loop, for the status output only.
+ *
+ * @param elapsed_us the time that the samples took
  */
-uint32_t pio_osd_count_sync_pulses(uint32_t window_us);
+uint32_t pio_osd_count_sync_pulses(uint32_t samples, uint32_t *elapsed_us);
 
 __END_DECLS
