@@ -11,4 +11,8 @@ if(CONFIG_DRIVERS_DSHOT)
 	add_subdirectory(../rpi_common/dshot dshot)
 endif()
 
+if(CONFIG_DRIVERS_OSD_PIO_OSD)
+	add_subdirectory(pio_osd)
+endif()
+
 add_subdirectory(../rpi_common/flash flash)
