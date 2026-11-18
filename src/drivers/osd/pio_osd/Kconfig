@@ -1,0 +1,5 @@
+menuconfig DRIVERS_OSD_PIO_OSD
+	bool "pio_osd"
+	default n
+	---help---
+		Enable support for the RP2350 PIO analog OSD

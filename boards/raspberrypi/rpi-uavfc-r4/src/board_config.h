@@ -53,12 +53,22 @@
 #define BOARD_OVERLOAD_LED	LED_BLUE
 
 /* Regulator enables (schematic sheet 2). 5 V feeds the GPS connector: on at
- * boot. 9 V feeds the analogue VTX: off until a later phase gives it a
- * parameter, so a bench board never powers a transmitter unasked. */
+ * boot. 9 V feeds the analogue VTX: off at boot, so a bench board never
+ * powers a transmitter unasked. The start of the pio_osd driver sets it on. */
 #define GPIO_VDD_5V_EN		PX4_MAKE_GPIO_OUTPUT_SET(19)
 #define GPIO_VDD_9V_EN		PX4_MAKE_GPIO_OUTPUT_CLEAR(18)
 #define VDD_5V_EN(on_true)	px4_arch_gpiowrite(GPIO_VDD_5V_EN, (on_true))
 #define VDD_9V_EN(on_true)	px4_arch_gpiowrite(GPIO_VDD_9V_EN, (on_true))
+
+/* Analog OSD (schematic sheet 3): U1 pins 21 to 23. OSD_EN high puts the
+ * OSD_W level (low black, high white) in the place of the camera signal;
+ * OSD_SYNC is the output of the sync comparator on the camera input. A PIO
+ * state machine drives them (px4_arch/pio_osd.h). DShot has PIO0
+ * (src/timer_config.cpp), thus the OSD has PIO1. */
+#define BOARD_PIO_OSD_PIO	1
+#define GPIO_OSD_W		21
+#define GPIO_OSD_EN		22
+#define GPIO_OSD_SYNC		23
 
 /* Sounder on GPIO3 through Q1, high = on. No tone_alarm backend on this
  * platform yet; keep it off. */
