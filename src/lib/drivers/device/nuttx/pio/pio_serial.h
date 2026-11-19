@@ -134,7 +134,52 @@ typedef struct {
     uint8_t       irq_num;
 } pio_uart_t;
 
+class ByteBuffer {
+public:
+    explicit ByteBuffer(size_t size) : _buf(new uint8_t[size]), _size(size), _head(0), _tail(0), _count(0) {}
+    ~ByteBuffer() { delete[] _buf; }
+
+    size_t write(const void *data, size_t len) {
+        const uint8_t *p = static_cast<const uint8_t *>(data);
+        size_t written = 0;
+        while (written < len && _count < _size) {
+            _buf[_tail] = p[written++];
+            _tail = (_tail + 1) % _size;
+            _count++;
+        }
+        return written;
+    }
+
+    size_t read(uint8_t *data, size_t len) {
+        size_t read_len = 0;
+        while (read_len < len && _count > 0) {
+            data[read_len++] = _buf[_head];
+            _head = (_head + 1) % _size;
+            _count--;
+        }
+        return read_len;
+    }
+
+    bool read_byte(uint8_t *byte) {
+        if (_count == 0) return false;
+        *byte = _buf[_head];
+        _head = (_head + 1) % _size;
+        _count--;
+        return true;
+    }
+
+    void clear() { _head = _tail = _count = 0; }
+    size_t available() const { return _count; }
+    size_t space() const { return _size - _count; }
+
+private:
+    uint8_t *_buf;
+    size_t _size;
+    size_t _head, _tail, _count;
+};
+
 namespace device { namespace rp2350 {
+
 
 class PIOUartDriver final : public SerialImpl {
 public:
@@ -146,10 +191,16 @@ public:
 protected:
     bool init(uint32_t b, uint16_t rxSpace, uint16_t txSpace);
     ssize_t write_bytes(const void *buffer, size_t buffer_size);
-    ssize_t read_bytes(uint8_t *buffer, size_t buffer_size);
+    ssize_t read_bytes(uint8_t *buffer, uint16_t buffer_size);
     bool close_uart();
     void flush_buffer();
     ssize_t bytesAvailable();
+    bool discard_input();
+    uint32_t txspace();
+    bool set_options(uint16_t options);
+    void set_stop_bits(int n);
+    bool wait_timeout(uint16_t n, uint32_t timeout_ms);
+    uint64_t receive_time_constraint_us(uint16_t nbytes);
 
 private:
     static PIOUartDriver          *_instances[PIO_NUM_INSTANCES];
@@ -165,8 +216,8 @@ private:
     bool  _parity_requested{false};
     bool  _parity_warned{false};
     uint8_t _active_stop_bits{0};
-    uint8_t _readbuf[512];
-    uint8_t _writebuf[512];
+    ByteBuffer *_readbuf{nullptr};
+    ByteBuffer *_writebuf{nullptr};
     bool _initialized{false};
 
     struct {
@@ -187,6 +238,7 @@ private:
     void drain_tx_fifo();
     void poll_pio_errors();
     void enable_tx_irq();
+    bool tx_pending();
     bool upload_programs();
     volatile uint32_t *inte_reg() const;
 

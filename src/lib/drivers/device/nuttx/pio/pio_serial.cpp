@@ -26,6 +26,7 @@
 #include "rp23xx_pio_instructions.h"
 #pragma GCC diagnostic pop
 
+#include <nuttx/irq.h>
 #include "pio_serial.h"
 #include <string.h>
 #include "uart.pio.h"
@@ -57,12 +58,13 @@ static const pio_uart_t _cfg_table[PIO_NUM_INSTANCES] = {
     { .pio_base = 0, .sm_tx = 2, .sm_rx = 3, .tx_pin = 42, .rx_pin = 43, .irq_num = 1 }, // PIOUART1
 };
 
-static void pio_uart_isr(void *arg)
+static int pio_uart_isr(int irq, void *context, void *arg)
 {
     auto *driver = static_cast<PIOUartDriver *>(arg);
     if (driver) {
         driver->service_irq();
     }
+    return 0;
 }
 
 PIOUartDriver::PIOUartDriver(const char *port, uint32_t baudrate, uint8_t instance)
@@ -240,9 +242,9 @@ void PIOUartDriver::enable_rx_irq()
 volatile uint32_t *PIOUartDriver::inte_reg() const {
     volatile uint32_t *irq_inte = NULL;
     if(_cfg.sm_rx <=1U) {
-	*irq_inte = RP23XX_PIO_IRQ0_INTE(_cfg.pio_base);
+	irq_inte = (volatile uint32_t *)RP23XX_PIO_IRQ0_INTE(_cfg.pio_base);
     } else {
-	*irq_inte = RP23XX_PIO_IRQ1_INTE(_cfg.pio_base);
+	irq_inte = (volatile uint32_t *)RP23XX_PIO_IRQ1_INTE(_cfg.pio_base);
 
     }
     return irq_inte;
@@ -268,7 +270,7 @@ void PIOUartDriver::poll_pio_errors()
     //                               (1u << RP23XX_PIO_FDEBUG_RXUNDER_SHIFT) |
     //                               (1u << RP23XX_PIO_FDEBUG_TXSTALL_SHIFT) |
     //                               (1u << RP23XX_PIO_FDEBUG_RXSTALL_SHIFT);
-    // putreg32(fdebug_sm_mask << sm, RP23XX_PIO_FDEBUG(pio));
+    // putreg32(fdebug_sm_mask << sm, RP23XX_PIO_FDEBUG(pio_base));
     if ((RP23XX_PIO_FDEBUG(pio_base) & PIO_FDEBUG_RXSTALL(sm)) != 0U) putreg32(getreg32(RP23XX_PIO_FDEBUG(sm)), getreg32(RP23XX_PIO_FDEBUG(pio_base)));
     if ((RP23XX_PIO_IRQ(pio_base) & PIO_IRQ_FRAMING_FLAG(sm)) != 0U) putreg32(getreg32(RP23XX_PIO_IRQ(sm)), getreg32(RP23XX_PIO_IRQ(pio_base)));;
 }
@@ -291,7 +293,7 @@ void PIOUartDriver::service_rx_fifo()
     uint32_t pio_base = _cfg.pio_base;
     const uint8_t sm = _cfg.sm_rx;
     volatile uint8_t *piox_rxf = NULL;
-    *piox_rxf = RP23XX_PIO_RXF(pio_base, sm);
+    piox_rxf = (volatile uint8_t *)RP23XX_PIO_RXF(pio_base, sm);
     volatile uint8_t *const rxfifo_byte = piox_rxf + 3;
     uint32_t drained = 0, received = 0, lost = 0;
     const bool sbus_sanitize = _sbus_rx_prog;
@@ -309,7 +311,7 @@ void PIOUartDriver::service_rx_fifo()
                 _sbus_rx.last_byte_us = now_us;
                 if (frame_gap && _sbus_rx.ofs != 0U) {
                     lost += _sbus_rx.ofs;
-                    _sbus_//_rx.ofs = 0U;
+                    _sbus_rx.ofs = 0U;
                 }
                 if (_sbus_rx.ofs == 0U && (byte != 0x0FU || !frame_gap)) {
                     lost++;
@@ -347,7 +349,7 @@ void PIOUartDriver::service_rx_fifo()
 uint64_t PIOUartDriver::receive_time_constraint_us(uint16_t nbytes) {
     uint64_t last_receive_us = _receive_timestamp[_receive_timestamp_idx];
     if (_active_baud > 0) {
-        const uint32_t transport_time_us = (1000000UL * 10UL / _active_baud) * (nbytes + available());
+        const uint32_t transport_time_us = (1000000UL * 10UL / _active_baud) * (nbytes + bytesAvailable());
         last_receive_us -= transport_time_us;
     }
     return last_receive_us;
@@ -359,7 +361,7 @@ bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
     _sbus_rx.ofs = 0;
     const bool rxinv = option_is_set(_last_options, Option::OPTION_RXINV);
     const bool hdplex = option_is_set(_last_options, Option::OPTION_HDPLEX);
-    if (_initialized && _active_baud == b && _active_rxinv == rxinv && _active_hdplex == hdplex && _active_stop_bits == _stop_bits) return true;
+    if (_initialized && _active_baud == b && _active_rxinv == rxinv && _active_hdplex == hdplex && _active_stop_bits == (uint8_t)getStopbits()) return true;
     if (rxSpace == 0) rxSpace = PIO_UART_RX_BUF;
     if (_readbuf == nullptr) {
         _readbuf = new ByteBuffer(rxSpace);
@@ -388,10 +390,10 @@ bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
     _active_baud = b;
     _active_rxinv = rxinv;
     _active_hdplex = hdplex;
-    _active_stop_bits = _stop_bits;
+    _active_stop_bits = (uint8_t)getStopbits();
     enable_rx_irq();
 
-    if (request_irq(_cfg.irq_num, pio_uart_isr, this) < 0) {
+    if (irq_attach(_cfg.irq_num, pio_uart_isr, this) < 0) {
         _initialized = false;
         return false;
     }
@@ -404,7 +406,7 @@ bool PIOUartDriver::close_uart() {
     *inte_reg() &= ~(PIO_INTE_RX_NOTEMPTY(_cfg.sm_rx) | PIO_INTE_TX_NOTFULL(_cfg.sm_tx) | PIO_IRQ_SM(_cfg.sm_tx));
     unlock_thread(basepri);
 
-    release_irq(_cfg.irq_num);
+    irq_detach(_cfg.irq_num);
 
     _initialized = false;
     _active_baud = 0;
@@ -422,7 +424,7 @@ void PIOUartDriver::flush_buffer() {
     if (!_initialized) return;
     const uint32_t start_ms = hrt_absolute_time() / 1000;
     while (tx_pending() && ((hrt_absolute_time() / 1000) - start_ms) < 50U) {
-        ScheduleDelayed(50);
+        px4_usleep(1000);
     }
 }
 
@@ -453,14 +455,14 @@ void PIOUartDriver::drain_tx_fifo() {
     uint8_t byte;
     while (pio_tx_level(pio_base, sm) < PIO_TX_FIFO_DEPTH && _writebuf->read_byte(&byte)) {
         if (_hd_enabled) _hd_echo_active = true;
-        RP23XX_PIO_TXF(pio_base, sm) = (uint32_t)byte;
+        *(volatile uint32_t *)RP23XX_PIO_TXF(pio_base, sm) = (uint32_t)byte;
     }
     if (_writebuf->available() == 0) {
         *inte_reg() &= ~PIO_INTE_TX_NOTFULL(sm);
     }
 }
 
-size_t PIOUartDriver::write_bytes(const uint8_t *buffer, size_t size) {
+ssize_t PIOUartDriver::write_bytes(const void *buffer, size_t size) {
     if (!_initialized || !_writebuf || buffer == nullptr || size == 0) return 0;
     if (_parity_requested) {
         if (!_parity_warned) {
@@ -470,11 +472,11 @@ size_t PIOUartDriver::write_bytes(const uint8_t *buffer, size_t size) {
         return 0;
     }
     size_t written;
-    {
-        WITH_SEMAPHORE(_write_mutex);
-        written = _writebuf->write(buffer, size);
-    }
-    const uint32_t basepri = lock_thread();
+    uint32_t basepri = lock_thread();
+    written = _writebuf->write(buffer, size);
+    unlock_thread(basepri);
+
+    basepri = lock_thread();
     drain_tx_fifo();
     if (_writebuf->available() > 0) enable_tx_irq();
     unlock_thread(basepri);
@@ -482,7 +484,7 @@ size_t PIOUartDriver::write_bytes(const uint8_t *buffer, size_t size) {
 }
 
 uint32_t PIOUartDriver::txspace() {
-    if (!_initialized || !_writebuf == nullptr) return 0;
+    if (!_initialized || _writebuf == nullptr) return 0;
     return _writebuf->space();
 }
 
@@ -496,10 +498,10 @@ bool PIOUartDriver::tx_pending() {
 }
 
 bool PIOUartDriver::set_options(uint16_t options) {
-    const uint16_t supported = OPTION_RXINV | OPTION_TXINV | OPTION_HDPLEX | OPTION_PULLDOWN_RX | OPTION_PULLUP_RX | OPTION_PULLDOWN_TX | OPTION_PULLUP_TX | OPTION_NODMA_RX | OPTION_NODMA_TX;
+    const uint16_t supported = static_cast<uint16_t>(Option::OPTION_RXINV) | static_cast<uint16_t>(Option::OPTION_TXINV) | static_cast<uint16_t>(Option::OPTION_HDPLEX) | static_cast<uint16_t>(Option::OPTION_PULLDOWN_RX) | static_cast<uint16_t>(Option::OPTION_PULLUP_RX) | static_cast<uint16_t>(Option::OPTION_PULLDOWN_TX) | static_cast<uint16_t>(Option::OPTION_PULLUP_TX) | static_cast<uint16_t>(Option::OPTION_NODMA_RX) | static_cast<uint16_t>(Option::OPTION_NODMA_TX);
     const uint16_t changed = _last_options ^ options;
     _last_options = options;
-    if (_initialized && (changed & (OPTION_RXINV | OPTION_TXINV | OPTION_HDPLEX)) != 0) {
+    if (_initialized && (changed & (static_cast<uint16_t>(Option::OPTION_RXINV) | static_cast<uint16_t>(Option::OPTION_TXINV) | static_cast<uint16_t>(Option::OPTION_HDPLEX))) != 0) {
         const uint32_t baud = _active_baud;
         _active_baud = 0;
         init(baud, 0, 0);
@@ -508,14 +510,14 @@ bool PIOUartDriver::set_options(uint16_t options) {
 }
 
 void PIOUartDriver::set_stop_bits(int n) {
-    _stop_bits = (n >= 2) ? 2 : 1;
+    _active_stop_bits = (n >= 2) ? 2 : 1;
 }
 
 bool PIOUartDriver::wait_timeout(uint16_t n, uint32_t timeout_ms) {
     const uint32_t start = hrt_absolute_time() / 1000;
     while ((hrt_absolute_time() / 1000) - start < timeout_ms) {
-        if (_available() >= n) return true;
-        ScheduleDelayed(100);
+        if (bytesAvailable() >= n) return true;
+        px4_usleep(100);
     }
-    return _available() >= n;
+    return bytesAvailable() >= n;
 }
