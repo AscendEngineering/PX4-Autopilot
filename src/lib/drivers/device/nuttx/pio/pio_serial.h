@@ -60,6 +60,7 @@
 #define PIO_IRQ_TX_DONE_FLAG(sm)     (1u << (sm))
 #define PIO_IRQ_SM(sm)               (1u << (sm))
 #define PIO_SHIFTCTRL_PULL_THRESH_LSB 25u
+#define PIO_FDEBUG_RXSTALL(sm) (24 << getreg32(RP23XX_PIO_FDEBUG(sm)))
 
 #define PIO_PINCTRL_OUT_BASE_LSB      0u
 #define PIO_PINCTRL_SET_BASE_LSB      5u

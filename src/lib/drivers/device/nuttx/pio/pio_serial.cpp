@@ -238,27 +238,39 @@ void PIOUartDriver::enable_rx_irq()
 }
 
 volatile uint32_t *PIOUartDriver::inte_reg() const {
-    return (_cfg.sm_rx <= 1U) ? &RP23XX_PIO_IRQ0_INTE(_cfg.pio_base) : &RP23XX_PIO_IRQ1_INTE(_cfg.pio_base);
+    volatile uint32_t *irq_inte = NULL;
+    if(_cfg.sm_rx <=1U) {
+	*irq_inte = RP23XX_PIO_IRQ0_INTE(_cfg.pio_base);
+    } else {
+	*irq_inte = RP23XX_PIO_IRQ1_INTE(_cfg.pio_base);
+
+    }
+    return irq_inte;
 }
 
 uint32_t PIOUartDriver::lock_thread() {
-    uint32_t basepri = __get_BASEPRI();
-    __set_BASEPRI(0x40);
+    uint32_t basepri = static_cast<uint32_t>(getbasepri());
+    setbasepri(0x40);
     lock_isr();
     return basepri;
 }
 
 void PIOUartDriver::unlock_thread(uint32_t basepri) {
     unlock_isr();
-    __set_BASEPRI(basepri);
+    setbasepri(basepri);
 }
 
 void PIOUartDriver::poll_pio_errors()
 {
     uint32_t pio_base = _cfg.pio_base;
     const uint8_t sm = _cfg.sm_rx;
-    if ((RP23XX_PIO_FDEBUG(pio_base) & PIO_FDEBUG_RXSTALL(sm)) != 0U) RP23XX_PIO_FDEBUG(pio_base) = PIO_FDEBUG_RXSTALL(sm);
-    if ((RP23XX_PIO_IRQ(pio_base) & PIO_IRQ_FRAMING_FLAG(sm)) != 0U) RP23XX_PIO_IRQ(pio_base) = PIO_IRQ_FRAMING_FLAG(sm);
+    // const uint32_t fdebug_sm_mask = (1u << RP23XX_PIO_FDEBUG_TXOVER_SHIFT) |
+    //                               (1u << RP23XX_PIO_FDEBUG_RXUNDER_SHIFT) |
+    //                               (1u << RP23XX_PIO_FDEBUG_TXSTALL_SHIFT) |
+    //                               (1u << RP23XX_PIO_FDEBUG_RXSTALL_SHIFT);
+    // putreg32(fdebug_sm_mask << sm, RP23XX_PIO_FDEBUG(pio));
+    if ((RP23XX_PIO_FDEBUG(pio_base) & PIO_FDEBUG_RXSTALL(sm)) != 0U) putreg32(getreg32(RP23XX_PIO_FDEBUG(sm)), getreg32(RP23XX_PIO_FDEBUG(pio_base)));
+    if ((RP23XX_PIO_IRQ(pio_base) & PIO_IRQ_FRAMING_FLAG(sm)) != 0U) putreg32(getreg32(RP23XX_PIO_IRQ(sm)), getreg32(RP23XX_PIO_IRQ(pio_base)));;
 }
 
 void PIOUartDriver::service_irq() {
@@ -271,17 +283,19 @@ void PIOUartDriver::service_irq() {
 }
 
 void PIOUartDriver::enable_tx_irq() {
-    *_inte_reg() |= PIO_INTE_TX_NOTFULL(_cfg.sm_tx);
+    *inte_reg() |= PIO_INTE_TX_NOTFULL(_cfg.sm_tx);
 }
 
 void PIOUartDriver::service_rx_fifo()
 {
     uint32_t pio_base = _cfg.pio_base;
     const uint8_t sm = _cfg.sm_rx;
-    volatile uint8_t *const rxfifo_byte = ((volatile uint8_t *)&RP23XX_PIO_RXF(pio_base, sm)) + 3;
+    volatile uint8_t *piox_rxf = NULL;
+    *piox_rxf = RP23XX_PIO_RXF(pio_base, sm);
+    volatile uint8_t *const rxfifo_byte = piox_rxf + 3;
     uint32_t drained = 0, received = 0, lost = 0;
     const bool sbus_sanitize = _sbus_rx_prog;
-    const uint32_t now_us = sbus_sanitize ? hrt_micros32() : 0U;
+    const uint32_t now_us = sbus_sanitize ? hrt_absolute_time() / 1000 : 0U;
     bool frame_gap = sbus_sanitize && ((now_us - _sbus_rx.last_byte_us) >= PIO_SBUS_FRAME_GAP_US);
 
     while (drained < PIO_RX_FIFO_MAX_READS && !(RP23XX_PIO_FSTAT(pio_base) & (1u << (PIO_FSTAT_RXEMPTY_LSB + sm)))) {
@@ -387,7 +401,7 @@ bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
 bool PIOUartDriver::close_uart() {
     if (!_initialized) return false;
     const uint32_t basepri = lock_thread();
-    *_inte_reg() &= ~(PIO_INTE_RX_NOTEMPTY(_cfg.sm_rx) | PIO_INTE_TX_NOTFULL(_cfg.sm_tx) | PIO_IRQ_SM(_cfg.sm_tx));
+    *inte_reg() &= ~(PIO_INTE_RX_NOTEMPTY(_cfg.sm_rx) | PIO_INTE_TX_NOTFULL(_cfg.sm_tx) | PIO_IRQ_SM(_cfg.sm_tx));
     unlock_thread(basepri);
 
     release_irq(_cfg.irq_num);
@@ -442,7 +456,7 @@ void PIOUartDriver::drain_tx_fifo() {
         RP23XX_PIO_TXF(pio_base, sm) = (uint32_t)byte;
     }
     if (_writebuf->available() == 0) {
-        *_inte_reg() &= ~PIO_INTE_TX_NOTFULL(sm);
+        *inte_reg() &= ~PIO_INTE_TX_NOTFULL(sm);
     }
 }
 
