@@ -64,8 +64,8 @@
  * OSD_W level (low black, high white) in the place of the camera signal;
  * OSD_SYNC is the output of the sync comparator on the camera input. A PIO
  * state machine drives them (px4_arch/pio_osd.h). DShot has PIO0
- * (src/timer_config.cpp), thus the OSD has PIO1. */
-#define BOARD_PIO_OSD_PIO	1
+ * (src/timer_config.cpp) and the PIO UARTs have PIO1, thus the OSD has PIO2. */
+#define BOARD_PIO_OSD_PIO	2
 #define GPIO_OSD_W		21
 #define GPIO_OSD_EN		22
 #define GPIO_OSD_SYNC		23

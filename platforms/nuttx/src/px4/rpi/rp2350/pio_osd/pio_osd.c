@@ -89,9 +89,19 @@
 
 #include "osd_tx.pio.h"
 
-/* DShot has PIO0 on the boards with this driver. The interrupt number below is that of PIO1. */
-#define OSD_PIO                     1u
-_Static_assert(BOARD_PIO_OSD_PIO == OSD_PIO, "the OSD scan-out supports PIO1 only");
+/* The board gives the PIO block. DShot has PIO0 on the boards with this driver. The OSD program fills
+ * the instruction memory of a block, thus the OSD cannot share its block with a different driver. */
+#if BOARD_PIO_OSD_PIO == 1
+#  define OSD_PIO                   1u
+#  define OSD_PIO_IRQ               RP23XX_PIO1_IRQ_0
+#  define OSD_PIO_GPIO_FUNC         RP23XX_GPIO_FUNC_PIO1
+#elif BOARD_PIO_OSD_PIO == 2
+#  define OSD_PIO                   2u
+#  define OSD_PIO_IRQ               RP23XX_PIO2_IRQ_0
+#  define OSD_PIO_GPIO_FUNC         RP23XX_GPIO_FUNC_PIO2
+#else
+#  error "the OSD scan-out supports PIO1 and PIO2 only"
+#endif
 
 /* The program does "out pins, 2": OSD_W is bit 0 and OSD_EN is bit 1 of each pixel */
 _Static_assert(GPIO_OSD_EN == GPIO_OSD_W + 1, "OSD_EN must be the pin after OSD_W");
@@ -163,8 +173,7 @@ static void flush_tx_fifo(void)
 static void dma_setup_field(void)
 {
 	const dma_config_t config = {
-		/* Not rp23xx_pio_get_dreq(): it gives the request of PIO2 for PIO1 */
-		.dreq = (uint8_t)(RP23XX_DMA_DREQ_PIO1_TX0 + _sm),
+		.dreq = (uint8_t)rp23xx_pio_get_dreq(OSD_PIO, _sm, true),
 		.size = RP23XX_DMA_SIZE_WORD,
 		.noincr = 0,
 	};
@@ -375,8 +384,8 @@ int pio_osd_init(void)
 	spin_unlock_irqrestore(&_lock, flags);
 
 	/* The state machine holds the two outputs low. Now the pads can go to the PIO block. */
-	px4_arch_configgpio(GPIO_OSD_W | GPIO_FUN(RP23XX_GPIO_FUNC_PIO1));
-	px4_arch_configgpio(GPIO_OSD_EN | GPIO_FUN(RP23XX_GPIO_FUNC_PIO1));
+	px4_arch_configgpio(GPIO_OSD_W | GPIO_FUN(OSD_PIO_GPIO_FUNC));
+	px4_arch_configgpio(GPIO_OSD_EN | GPIO_FUN(OSD_PIO_GPIO_FUNC));
 	/* The comparator drives OSD_SYNC: no pull. The PIO block reads the pad with all pin functions. */
 	px4_arch_configgpio(GPIO_OSD_SYNC | GPIO_FUN(RPI_GPIO_FUNC_SIO));
 	rp23xx_gpio_set_input_hysteresis_enabled(GPIO_OSD_SYNC, true);
@@ -388,8 +397,8 @@ int pio_osd_init(void)
 	 * handler does nothing while the source is masked.
 	 */
 	if (!_irq_attached) {
-		irq_attach(RP23XX_PIO1_IRQ_0, field_interrupt, NULL);
-		up_enable_irq(RP23XX_PIO1_IRQ_0);
+		irq_attach(OSD_PIO_IRQ, field_interrupt, NULL);
+		up_enable_irq(OSD_PIO_IRQ);
 		_irq_attached = true;
 	}
 
