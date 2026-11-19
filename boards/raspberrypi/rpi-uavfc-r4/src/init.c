@@ -107,9 +107,35 @@ int board_read_VBUS_state(void)
 	return 0;
 }
 
+/* Code that runs from SRAM. The linker script places .ramfunc in SRAM with
+ * its load address in flash; rp23xx_start.c copies only .data, so copy it
+ * here before anything placed in it can be called. This function and
+ * everything it calls stay in flash (tools/check_ramfunc.py checks that
+ * after every link). noinline and noclone keep it a symbol with this
+ * name for that check (GCC would otherwise clone it as .constprop); the
+ * optimize attribute and the volatile source keep GCC from turning the
+ * loop into a memcpy() call, which the same script moves to SRAM. */
+extern const uint32_t _lramfunc[];
+extern uint32_t _sramfunc[];
+extern uint32_t _eramfunc[];
+
+__attribute__((noinline, noclone, optimize("no-tree-loop-distribute-patterns")))
+static void copy_ram_code(const volatile uint32_t *src, uint32_t *dst, const uint32_t *end)
+{
+	while (dst < end) {
+		*dst++ = *src++;
+	}
+
+	/* The copied words must be visible to instruction fetch before the
+	 * first call into them: drain the write buffer, then flush the
+	 * pipeline so nothing prefetched from the old contents survives. */
+	__asm__ volatile("dsb sy\n\tisb sy" ::: "memory");
+}
+
 /* Called from rp23xx_start.c before the FPU and the serial console exist. */
 void rp23xx_boardearlyinitialize(void)
 {
+	copy_ram_code(_lramfunc, _sramfunc, _eramfunc);
 	rp23xx_gpio_initialize();
 }
 

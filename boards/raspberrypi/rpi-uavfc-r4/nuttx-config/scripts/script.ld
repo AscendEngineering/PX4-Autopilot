@@ -1,8 +1,8 @@
 /****************************************************************************
- * boards/raspberrypi/rpi-uavfc-r4/nuttx-config/scripts/bootloader_script.ld
+ * boards/raspberrypi/rpi-uavfc-r4/nuttx-config/scripts/script.ld
  *
- * PX4 bootloader image for the RP2350. Numbers repeat src/hw_config.h:
- * BOOTLOADER_RESERVATION_SIZE 128 KB at the XIP base, striped SRAM0-7.
+ * PX4 application image for the RP2350, after the 128 KB bootloader.
+ * Numbers repeat src/hw_config.h. Hot code runs from SRAM: see .ramfunc.
  *
  *   Copyright (c) 2026 PX4 Development Team. All rights reserved.
  *
@@ -47,7 +47,7 @@ ENTRY(_stext)
 EXTERN(board_get_manifest)
 SECTIONS
 {
-	.text : {
+	.vectors : {
 		_stext = ABSOLUTE(.);
 		KEEP(*(.vectors))
 
@@ -61,7 +61,101 @@ SECTIONS
 		LONG(0x00000000)	/* link to self */
 		LONG(0xab123579)	/* PICOBIN_BLOCK_MARKER_END */
 		_image_def_end = ABSOLUTE(.);
+	} > flash
 
+	/* Code that runs from SRAM. Before .text on purpose: ld gives an input
+	 * section to the first rule that matches it, so these rules must come
+	 * before the .text catch-all. The load image sits in flash between the
+	 * vectors and .text; rp23xx_boardearlyinitialize() in src/init.c copies
+	 * it before anything placed here can run. Everything that executes
+	 * before that copy (__start, rp23xx_clockconfig, the board early init
+	 * and its copy loop) must stay in flash; tools/check_ramfunc.py proves
+	 * it after every link. */
+	.ramfunc : {
+		. = ALIGN(4);
+		_sramfunc = ABSOLUTE(.);
+		/* 1. anything that asks explicitly: the ROM flash wrapper, the IMU driver */
+		*(.ramfunc .ramfunc.*)
+
+		/* Rules 2 to 5 were chosen from the PC profile
+		 * by samples per kilobyte, within the 208 KB budget asserted below
+		 * and leaving room for the generated EKF list. Everything that runs
+		 * before the copy (__start, clocks, the board early init) matches
+		 * none of them; tools/check_ramfunc.py proves it after every link. */
+
+		/* 2. NuttX kernel: the scheduler, and from libarch only the interrupt
+		 *    and context-switch path plus the SPI, I2C and DMA drivers.
+		 *    up_cpu_index stays in flash: __start calls it before the copy. */
+		*libsched.a:(.text .text.*)
+		*libarch.a:arm_exception.o(.text .text.*)
+		*libarch.a:arm_doirq.o(.text .text.*)
+		*libarch.a:arm_svcall.o(.text .text.*)
+		*libarch.a:arm_saveusercontext.o(.text .text.*)
+		*libarch.a:arm_schedulesigaction.o(.text .text.*)
+		*libarch.a:arm_sigdeliver.o(.text .text.*)
+		*libarch.a:rp23xx_irq.o(.text .text.*)
+		*libarch.a:rp23xx_timerisr.o(.text .text.*)
+		*libarch.a:rp23xx_spi.o(.text .text.*)
+		*libarch.a:rp23xx_i2c.o(.text .text.*)
+		*libarch.a:rp23xx_dmac.o(.text .text.*)
+
+		/* 3. PX4 platform: hrt, uORB, work queue, device and cdev layers, perf */
+		*libarch_hrt.a:(.text .text.*)
+		*libuORB.a:(.text .text.*)
+		*libpx4_layer.a:(.text .text.*)
+		*libpx4_work_queue.a:(.text .text.*)
+		*libdrivers__device.a:(.text .text.*)
+		*libcdev.a:(.text .text.*)
+		*libperf.a:(.text .text.*)
+		*libarch_spi.a:(.text .text.*)
+
+		/* 4. libc and compiler support the profile named. memset, memcpy and
+		 *    the 64-bit divide stay in flash: __start and the clock setup call
+		 *    them before the copy (the post-link check proves it). */
+		*libc.a:arch_strcmp.o(.text .text.*)
+		*libc.a:arch_strlen.o(.text .text.*)
+		*libc.a:lib_memcmp.o(.text .text.*)
+		*libc.a:sem_wait.o(.text .text.*)
+		*libc.a:sem_post.o(.text .text.*)
+		*libuorb_msgs.a:uORBTopics.cpp.obj(.text .text.*)
+		*libgcc.a:_arm_addsubdf3.o(.text .text.*)
+		*libgcc.a:_arm_muldivdf3.o(.text .text.*)
+		*libgcc.a:_arm_cmpdf2.o(.text .text.*)
+		*libgcc.a:_arm_fixdfsi.o(.text .text.*)
+		*libgcc.a:_arm_truncdfsf2.o(.text .text.*)
+		*libm.a:libm_a-e_sqrt.o(.text .text.*)
+		*libm.a:libm_a-s_sin.o(.text .text.*)
+		*libm.a:libm_a-s_cos.o(.text .text.*)
+		*libm.a:libm_a-k_sin.o(.text .text.*)
+		*libm.a:libm_a-k_cos.o(.text .text.*)
+		*libm.a:libm_a-e_rem_pio2.o(.text .text.*)
+		*libm.a:libm_a-k_rem_pio2.o(.text .text.*)
+		*libm.a:libm_a-e_acos.o(.text .text.*)
+		*libm.a:libm_a-e_atan2.o(.text .text.*)
+
+		/* 5. Sensor and control path */
+		*libdrivers__imu__invensense__icm56686.a:(.text .text.*)
+		*libdrivers_accelerometer.a:(.text .text.*)
+		*libdrivers_gyroscope.a:(.text .text.*)
+		*libvehicle_imu.a:(.text .text.*)
+		*libvehicle_angular_velocity.a:(.text .text.*)
+		*libvehicle_acceleration.a:(.text .text.*)
+		*libdata_validator.a:(.text .text.*)
+		*libmodules__mc_rate_control.a:(.text .text.*)
+		*libRateControl.a:(.text .text.*)
+		*libmodules__control_allocator.a:(.text .text.*)
+		*libControlAllocation.a:(.text .text.*)
+
+		/* 6. EKF functions picked from the PC profile by samples per byte
+		 *    (48 KB budget); ld finds the file through -L<nuttx-config>/scripts. */
+		INCLUDE ramfunc_ekf.ld
+
+		. = ALIGN(4);
+		_eramfunc = ABSOLUTE(.);
+	} > sram AT > flash
+	_lramfunc = LOADADDR(.ramfunc);
+
+	.text : {
 		*(.text .text.*)
 		*(.fixup)
 		*(.gnu.warning)
@@ -91,13 +185,10 @@ SECTIONS
 	} > flash
 	__exidx_end = ABSOLUTE(.);
 
-	/* .ramfunc rides along with .data so the ROM flash wrapper in
-	 * px4/rpi/rpi_common/flash/rpi_flash.c runs from SRAM (flash-based
-	 * parameters). rp23xx_start.c copies _eronly to _sdata.._edata first. */
+	/* rp23xx_start.c copies _eronly to _sdata.._edata before the board init. */
 	.data : {
 		_sdata = ABSOLUTE(.);
 		*(.data .data.*)
-		*(.ramfunc .ramfunc.*)
 		*(.gnu.linkonce.d.*)
 		CONSTRUCTORS
 		. = ALIGN(4);
@@ -112,6 +203,10 @@ SECTIONS
 
 	.bss : {
 		_sbss = ABSOLUTE(.);
+		/* NuttX's RAM vector table (CONFIG_ARCH_RAMVECTORS); VTOR needs the
+		 * alignment of the next power of two above the table size. */
+		. = ALIGN(512);
+		*(.ram_vectors)
 		*(.bss .bss.*)
 		*(.gnu.linkonce.b.*)
 		*(COMMON)
@@ -136,4 +231,6 @@ SECTIONS
 ASSERT(_image_def_end - _image_def_start == 20, "IMAGE_DEF block must be five words")
 ASSERT(_image_def_end - ORIGIN(flash) <= 4096, "IMAGE_DEF block must end inside the first 4 KB")
 ASSERT(_eronly == LOADADDR(.data), "_eronly must be the .data load address")
+ASSERT(SIZEOF(.ramfunc) <= 208K, ".ramfunc exceeds the 208 KB SRAM code budget")
+ASSERT(_eramfunc <= _sdata, ".ramfunc must precede .data in SRAM")
 ASSERT(LOADADDR(.data) + SIZEOF(.data) <= ORIGIN(flash) + LENGTH(flash), "application image overflows its 3904 KB window")

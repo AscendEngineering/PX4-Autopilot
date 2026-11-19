@@ -49,6 +49,12 @@
 #include <lib/perf/perf_counter.h>
 #include <px4_platform_common/atomic.h>
 #include <px4_platform_common/i2c_spi_buses.h>
+#include <px4_arch/micro_hal.h>
+
+/* RAMFUNC puts a hot function in SRAM on platforms that define it (RP2350). */
+#ifndef RAMFUNC
+#define RAMFUNC
+#endif
 
 using namespace InvenSense_ICM56686;
 
@@ -141,6 +147,7 @@ private:
 
 	perf_counter_t _bad_register_perf{perf_alloc(PC_COUNT, MODULE_NAME": bad register")};
 	perf_counter_t _bad_transfer_perf{perf_alloc(PC_COUNT, MODULE_NAME": bad transfer")};
+	perf_counter_t _fifo_read_perf{perf_alloc(PC_COUNT, MODULE_NAME": FIFO read")};
 	perf_counter_t _fifo_empty_perf{perf_alloc(PC_COUNT, MODULE_NAME": FIFO empty")};
 	perf_counter_t _fifo_overflow_perf{perf_alloc(PC_COUNT, MODULE_NAME": FIFO overflow")};
 	perf_counter_t _fifo_reset_perf{perf_alloc(PC_COUNT, MODULE_NAME": FIFO reset")};

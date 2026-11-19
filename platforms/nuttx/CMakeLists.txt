@@ -565,6 +565,27 @@ if(CONFIG_ARCH_CHIP_RP23XX AND NOT ("${PX4_BOARD_LABEL}" MATCHES "^bootloader"))
 	add_custom_target(px4_uf2 ALL DEPENDS ${PX4_BINARY_DIR}/${PX4_CONFIG}.uf2)
 endif()
 
+# Board-supplied post-link image check (SRAM placement, boot and XIP-down call
+# graphs). Fails the build on a violation. See boards/*/tools/check_ramfunc.py.
+if(EXISTS ${PX4_BOARD_DIR}/tools/check_ramfunc.py AND NOT ("${PX4_BOARD_LABEL}" MATCHES "^bootloader"))
+	set(check_ramfunc_args $<TARGET_FILE:px4> ${PX4_BINARY_DIR}/${PX4_CONFIG}.map
+		--ld ${PX4_BOARD_DIR}/nuttx-config/scripts/script.ld)
+	set(check_ramfunc_deps ${PX4_BOARD_DIR}/tools/check_ramfunc.py ${PX4_BOARD_DIR}/tools/symbols.py
+		${PX4_BOARD_DIR}/nuttx-config/scripts/script.ld)
+	if(EXISTS ${PX4_BOARD_DIR}/nuttx-config/scripts/ramfunc_ekf.ld)
+		list(APPEND check_ramfunc_args --ekf-list ${PX4_BOARD_DIR}/nuttx-config/scripts/ramfunc_ekf.ld)
+		list(APPEND check_ramfunc_deps ${PX4_BOARD_DIR}/nuttx-config/scripts/ramfunc_ekf.ld)
+		set_property(TARGET px4 APPEND PROPERTY LINK_DEPENDS ${PX4_BOARD_DIR}/nuttx-config/scripts/ramfunc_ekf.ld)
+	endif()
+	add_custom_command(OUTPUT ${PX4_BINARY_DIR}/check_ramfunc.stamp
+		COMMAND ${PYTHON_EXECUTABLE} ${PX4_BOARD_DIR}/tools/check_ramfunc.py ${check_ramfunc_args}
+		COMMAND ${CMAKE_COMMAND} -E touch ${PX4_BINARY_DIR}/check_ramfunc.stamp
+		DEPENDS px4 ${check_ramfunc_deps}
+		COMMENT "Checking .ramfunc placement and boot call graph"
+	)
+	add_custom_target(px4_check_ramfunc ALL DEPENDS ${PX4_BINARY_DIR}/check_ramfunc.stamp)
+endif()
+
 # print weak symbols
 add_custom_target(weak_symbols
 	COMMAND ${CMAKE_NM} $<TARGET_FILE:px4> | ${GREP} " w " | cat

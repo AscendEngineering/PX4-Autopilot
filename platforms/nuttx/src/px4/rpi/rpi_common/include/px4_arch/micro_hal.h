@@ -7,6 +7,12 @@
 #include <stdbool.h>
 #include <nuttx/irq.h>
 
+/* Place a function in SRAM instead of XIP flash. The board linker script
+ * collects .ramfunc and the board early init copies it before use. */
+#ifndef RAMFUNC
+#define RAMFUNC __attribute__((section(".ramfunc"), noinline))
+#endif
+
 __BEGIN_DECLS
 
 // The chip-specific rpi_/RPI_ names used below are defined by the per-chip
