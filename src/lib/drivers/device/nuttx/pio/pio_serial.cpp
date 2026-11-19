@@ -52,9 +52,10 @@ PIOUartDriver *PIOUartDriver::instances[PIO_NUM_INSTANCES];
 // Static configuration table for PIO UART instances
 // PIOUART0 and PIOUART1 pins need to be all either in range 0-31 or range 16-47
 // Each PIO base can accomodate two UART tx/rx pairs each
+// Start UART on PIO block 1
 static const pio_uart_t _cfg_table[PIO_NUM_INSTANCES] = {
-    { .pio_base = 0, .sm_tx = 0, .sm_rx = 1, .tx_pin = 16, .rx_pin = 17, .irq_num = 0 }, // PIOUART0
-    { .pio_base = 0, .sm_tx = 2, .sm_rx = 3, .tx_pin = 42, .rx_pin = 43, .irq_num = 1 }, // PIOUART1
+    { .pio_base = 1, .sm_tx = 0, .sm_rx = 1, .tx_pin = 16, .rx_pin = 17, .irq_num = 0 }, // PIOUART0
+    { .pio_base = 1, .sm_tx = 2, .sm_rx = 3, .tx_pin = 42, .rx_pin = 43, .irq_num = 1 }, // PIOUART1
 };
 
 static int pio_uart_isr(int irq, void *context, void *arg)
