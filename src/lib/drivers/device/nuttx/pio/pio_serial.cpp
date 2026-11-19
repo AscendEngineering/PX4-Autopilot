@@ -13,11 +13,10 @@
 #include <px4_arch/io_timer.h>
 #include <px4_arch/micro_hal.h>
 #include <drivers/drv_hrt.h>
-#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include "arm_internal.h"
-#include "hardware/rp23xx_pio.h"
+
 #include "rp23xx_gpio.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wtype-limits"
@@ -48,7 +47,7 @@ static inline uint32_t pio_tx_level(uint32_t base, uint8_t sm)
 
 #define PIO_UART_IRQ_PRIO  5
 
-PIOUartDriver *PIOUartDriver::_instances[PIO_NUM_INSTANCES];
+PIOUartDriver *PIOUartDriver::instances[PIO_NUM_INSTANCES];
 
 // Static configuration table for PIO UART instances
 // PIOUART0 and PIOUART1 pins need to be all either in range 0-31 or range 16-47
@@ -68,11 +67,11 @@ static int pio_uart_isr(int irq, void *context, void *arg)
 }
 
 PIOUartDriver::PIOUartDriver(const char *port, uint32_t baudrate, uint8_t instance)
-    : SerialImpl(port, baudrate, ByteSize::EightBits, Parity::None, StopBits::One, FlowControl::Disabled), _instance(instance), _initialized(false)
+    : _instance(instance), _initialized(false)
 {
     if (instance < PIO_NUM_INSTANCES) {
         _cfg = _cfg_table[instance];
-        _instances[instance] = this;
+        instances[instance] = this;
     }
 }
 
@@ -361,7 +360,7 @@ bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
     _sbus_rx.ofs = 0;
     const bool rxinv = option_is_set(_last_options, Option::OPTION_RXINV);
     const bool hdplex = option_is_set(_last_options, Option::OPTION_HDPLEX);
-    if (_initialized && _active_baud == b && _active_rxinv == rxinv && _active_hdplex == hdplex && _active_stop_bits == (uint8_t)getStopbits()) return true;
+    if (_initialized && _active_baud == b && _active_rxinv == rxinv && _active_hdplex == hdplex) return true;
     if (rxSpace == 0) rxSpace = PIO_UART_RX_BUF;
     if (_readbuf == nullptr) {
         _readbuf = new ByteBuffer(rxSpace);
@@ -390,7 +389,7 @@ bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
     _active_baud = b;
     _active_rxinv = rxinv;
     _active_hdplex = hdplex;
-    _active_stop_bits = (uint8_t)getStopbits();
+   _active_stop_bits = 1;
     enable_rx_irq();
 
     if (irq_attach(_cfg.irq_num, pio_uart_isr, this) < 0) {

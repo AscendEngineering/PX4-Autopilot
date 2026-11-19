@@ -76,7 +76,8 @@
 #endif  // CONFIG_ARCH_CHIP RP23XX
 
 #include "uart.pio.h"
-#include <px4_arch/SerialImpl.hpp>
+
+#include "hardware/rp23xx_pio.h"
 
 enum class Option : uint16_t {
     OPTION_RXINV = 1 << 0,
@@ -181,20 +182,23 @@ private:
 namespace device { namespace rp2350 {
 
 
-class PIOUartDriver final : public SerialImpl {
+class PIOUartDriver final {
 public:
     explicit PIOUartDriver(const char *port, uint32_t baudrate, uint8_t instance);
 
     void service_rx_fifo();
     void service_irq();
+    ssize_t write_bytes(const void *buffer, size_t buffer_size);
+    ssize_t read_bytes(uint8_t *buffer, uint16_t buffer_size);
+    static PIOUartDriver          *instances[PIO_NUM_INSTANCES];
+    ssize_t bytesAvailable();
+    void flush_buffer();
 
 protected:
     bool init(uint32_t b, uint16_t rxSpace, uint16_t txSpace);
-    ssize_t write_bytes(const void *buffer, size_t buffer_size);
-    ssize_t read_bytes(uint8_t *buffer, uint16_t buffer_size);
+
     bool close_uart();
-    void flush_buffer();
-    ssize_t bytesAvailable();
+
     bool discard_input();
     uint32_t txspace();
     bool set_options(uint16_t options);
@@ -202,8 +206,9 @@ protected:
     bool wait_timeout(uint16_t n, uint32_t timeout_ms);
     uint64_t receive_time_constraint_us(uint16_t nbytes);
 
+
 private:
-    static PIOUartDriver          *_instances[PIO_NUM_INSTANCES];
+
 
     const uint8_t _instance{0};
     pio_uart_t _cfg{};

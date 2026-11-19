@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2023 PX4 Development Team. All rights reserved.
+ *   Copyright (C) 2026 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -10,8 +10,7 @@
  *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
+ *    the documentation and/or other materials provided with the distribution.
  * 3. Neither the name PX4 nor the names of its contributors may be
  *    used to endorse or promote products derived from this software
  *    without specific prior written permission.
@@ -31,17 +30,14 @@
  *
  ****************************************************************************/
 
-#include <SerialImpl.hpp>
+#include <px4_arch/SerialImpl.hpp>
 #include <string.h> // strncpy
 #include <px4_log.h>
-#include <drivers/device/pio/pio_serial.h>
 #include <drivers/drv_hrt.h>
-
-#define MODULE_NAME "SerialImpl"
-
+#include "pio_serial.h"
+using namespace device;
+using namespace rp2350;
 namespace device
-{
-namespace rp2350
 {
 
 // Helper to map port name (e.g., "PIO0") to instance index
@@ -55,7 +51,7 @@ static int port_to_instance(const char *port)
 }
 
 SerialImpl::SerialImpl(const char *port, uint32_t baudrate, ByteSize bytesize, Parity parity, StopBits stopbits,
-		       FlowControl flowcontrol) :
+			       FlowControl flowcontrol) :
     _baudrate(baudrate),
     _bytesize(bytesize),
     _parity(parity),
@@ -87,7 +83,7 @@ bool SerialImpl::open()
     _serial_fd = -1;
 
     if (!validateBaudrate(_baudrate)) {
-        PX4_ERR("Invalid baudrate: %u", _baudrate);
+        PX4_ERR("Invalid baudrate: %ul", (unsigned)_baudrate);
         return false;
     }
 
@@ -107,18 +103,14 @@ bool SerialImpl::open()
         return false;
     }
 
-    // Use the driver's static instances.
-    // In a fully integrated system, we would have a way to ensure the PIORXDriver
-    // is created and configured. For this mapping, we assume it's available.
-    if (device::rp2350::PIORXDriver::_instances[instance] == nullptr) {
-        // If not yet created, we create it here.
-        new device::rp2350::PIORXDriver(_port, _baudrate, instance);
+    	if (device::rp2350::PIOUartDriver::instances[instance] == nullptr) {
+        new device::rp2350::PIOUartDriver(_port, _baudrate, instance);
     }
 
     _serial_fd = instance;
     _open = true;
 
-    PX4_INFO("Successfully opened PIO UART %s (instance %d) with baudrate %u", _port, instance, _baudrate);
+    PX4_INFO("Successfully opened PIO UART %s (instance %d) with baudrate %u", _port, instance, (unsigned)_baudrate);
 
     return _open;
 }
@@ -142,11 +134,7 @@ ssize_t SerialImpl::bytesAvailable()
     int instance = _serial_fd;
     if (instance < 0 || instance >= 4) return -1;
 
-    // Call the driver's available()
-    // We need to cast since SerialImpl is a different class hierarchy than PIORXDriver
-    // but in the provided pio_serial.h, PIORXDriver inherits from SerialImpl (or a similar base).
-    // Let's assume it implements the expected interface.
-    auto *driver = (device::rp2350::PIORXDriver*)device::rp2350::PIORXDriver::_instances[instance];
+    auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[instance];
     if (!driver) return 0;
 
     return driver->bytesAvailable();
@@ -163,10 +151,10 @@ ssize_t SerialImpl::read(uint8_t *buffer, size_t buffer_size)
     if (!_open) return -1;
 
     int instance = _serial_fd;
-    auto *driver = (device::rp2350::PIORXDriver*)device::rp2350::PIORXDriver::_instances[instance];
+    auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[instance];
     if (!driver) return -1;
 
-    return driver->read(buffer, buffer_size);
+    return driver->read_bytes(buffer, buffer_size);
 }
 
 ssize_t SerialImpl::readAtLeast(uint8_t *buffer, size_t buffer_size, size_t character_count, uint32_t timeout_ms)
@@ -174,12 +162,8 @@ ssize_t SerialImpl::readAtLeast(uint8_t *buffer, size_t buffer_size, size_t char
     if (!_open) return -1;
 
     int instance = _serial_fd;
-    auto *driver = (device::rp2350::PIORXDriver*)device::rp2350::PIORXDriver::_instances[instance];
+    auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[instance];
     if (!driver) return -1;
-
-    // The driver doesn't implement readAtLeast specifically, so we use the base loop logic
-    // or assume the driver's read() handles blocking/timeout.
-    // For now, we'll mirror the basic read loop.
 
     const hrt_abstime start_time_us = hrt_absolute_time();
     uint32_t timeout_us = timeout_ms * 1000;
@@ -192,7 +176,7 @@ ssize_t SerialImpl::readAtLeast(uint8_t *buffer, size_t buffer_size, size_t char
             }
         }
 
-        int current_bytes_read = driver->read(&buffer[total_bytes_read], buffer_size - total_bytes_read);
+        int current_bytes_read = driver->read_bytes(&buffer[total_bytes_read], buffer_size - total_bytes_read);
         if (current_bytes_read < 0) return -1;
 
         total_bytes_read += current_bytes_read;
@@ -208,10 +192,10 @@ ssize_t SerialImpl::write(const void *buffer, size_t buffer_size)
     if (!_open) return -1;
 
     int instance = _serial_fd;
-    auto *driver = (device::rp2350::PIORXDriver*)device::rp2350::PIORXDriver::_instances[instance];
+    auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[instance];
     if (!driver) return -1;
 
-    return driver->write(buffer, buffer_size);
+    return driver->write_bytes(buffer, buffer_size);
 }
 
 ssize_t SerialImpl::writeBlocking(const void *buffer, size_t buffer_size, uint32_t timeout_ms)
@@ -223,8 +207,8 @@ void SerialImpl::flush()
 {
     if (_open) {
         int instance = _serial_fd;
-        auto *driver = (device::rp2350::PIORXDriver*)device::rp2350::PIORXDriver::_instances[instance];
-        if (driver) driver->flush();
+        auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[instance];
+        if (driver) driver->flush_buffer();
     }
 }
 
@@ -256,7 +240,7 @@ uint32_t SerialImpl::getBaudrate() const
 
 bool SerialImpl::setBaudrate(uint32_t baudrate)
 {
-    if (!validateBaudrate(baudrate)) return false;
+    if (!validateBaudrate(baudrate) ) return false;
     if (baudrate == _baudrate) return true;
     _baudrate = baudrate;
     if (_open) return open();
@@ -314,5 +298,4 @@ bool SerialImpl::setSwapRxTxMode() { return false; }
 bool SerialImpl::getInvertedMode() const { return false; }
 bool SerialImpl::setInvertedMode(bool enable) { return !enable; }
 
-} // namespace rp2350
 } // namespace device

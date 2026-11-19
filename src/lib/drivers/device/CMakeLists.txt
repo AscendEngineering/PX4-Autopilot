@@ -10,8 +10,7 @@
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in
-#    the documentation and/or other materials provided with the
-#    distribution.
+#    the documentation and/or other materials provided with the distribution.
 # 3. Neither the name PX4 nor the names of its contributors may be
 #    used to endorse or promote products derived from this software
 #    without specific prior written permission.
@@ -26,7 +25,7 @@
 # OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
 # AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# ANY WAY OUT OF THE USE of THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
@@ -53,7 +52,9 @@ elseif(UNIX AND NOT APPLE) #TODO: add linux PX4 platform type
 endif()
 
 if (${PX4_CONFIG} MATCHES "raspberrypi_rpi-uavfc-r4_default")
-	list(APPEND SRCS_PLATFORM nuttx/pio/pio_serial.cpp)	
+	list(APPEND SRCS_PLATFORM nuttx/pio/pio_serial.cpp)
+	list(APPEND SRCS_PLATFORM nuttx/pio/pio_uart_manager.cpp)
+	list(APPEND SRCS_PLATFORM nuttx/pio/SerialImpl.cpp)
 endif()
 
 px4_add_library(drivers__device
@@ -61,14 +62,14 @@ px4_add_library(drivers__device
 	${SRCS_PLATFORM}
 	)
 
-# px4_spibus_initialize (stm32_spibus_initialize)
-if (${PX4_PLATFORM} STREQUAL "nuttx")
-	if (NOT DEFINED CONFIG_BUILD_FLAT)
-		target_link_libraries(drivers__device PRIVATE nuttx_karch)
-	else()
-		target_link_libraries(drivers__device PRIVATE nuttx_arch)
+	# px4_spibus_initialize (stm32_spibus_set_gpio)
+	if (${PX4_PLATFORM} STREQUAL "nuttx")
+		if (NOT DEFINED CONFIG_BUILD_FLAT)
+			target_link_libraries(drivers__device PRIVATE nuttx_karch)
+		else()
+			target_link_libraries(drivers__device PRIVATE nuttx_arch)
+		endif()
 	endif()
-endif()
 
 
-target_link_libraries(drivers__device PRIVATE cdev)
+	target_link_libraries(drivers__device PRIVATE cdev)
