@@ -74,7 +74,7 @@ public:
 private:
 	void exit_and_cleanup() override;
 
-	// Default ODR; the -O start option selects 6400, 3200, 1600 or 800 Hz per board.
+	// Default ODR; the -O start option selects 6400, 3200, 1600, 800 or 400 Hz per board.
 	static constexpr int32_t DEFAULT_ODR_HZ{6400};
 
 	static constexpr size_t GYRO_FIFO_MAX_SAMPLES{

@@ -148,6 +148,15 @@ SECTIONS
 		*libmodules__control_allocator.a:(.text .text.*)
 		*libControlAllocation.a:(.text .text.*)
 
+		/* 5b. Output path: the mixer and the DShot and PWM outputs. They
+		 *     operate in each cycle of the control loop. */
+		*libmixer_module.a:(.text .text.*)
+		*libdrivers__dshot.a:(.text .text.*)
+		*libdrivers__pwm_out.a:(.text .text.*)
+		*libarch_dshot.a:(.text .text.*)
+		*libarch_io_pins.a:(.text .text.*)
+		*libarch.a:rp23xx_pio.o(.text .text.*)
+
 		/* 6. EKF functions picked from the PC profile by samples per byte
 		 *    (48 KB budget); ld finds the file through -L<nuttx-config>/scripts. */
 		INCLUDE ramfunc_ekf.ld
