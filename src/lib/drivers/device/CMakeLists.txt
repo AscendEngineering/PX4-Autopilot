@@ -63,6 +63,9 @@ px4_add_library(drivers__device
 	)
 
 	# px4_spibus_initialize (stm32_spibus_set_gpio)
+	if (${PX4_CONFIG} MATCHES "raspberrypi_rpi-uavfc-r4_default")
+		target_include_directories(drivers__device PUBLIC nuttx/pio)
+	endif()
 	if (${PX4_PLATFORM} STREQUAL "nuttx")
 		if (NOT DEFINED CONFIG_BUILD_FLAT)
 			target_link_libraries(drivers__device PRIVATE nuttx_karch)

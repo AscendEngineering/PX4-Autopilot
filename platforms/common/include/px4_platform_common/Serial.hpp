@@ -32,9 +32,7 @@
  ****************************************************************************/
 
 #pragma once
-
 #include <SerialImpl.hpp>
-
 #include <px4_platform_common/SerialCommon.hpp>
 
 using device::SerialConfig::ByteSize;

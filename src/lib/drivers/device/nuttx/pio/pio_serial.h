@@ -121,7 +121,7 @@ static_assert(PIO_UART_TX_PROG_OFFSET + UART_ARRAY_SIZE(uart_tx_program_instruct
 #ifdef BOARD_NUM_PIO
 #define PIO_NUM_INSTANCES  BOARD_NUM_PIO
 #else
-#define PIO_NUM_INSTANCES  3U
+#define PIO_NUM_INSTANCES  4U
 #endif
 
 typedef struct {
@@ -193,6 +193,7 @@ public:
     static PIOUartDriver          *instances[PIO_NUM_INSTANCES];
     ssize_t bytesAvailable();
     void flush_buffer();
+    ssize_t read_at_least(uint8_t *buffer, size_t buffer_size, size_t character_count, uint32_t timeout_ms);
 
 protected:
     bool init(uint32_t b, uint16_t rxSpace, uint16_t txSpace);
@@ -200,6 +201,7 @@ protected:
     bool close_uart();
 
     bool discard_input();
+public:
     uint32_t txspace();
     bool set_options(uint16_t options);
     void set_stop_bits(int n);
