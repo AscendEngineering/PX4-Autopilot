@@ -43,10 +43,10 @@ namespace device
 // Helper to map port name (e.g., "PIO0") to instance index
 static int port_to_instance(const char *port)
 {
-    if (strcmp(port, "PIO0") == 0) return 0;
-    if (strcmp(port, "PIO1") == 0) return 1;
-    if (strcmp(port, "PIO2") == 0) return 2;
-    if (strcmp(port, "PIO3") == 0) return 3;
+    if (strcmp(port, "/dev/ttyS2") == 0) return 0;
+    if (strcmp(port, "/dev/ttyS3") == 0) return 1;
+    if (strcmp(port, "/dev/ttyS4") == 0) return 2;
+    if (strcmp(port, "/dev/ttyS5") == 0) return 3;
     return -1;
 }
 
@@ -93,7 +93,7 @@ bool SerialImpl::open()
     if (!setFlowcontrol(_flowcontrol)) { return false; }
 
     if (!validatePort(_port)) {
-        PX4_ERR("Invalid port %s", _port);
+        PX4_ERR("Invalid PIO port %s", _port);
         return false;
     }
 

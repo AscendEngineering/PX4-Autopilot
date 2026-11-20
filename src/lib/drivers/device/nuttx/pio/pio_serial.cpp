@@ -53,10 +53,23 @@ PIOUartDriver *PIOUartDriver::instances[PIO_NUM_INSTANCES];
 // PIOUART0 and PIOUART1 pins need to be all either in range 0-31 or range 16-47
 // Each PIO base can accomodate two UART tx/rx pairs each
 // Start UART on PIO block 1
+#ifdef CONFIG_DRIVERS_DSHOT
+// If DShot is enabled, PIO block 0 is reserved. Only block 1 is available.
 static const pio_uart_t _cfg_table[PIO_NUM_INSTANCES] = {
-    { .pio_base = 1, .sm_tx = 0, .sm_rx = 1, .tx_pin = 16, .rx_pin = 17, .irq_num = 0 }, // PIOUART0
-    { .pio_base = 1, .sm_tx = 2, .sm_rx = 3, .tx_pin = 42, .rx_pin = 43, .irq_num = 1 }, // PIOUART1
+    { .pio_base = 1, .sm_tx = 0, .sm_rx = 1, .tx_pin = 16, .rx_pin = 17, .irq_num = 0 }, // PIOUART0 -> /dev/ttyS2
+    { .pio_base = 1, .sm_tx = 2, .sm_rx = 3, .tx_pin = 42, .rx_pin = 43, .irq_num = 1 }, // PIOUART1 -> /dev/ttyS3
+    { .pio_base = 1, .sm_tx = 0, .sm_rx = 1, .tx_pin = 0,  .rx_pin = 0,  .irq_num = 0 }, // Disabled
+    { .pio_base = 1, .sm_tx = 0, .sm_rx = 1, .tx_pin = 0,  .rx_pin = 0,  .irq_num = 0 }, // Disabled
 };
+#else
+// Block 0 and Block 1 both available
+static const pio_uart_t _cfg_table[PIO_NUM_INSTANCES] = {
+    { .pio_base = 1, .sm_tx = 0, .sm_rx = 1, .tx_pin = 16, .rx_pin = 17, .irq_num = 0 }, // PIOUART0 -> /dev/ttyS2
+    { .pio_base = 1, .sm_tx = 2, .sm_rx = 3, .tx_pin = 42, .rx_pin = 43, .irq_num = 1 }, // PIOUART1 -> /dev/ttyS3
+    { .pio_base = 0, .sm_tx = 0, .sm_rx = 1, .tx_pin = 0,  .rx_pin = 1,  .irq_num = 0 }, // PIOUART2 -> /dev/ttyS4 (TBD pins)
+    { .pio_base = 0, .sm_tx = 2, .sm_rx = 3, .tx_pin = 2,  .rx_pin = 3,  .irq_num = 1 }, // PIOUART3 -> /dev/ttyS5 (TBD pins)
+};
+#endif
 
 static int pio_uart_isr(int irq, void *context, void *arg)
 {
@@ -520,4 +533,14 @@ bool PIOUartDriver::wait_timeout(uint16_t n, uint32_t timeout_ms) {
         px4_usleep(100);
     }
     return bytesAvailable() >= n;
+}
+ssize_t PIOUartDriver::read_at_least(uint8_t *buffer, size_t buffer_size, size_t character_count, uint32_t timeout_ms) {
+    if (!_initialized || !_readbuf || !buffer) return -1;
+    if (buffer_size < character_count) return -1;
+
+    if (!wait_timeout(character_count, timeout_ms)) {
+        return 0;
+    }
+
+    return (ssize_t)_readbuf->read(buffer, buffer_size);
 }
