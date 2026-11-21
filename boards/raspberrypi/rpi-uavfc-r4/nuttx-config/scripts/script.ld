@@ -108,6 +108,7 @@ SECTIONS
 		*libdrivers__device.a:(.text .text.*)
 		*libcdev.a:(.text .text.*)
 		*libperf.a:(.text .text.*)
+		*libdrivers_device_nuttx_pio.a:(.text .text.*)
 		*libarch_spi.a:(.text .text.*)
 
 		/* 4. libc and compiler support the profile named. memset, memcpy and

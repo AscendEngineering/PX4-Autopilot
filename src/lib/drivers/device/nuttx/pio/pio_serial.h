@@ -194,12 +194,10 @@ public:
     ssize_t bytesAvailable();
     void flush_buffer();
     ssize_t read_at_least(uint8_t *buffer, size_t buffer_size, size_t character_count, uint32_t timeout_ms);
-
-protected:
     bool init(uint32_t b, uint16_t rxSpace, uint16_t txSpace);
-
     bool close_uart();
 
+protected:
     bool discard_input();
 public:
     uint32_t txspace();
@@ -235,6 +233,7 @@ private:
 
     uint64_t _receive_timestamp[2];
     uint8_t _receive_timestamp_idx{0};
+    uint32_t _irq_count{0};
 
     void start_tx_sm(uint32_t clkdiv_int, uint32_t clkdiv_frac);
     void start_rx_sm(uint32_t clkdiv_int, uint32_t clkdiv_frac);

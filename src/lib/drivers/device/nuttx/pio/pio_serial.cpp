@@ -65,13 +65,13 @@ static const pio_uart_t _cfg_table[PIO_NUM_INSTANCES] = {
 // Block 0 and Block 1 both available
 static const pio_uart_t _cfg_table[PIO_NUM_INSTANCES] = {
     { .pio_base = 1, .sm_tx = 0, .sm_rx = 1, .tx_pin = 16, .rx_pin = 17, .irq_num = 0 }, // PIOUART0 -> /dev/ttyS2
-    { .pio_base = 1, .sm_tx = 2, .sm_rx = 3, .tx_pin = 42, .rx_pin = 43, .irq_num = 1 }, // PIOUART1 -> /dev/ttyS3
+    { .pio_base = 1, .sm_tx = 2, .sm_rx = 3, .tx_pin = 36, .rx_pin = 37, .irq_num = 1 }, // PIOUART1 -> /dev/ttyS3
     { .pio_base = 0, .sm_tx = 0, .sm_rx = 1, .tx_pin = 0,  .rx_pin = 1,  .irq_num = 0 }, // PIOUART2 -> /dev/ttyS4 (TBD pins)
     { .pio_base = 0, .sm_tx = 2, .sm_rx = 3, .tx_pin = 2,  .rx_pin = 3,  .irq_num = 1 }, // PIOUART3 -> /dev/ttyS5 (TBD pins)
 };
 #endif
 
-static int pio_uart_isr(int irq, void *context, void *arg)
+static __attribute__((section(".ramfunc"))) int pio_uart_isr(int irq, void *context, void *arg)
 {
     auto *driver = static_cast<PIOUartDriver *>(arg);
     if (driver) {
@@ -83,6 +83,7 @@ static int pio_uart_isr(int irq, void *context, void *arg)
 PIOUartDriver::PIOUartDriver(const char *port, uint32_t baudrate, uint8_t instance)
     : _instance(instance), _initialized(false)
 {
+    PX4_INFO("PIO UART %u: Constructor called for port %s", instance, port);
     if (instance < PIO_NUM_INSTANCES) {
         _cfg = _cfg_table[instance];
         instances[instance] = this;
@@ -105,12 +106,30 @@ void PIOUartDriver::configure_gpio(uint8_t pin, bool is_output)
     const uint32_t funcsel = (_cfg.pio_base == 0) ? RP23XX_GPIO_FUNC_PIO0 : RP23XX_GPIO_FUNC_PIO1;
     const bool half_duplex = _hd_enabled && (pin == _cfg.tx_pin);
     const bool drive = is_output && !half_duplex;
-    const bool pulldown = half_duplex
-        ? (option_is_set(_last_options, Option::OPTION_PULLDOWN_TX) || option_is_set(_last_options, Option::OPTION_PULLDOWN_RX))
-        : option_is_set(_last_options, Option::OPTION_PULLDOWN_RX);
+
+    bool pull_up = false;
+    bool pull_down = false;
+
+    if (half_duplex) {
+        pull_up = option_is_set(_last_options, Option::OPTION_PULLUP_TX) || option_is_set(_last_options, Option::OPTION_PULLUP_RX);
+        pull_down = option_is_set(_last_options, Option::OPTION_PULLDOWN_TX) || option_is_set(_last_options, Option::OPTION_PULLDOWN_RX);
+    } else {
+        if (is_output) {
+            pull_up = option_is_set(_last_options, Option::OPTION_PULLUP_TX);
+            pull_down = option_is_set(_last_options, Option::OPTION_PULLDOWN_TX);
+        } else {
+            pull_up = option_is_set(_last_options, Option::OPTION_PULLUP_RX);
+            pull_down = option_is_set(_last_options, Option::OPTION_PULLDOWN_RX);
+        }
+    }
+
+    // Default: RX pins should typically be pulled up to avoid floating start bits
+    if (!is_output && !pull_up && !pull_down) {
+        pull_up = true;
+    }
 
     rp23xx_gpio_set_function(pin, funcsel);
-    rp23xx_gpio_set_pulls(pin, 0, pulldown);
+    rp23xx_gpio_set_pulls(pin, pull_up, pull_down);
 
     if (pin < 32U) {
         if (drive) putreg32(1u << pin, RP23XX_SIO_GPIO_OE_SET);
@@ -189,10 +208,20 @@ void PIOUartDriver::start_tx_sm(uint32_t int_div, uint32_t frac_div)
     putreg32(PIO_UART_INSTR_SET_PINS_1, RP23XX_PIO_SM_INSTR(pio_base, sm));
     putreg32(PIO_UART_INSTR_SET_PINDIRS(_hd_enabled ? 0u : 1u), RP23XX_PIO_SM_INSTR(pio_base, sm));
     putreg32(pinctrl_base | ((_hd_enabled ? 1u : 0u) << PIO_PINCTRL_SET_COUNT_LSB), RP23XX_PIO_SM_PINCTRL(pio_base, sm));
+
+    // Ensure Tx line is IDLE-HIGH before enabling the state machine
+    // if (tx_pin < 32U) {
+    //     putreg32(1u << tx_pin, RP23XX_SIO_GPIO_SET);
+    // } else {
+        putreg32(1u << (tx_pin - 32U), RP23XX_SIO_GPIO_HI_OUT_SET);
+    // }
+
     putreg32((1u << (PIO_CTRL_CLKDIV_RESTART_LSB + sm)) | (1u << (PIO_CTRL_SM_RESTART_LSB + sm)), RP23XX_PIO_CTRL(pio_base));
     putreg32(PIO_UART_INSTR_SET_Y((_active_stop_bits >= 2) ? 1u : 0u), RP23XX_PIO_SM_INSTR(pio_base, sm));
     putreg32(PIO_UART_INSTR_JMP(PIO_UART_TX_PROG_OFFSET), RP23XX_PIO_SM_INSTR(pio_base, sm));
     putreg32(getreg32(RP23XX_PIO_CTRL(pio_base)) | (1u << (PIO_CTRL_SM_ENABLE_LSB + sm)), RP23XX_PIO_CTRL(pio_base));
+
+    PX4_INFO("Started TX state machine");
 }
 
 uint32_t PIOUartDriver::rx_prog_offset() const {
@@ -220,7 +249,7 @@ void PIOUartDriver::start_rx_sm(uint32_t int_div, uint32_t frac_div)
     putreg32(getreg32(RP23XX_PIO_CTRL(pio_base)) | (1u << (PIO_CTRL_SM_ENABLE_LSB + sm)), RP23XX_PIO_CTRL(pio_base));
 }
 
-void PIOUartDriver::hd_echo_check()
+void __attribute__((section(".ramfunc"))) PIOUartDriver::hd_echo_check()
 {
     uint32_t pio_base = _cfg.pio_base;
     const uint8_t sm_tx = _cfg.sm_tx;
@@ -279,17 +308,13 @@ void PIOUartDriver::poll_pio_errors()
 {
     uint32_t pio_base = _cfg.pio_base;
     const uint8_t sm = _cfg.sm_rx;
-    // const uint32_t fdebug_sm_mask = (1u << RP23XX_PIO_FDEBUG_TXOVER_SHIFT) |
-    //                               (1u << RP23XX_PIO_FDEBUG_RXUNDER_SHIFT) |
-    //                               (1u << RP23XX_PIO_FDEBUG_TXSTALL_SHIFT) |
-    //                               (1u << RP23XX_PIO_FDEBUG_RXSTALL_SHIFT);
-    // putreg32(fdebug_sm_mask << sm, RP23XX_PIO_FDEBUG(pio_base));
     if ((RP23XX_PIO_FDEBUG(pio_base) & PIO_FDEBUG_RXSTALL(sm)) != 0U) putreg32(getreg32(RP23XX_PIO_FDEBUG(sm)), getreg32(RP23XX_PIO_FDEBUG(pio_base)));
     if ((RP23XX_PIO_IRQ(pio_base) & PIO_IRQ_FRAMING_FLAG(sm)) != 0U) putreg32(getreg32(RP23XX_PIO_IRQ(sm)), getreg32(RP23XX_PIO_IRQ(pio_base)));;
 }
 
-void PIOUartDriver::service_irq() {
+void __attribute__((section(".ramfunc"))) PIOUartDriver::service_irq() {
     lock_isr();
+    _irq_count++;
     poll_pio_errors();
     service_rx_fifo();
     drain_tx_fifo();
@@ -301,7 +326,7 @@ void PIOUartDriver::enable_tx_irq() {
     *inte_reg() |= PIO_INTE_TX_NOTFULL(_cfg.sm_tx);
 }
 
-void PIOUartDriver::service_rx_fifo()
+void __attribute__((section(".ramfunc"))) PIOUartDriver::service_rx_fifo()
 {
     uint32_t pio_base = _cfg.pio_base;
     const uint8_t sm = _cfg.sm_rx;
@@ -312,6 +337,7 @@ void PIOUartDriver::service_rx_fifo()
     const bool sbus_sanitize = _sbus_rx_prog;
     const uint32_t now_us = sbus_sanitize ? hrt_absolute_time() / 1000 : 0U;
     bool frame_gap = sbus_sanitize && ((now_us - _sbus_rx.last_byte_us) >= PIO_SBUS_FRAME_GAP_US);
+
 
     while (drained < PIO_RX_FIFO_MAX_READS && !(RP23XX_PIO_FSTAT(pio_base) & (1u << (PIO_FSTAT_RXEMPTY_LSB + sm)))) {
         const uint8_t byte = *rxfifo_byte;
@@ -369,6 +395,7 @@ uint64_t PIOUartDriver::receive_time_constraint_us(uint16_t nbytes) {
 }
 
 bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
+    PX4_INFO("PIO UART %u: init() called (baud: %u)", _instance, (unsigned)b);
     if (_instance >= PIO_NUM_INSTANCES) return false;
     if (b == 0) b = 57600;
     _sbus_rx.ofs = 0;
@@ -385,7 +412,10 @@ bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
         _writebuf = new ByteBuffer(txSpace);
         if (!_writebuf) return false;
     }
-    if (!upload_programs()) return false;
+    if (!upload_programs()) {
+	PX4_ERR("Unable to load PIO program");
+    	return false;
+    }
     _hd_enabled = hdplex;
     _hd_echo_active = false;
     configure_gpio(_cfg.tx_pin, true);
@@ -407,6 +437,7 @@ bool PIOUartDriver::init(uint32_t b, uint16_t rxSpace, uint16_t txSpace) {
     enable_rx_irq();
 
     if (irq_attach(_cfg.irq_num, pio_uart_isr, this) < 0) {
+    	PX4_ERR("Unable to attch ISR to PIO");
         _initialized = false;
         return false;
     }
@@ -442,7 +473,19 @@ void PIOUartDriver::flush_buffer() {
 }
 
 ssize_t PIOUartDriver::bytesAvailable() {
-    if (_initialized) poll_pio_errors();
+    if (_initialized) {
+        poll_pio_errors();
+        // Debug: periodically log IRQ count and SM status
+        static uint32_t last_log = 0;
+        uint32_t now = hrt_absolute_time() / 1000000;
+        if (now > last_log + 5) {
+            uint32_t pio_base = _cfg.pio_base;
+            uint32_t ctrl = getreg32(RP23XX_PIO_CTRL(pio_base));
+            PX4_INFO("PIO UART %u: IRQs: %ul, CTRL: 0x%08X, RxBuf: %zu",
+                     _instance, (unsigned)_irq_count, (unsigned)ctrl, _readbuf ? _readbuf->available() : 0);
+            last_log = now;
+        }
+    }
     if (!_initialized || !_readbuf) return 0;
     return _readbuf->available();
 }
@@ -458,10 +501,12 @@ bool PIOUartDriver::discard_input() {
 
 ssize_t PIOUartDriver::read_bytes(uint8_t *buffer, uint16_t count) {
     if (!_initialized || !_readbuf || !buffer) return -1;
-    return (ssize_t)_readbuf->read(buffer, count);
+    ssize_t read_len = (ssize_t)_readbuf->read(buffer, count);
+    PX4_INFO("PIO UART %u: read_bytes called, read %zd bytes", _instance, read_len);
+    return read_len;
 }
 
-void PIOUartDriver::drain_tx_fifo() {
+void __attribute__((section(".ramfunc"))) PIOUartDriver::drain_tx_fifo() {
     if (!_writebuf || !_initialized) return;
     uint32_t pio_base = _cfg.pio_base;
     const uint8_t sm = _cfg.sm_tx;
@@ -539,8 +584,11 @@ ssize_t PIOUartDriver::read_at_least(uint8_t *buffer, size_t buffer_size, size_t
     if (buffer_size < character_count) return -1;
 
     if (!wait_timeout(character_count, timeout_ms)) {
+        PX4_WARN("PIO UART %u: read_at_least timeout (wanted %zu, got %zu)", _instance, character_count, bytesAvailable());
         return 0;
     }
 
-    return (ssize_t)_readbuf->read(buffer, buffer_size);
+    ssize_t read_len = (ssize_t)_readbuf->read(buffer, buffer_size);
+    PX4_WARN("PIO UART %u: read_at_least success: read %zd bytes", _instance, read_len);
+    return read_len;
 }
