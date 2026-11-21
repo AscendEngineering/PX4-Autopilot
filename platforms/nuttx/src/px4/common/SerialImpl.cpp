@@ -141,6 +141,13 @@ bool SerialImpl::configure()
 	int termios_state;
 
 	/* fill the struct for the new configuration */
+#ifdef CONFIG_ARCH_CHIP_RP23XX
+	if (_serial_fd >= 0 && _serial_fd < 4) {
+		// PIO UARTs are configured via the driver, not termios
+		return true;
+	}
+#endif
+
 	if ((termios_state = tcgetattr(_serial_fd, &uart_config)) < 0) {
 		PX4_ERR("ERR: %d (tcgetattr)", termios_state);
 		return false;
@@ -271,13 +278,19 @@ bool SerialImpl::open()
 			return false;
 		}
 
-		if (device::rp2350::PIOUartDriver::instances[instance] == nullptr) {
-			new device::rp2350::PIOUartDriver(_port, _baudrate, instance);
-		}
+			if (device::rp2350::PIOUartDriver::instances[instance] == nullptr) {
+				new device::rp2350::PIOUartDriver(_port, _baudrate, instance);
+			}
 
-		_serial_fd = instance;
-		_open = true;
-		PX4_INFO("Successfully opened PIO UART %s (instance %d) with baudrate %u", _port, instance, (unsigned)_baudrate);
+			auto *driver = device::rp2350::PIOUartDriver::instances[instance];
+			if (driver == nullptr || !driver->init(_baudrate, 0, 0)) {
+				PX4_ERR("Failed to initialize PIO UART %s", _port);
+				return false;
+			}
+
+			_serial_fd = instance;
+			_open = true;
+			PX4_INFO("Successfully opened PIO UART %s (instance %d) with baudrate %u", _port, instance, (unsigned)_baudrate);
 #else
 		PX4_ERR("PIO UART not supported on this architecture: %s", _port);
 		return false;
@@ -303,18 +316,20 @@ bool SerialImpl::isOpen() const
 	return _open;
 }
 
-bool SerialImpl::close()
-{
-
-	if (_serial_fd >= 0) {
-		::close(_serial_fd);
+	bool SerialImpl::close()
+	{
+		if (_serial_fd >= 0) {
+			if (_serial_fd < 4) {
+				auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[_serial_fd];
+				if (driver) driver->close_uart();
+			} else {
+				::close(_serial_fd);
+			}
+		}
+		_serial_fd = -1;
+		_open = false;
+		return true;
 	}
-
-	_serial_fd = -1;
-	_open = false;
-
-	return true;
-}
 
 ssize_t SerialImpl::bytesAvailable()
 {
