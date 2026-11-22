@@ -24,6 +24,9 @@ dps310 -8 -I -b 1 -a 0x76 start
 # QMC5883L compass on the GPS connector (I2C1, bus 2, address 0x0D)
 qmc5883l -X start
 
+# Start OSD via PIO (turns on the 9v rail)
+pio_osd start
+
 # Analog OSD from the PIO block. The start also sets the 9 V rail of the video transmitter on.
 if param compare OSD_PIO_EN 1
 then
