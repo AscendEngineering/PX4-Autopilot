@@ -1,15 +1,14 @@
 ;
-; RP2350 PIO UART programs, loaded together into one PIO block by PIOUART.cpp.
-; Each has a fixed .origin, the offset the driver loads it at. pioasm still
-; emits jump targets relative to the program start, and rp2350_pio_load()
-; adds the offset. 8 PIO cycles per bit throughout.
+; UART PIO programs for the PX4 RP2350 PIO UART serial driver
+; (platforms/nuttx/src/px4/rpi/rp2350/pio_uart/pio_uart.c).
 ;
-; uart_tx is Betaflight's src/platform/PICO/uart/uart_tx_program.c, itself
-; derived from pico-examples uart_tx.pio. uart_rx is pico-examples uart_rx.pio
-; as Betaflight uses it, and uart_rx_sbus is uart_rx with the parity bit
-; skipped.
-;
-; Regenerate uart.pio.h with Tools/scripts/rp2350_pioasm.py after editing.
+; From ArduPilot, libraries/AP_HAL_ChibiOS/rp2350/pio/uart.pio. The programs
+; are identical to that file at https://github.com/davidbuzz/ardupilot commit
+; 426f25a3bb8e8489f185b095d2724d0ca62c8e00. uart_tx is Betaflight's
+; src/platform/PICO/uart/uart_tx_program.c, itself derived from pico-examples
+; uart_tx.pio. uart_rx is pico-examples uart_rx.pio as Betaflight uses it, and
+; uart_rx_sbus is uart_rx with the parity bit skipped. Regenerate uart.pio.h
+; with pioasm.sh after editing.
 ;
 ; Copyright (c) Betaflight contributors. uart_tx written by Matthew Selby.
 ; uart_tx and uart_rx are derived from the Raspberry Pi pico-examples:
@@ -27,6 +26,23 @@
 ;
 ; You should have received a copy of the GNU General Public License along
 ; with this program. If not, see <http://www.gnu.org/licenses/>.
+;
+; Local modifications (PX4):
+;
+; - None to the instructions. Only this header is different.
+;
+; Use in PX4, which is different from the ArduPilot driver:
+;
+; - The .origin values below are not used. The driver gives each program to
+;   the NuttX PIO layer with no fixed origin. NuttX loads the programs from
+;   the top of the instruction memory down and adds the load offset to the
+;   jump targets. The driver sets the wrap and the start address from that
+;   offset. 8 PIO cycles for each bit throughout.
+; - uart_rx_sbus is not loaded: the driver does not support parity.
+; - The driver is full duplex only. It sets SET_COUNT to 0, thus the two
+;   "set pindirs" instructions of uart_tx change no pin and the line is
+;   never released.
+; - The driver does not use the end-of-transmission flag of uart_tx.
 ;
 
 ; Transmitter, 8N1/8N2. In half duplex the receiver shares the pin, so the
