@@ -39,9 +39,6 @@
 #include <errno.h>
 #include <poll.h>
 #include <drivers/drv_hrt.h>
-#ifdef CONFIG_ARCH_CHIP_RP23XX
-#include "lib/drivers/device/nuttx/pio/pio_serial.h"
-#endif
 
 #define MODULE_NAME "SerialImpl"
 
@@ -141,13 +138,6 @@ bool SerialImpl::configure()
 	int termios_state;
 
 	/* fill the struct for the new configuration */
-#ifdef CONFIG_ARCH_CHIP_RP23XX
-	if (_serial_fd >= 0 && _serial_fd < 4) {
-		// PIO UARTs are configured via the driver, not termios
-		return true;
-	}
-#endif
-
 	if ((termios_state = tcgetattr(_serial_fd, &uart_config)) < 0) {
 		PX4_ERR("ERR: %d (tcgetattr)", termios_state);
 		return false;
@@ -245,57 +235,23 @@ bool SerialImpl::open()
 		return false;
 	}
 
-	// Decouple: ttyS0 and ttyS1 are hardware UARTs, ttyS2+ are PIO
-	if (strcmp(_port, "/dev/ttyS0") == 0 || strcmp(_port, "/dev/ttyS1") == 0) {
-		// Open the serial port via standard NuttX VFS
-		int serial_fd = ::open(_port, O_RDWR | O_NOCTTY | O_NONBLOCK);
+	// Open the serial port
+	int serial_fd = ::open(_port, O_RDWR | O_NOCTTY | O_NONBLOCK);
 
-		if (serial_fd < 0) {
-			PX4_ERR("failed to open %s err: %d", _port, errno);
-			return false;
-		}
-
-		_serial_fd = serial_fd;
-
-		// Configure the serial port
-		if (! configure()) {
-			PX4_ERR("failed to configure %s err: %d", _port, errno);
-			return false;
-		}
-
-		_open = true;
-	} else {
-		// PIO Implementation
-#ifdef CONFIG_ARCH_CHIP_RP23XX
-		int instance = -1;
-		if (strcmp(_port, "/dev/ttyS2") == 0) instance = 0;
-		else if (strcmp(_port, "/dev/ttyS3") == 0) instance = 1;
-		else if (strcmp(_port, "/dev/ttyS4") == 0) instance = 2;
-		else if (strcmp(_port, "/dev/ttyS5") == 0) instance = 3;
-
-		if (instance < 0) {
-			PX4_ERR("Unsupported PIO port: %s", _port);
-			return false;
-		}
-
-			if (device::rp2350::PIOUartDriver::instances[instance] == nullptr) {
-				new device::rp2350::PIOUartDriver(_port, _baudrate, instance);
-			}
-
-			auto *driver = device::rp2350::PIOUartDriver::instances[instance];
-			if (driver == nullptr || !driver->init(_baudrate, 0, 0)) {
-				PX4_ERR("Failed to initialize PIO UART %s", _port);
-				return false;
-			}
-
-			_serial_fd = instance;
-			_open = true;
-			PX4_INFO("Successfully opened PIO UART %s (instance %d) with baudrate %u", _port, instance, (unsigned)_baudrate);
-#else
-		PX4_ERR("PIO UART not supported on this architecture: %s", _port);
+	if (serial_fd < 0) {
+		PX4_ERR("failed to open %s err: %d", _port, errno);
 		return false;
-#endif
 	}
+
+	_serial_fd = serial_fd;
+
+	// Configure the serial port
+	if (! configure()) {
+		PX4_ERR("failed to configure %s err: %d", _port, errno);
+		return false;
+	}
+
+	_open = true;
 
 	// Do pin operations after port has been opened
 	if (_single_wire_mode) {
@@ -316,20 +272,18 @@ bool SerialImpl::isOpen() const
 	return _open;
 }
 
-	bool SerialImpl::close()
-	{
-		if (_serial_fd >= 0) {
-			if (_serial_fd < 4) {
-				auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[_serial_fd];
-				if (driver) driver->close_uart();
-			} else {
-				::close(_serial_fd);
-			}
-		}
-		_serial_fd = -1;
-		_open = false;
-		return true;
+bool SerialImpl::close()
+{
+
+	if (_serial_fd >= 0) {
+		::close(_serial_fd);
 	}
+
+	_serial_fd = -1;
+	_open = false;
+
+	return true;
+}
 
 ssize_t SerialImpl::bytesAvailable()
 {
@@ -338,15 +292,6 @@ ssize_t SerialImpl::bytesAvailable()
 		errno = EBADF;
 		return -1;
 	}
-
-#ifdef CONFIG_ARCH_CHIP_RP23XX
-	if (_serial_fd >= 0 && _serial_fd < 4) {
-		auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[_serial_fd];
-		if (driver) {
-			return driver->bytesAvailable();
-		}
-	}
-#endif
 
 	ssize_t bytes_available = 0;
 	int ret = ioctl(_serial_fd, FIONREAD, &bytes_available);
@@ -365,14 +310,6 @@ ssize_t SerialImpl::txSpaceAvailable()
 		errno = EBADF;
 		return -1;
 	}
-#ifdef CONFIG_ARCH_CHIP_RP23XX
-	if (_serial_fd >= 0 && _serial_fd < 4) {
-		auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[_serial_fd];
-		if (driver) {
-			return driver->txspace();
-		}
-	}
-#endif
 
 	ssize_t space_available = 0;
 	int ret = ioctl(_serial_fd, FIONSPACE, &space_available);
@@ -390,14 +327,6 @@ ssize_t SerialImpl::read(uint8_t *buffer, size_t buffer_size)
 		PX4_ERR("Cannot read from serial device until it has been opened");
 		return -1;
 	}
-#ifdef CONFIG_ARCH_CHIP_RP23XX
-	if (_serial_fd >= 0 && _serial_fd < 4) {
-		auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[_serial_fd];
-		if (driver) {
-			return driver->read_bytes(buffer, buffer_size);
-		}
-	}
-#endif
 
 	int ret = ::read(_serial_fd, buffer, buffer_size);
 
@@ -414,15 +343,6 @@ ssize_t SerialImpl::readAtLeast(uint8_t *buffer, size_t buffer_size, size_t char
 		PX4_ERR("Cannot readAtLeast from serial device until it has been opened");
 		return -1;
 	}
-
-#ifdef CONFIG_ARCH_CHIP_RP23XX
-	if (_serial_fd >= 0 && _serial_fd < 4) {
-		auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[_serial_fd];
-		if (driver) {
-			return driver->read_at_least(buffer, buffer_size, character_count, timeout_ms);
-		}
-	}
-#endif
 
 	if (buffer_size < character_count) {
 		PX4_ERR("%s: Buffer not big enough to hold desired amount of read data", __FUNCTION__);
@@ -479,14 +399,6 @@ ssize_t SerialImpl::write(const void *buffer, size_t buffer_size)
 		PX4_ERR("Cannot write to serial device until it has been opened");
 		return -1;
 	}
-#ifdef CONFIG_ARCH_CHIP_RP23XX
-	if (_serial_fd >= 0 && _serial_fd < 4) {
-		auto *driver = (device::rp2350::PIOUartDriver*)device::rp2350::PIOUartDriver::instances[_serial_fd];
-		if (driver) {
-			return driver->write_bytes(buffer, buffer_size);
-		}
-	}
-#endif
 
 	int written = ::write(_serial_fd, buffer, buffer_size);
 

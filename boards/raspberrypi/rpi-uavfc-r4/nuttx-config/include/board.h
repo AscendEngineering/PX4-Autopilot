@@ -111,5 +111,4 @@
 #define GPIO_ADC_VBAT		46	/* VBAT_SENSE, 22.1k / 2.2k divider: BAT1_V_DIV 11.045 */
 #define GPIO_ADC_CURRENT	47	/* CURRENT_SENSE from the ESC connector */
 
-#define BOARD_NUM_PIO 4 
 #endif  /* __ARCH_BOARD_BOARD_H */

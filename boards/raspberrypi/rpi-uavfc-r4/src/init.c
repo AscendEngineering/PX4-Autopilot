@@ -55,7 +55,6 @@
 #include <rp23xx_gpio.h>
 #include <hardware/rp23xx_pads_bank0.h>
 #include "arm_internal.h"
-#include <lib/drivers/device/nuttx/pio/pio_uart_manager.hpp>
 
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_board_led.h>
@@ -238,6 +237,5 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 #endif
 
 	px4_platform_configure();
-	pio_uart_manager_init();
 	return OK;
 }

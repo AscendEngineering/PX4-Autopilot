@@ -66,7 +66,6 @@ else()
 			drivers__led		# drv_led_start
 			nuttx_arch
 			nuttx_drivers
-			drivers__device
 			px4_layer
 	)
 endif()
