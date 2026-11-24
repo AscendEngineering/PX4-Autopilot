@@ -119,9 +119,7 @@ SECTIONS
 		*libc.a:arch_atomic.o(.text .text.*)
 		*libc.a:sem_wait.o(.text .text.*)
 		*libc.a:sem_post.o(.text .text.*)
-		/* 4a. The serial read path below the driver: the NuttX serial layer and the
-		 *     file read and poll calls. A reader of a fast serial stream goes through
-		 *     them for each read. */
+		/* 4a. NuttX serial read layer functions */
 		*libdrivers.a:serial.o(.text .text.*)
 		*libdrivers.a:serial_io.o(.text .text.*)
 		*libfs.a:fs_read.o(.text .text.*)
