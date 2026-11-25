@@ -8,7 +8,8 @@
 # RP2350 prescaler gives 150/8 MHz; the driver's old 24 MHz request became
 # 25 MHz, over the part's limit. ODR 1.6 kHz (-O 1600): the RP2350 has no CPU
 # time left at the driver's 6.4 kHz default once the sensors pipeline filters
-# every raw sample.
+# every raw sample. Rotation yaw 180 (-R 4): the sensor +X axis points to the
+# rear of the board.
 #
 #------------------------------------------------------------------------------
 
@@ -17,7 +18,7 @@ board_adc start
 # The IMU is not started at boot for now: at 1.6 kHz the sensors pipeline
 # takes all the CPU time of the RP2350 and the MAVLink links stop. Start it
 # by hand from the shell when it is needed:
-icm56686 -s -b 1 -R 0 -f 18750 -O 1600 start
+icm56686 -s -b 1 -R 4 -f 18750 -O 1600 start
 
 dps310 -8 -I -b 1 -a 0x76 start
 
