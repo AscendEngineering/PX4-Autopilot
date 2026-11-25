@@ -118,6 +118,8 @@ static inline bool board_usb_connected(void)
  * platforms/nuttx/src/px4/rpi/rpi_common/flash/rpi_progmem.c. */
 // #define FLASH_BASED_PARAMS
 // #define BOARD_USE_EXTERNAL_FLASH
+/* The parameter file is in flash and a write stalls both cores: autosave waits for disarm */
+#define BOARD_PARAM_FILE_ON_FLASH
 #define BOARD_PARAMS_FLASH_ADDRESS	0x103f0000u
 #define BOARD_PARAMS_FLASH_SIZE		(64 * 1024)
 #define BOARD_PARAMS_FLASH_PAGE_SIZE	(32 * 1024)

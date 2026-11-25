@@ -62,11 +62,11 @@ else()
 		PRIVATE
 			arch_flash		# up_progmem_ext_* for flash-based parameters
 			arch_io_pins
+			arch_pio_uart		# rp2350_pio_uart_register
 			arch_spi
 			drivers__led		# drv_led_start
 			nuttx_arch
 			nuttx_drivers
-			drivers__device
 			px4_layer
 	)
 endif()

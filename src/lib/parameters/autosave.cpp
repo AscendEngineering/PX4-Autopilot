@@ -34,6 +34,7 @@
 #include "autosave.h"
 
 #include <px4_platform_common/log.h>
+#include <px4_platform_common/px4_config.h>
 #include <uORB/topics/actuator_armed.h>
 #include <uORB/Subscription.hpp>
 
@@ -85,7 +86,13 @@ void ParamAutosave::Run()
 {
 	bool disabled = false;
 
-	if (!param_get_default_file()) {
+#if defined(BOARD_PARAM_FILE_ON_FLASH)
+	const bool save_to_flash = true; // the parameter file is on the internal flash
+#else
+	const bool save_to_flash = !param_get_default_file();
+#endif
+
+	if (save_to_flash) {
 		// In case we save to FLASH, defer param writes until disarmed,
 		// as writing to FLASH can stall the entire CPU (in rare cases around 300ms on STM32F7)
 		uORB::SubscriptionData<actuator_armed_s> armed_sub{ORB_ID(actuator_armed)};

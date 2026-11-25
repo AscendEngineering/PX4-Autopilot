@@ -79,13 +79,17 @@
  * UART0's default there is GPIO0/1, the LED pins. Never link that code. */
 #define GPIO_UART0_TX		44	/* DVTX_UART0_TX, DJI air unit connector */
 #define GPIO_UART0_RX		45	/* DVTX_UART0_RX */
+// #define GPIO_UART0_TX           42     /* Radio Receiver TX */
+// #define GPIO_UART0_RX           43     /* Radio Receiver RX */
 
 #define GPIO_UART1_TX		36	/* GPS_UART1_TX */
 #define GPIO_UART1_RX		37	/* GPS_UART1_RX */
 //TODO: Use PIOUART0 for Radio RX
-// #define GPIO_UART1_TX           42     /* Radio Receiver TX */
-// #define GPIO_UART1_RX           43     /* Radio Receiver RX */
+// #define GPIO_UART2_TX           42     /* Radio Receiver TX */
+// #define GPIO_UART2_RX           43     /* Radio Receiver RX */
 
+// #define GPIO_UART3_TX           16     /* AVTX TX */
+// #define GPIO_UART3_RX           17     /* AVTX RX */
 /* I2C0 (internal): barometer DPS368, address 0x76. I2C1 (external connector). */
 #define GPIO_I2C0_SDA		24
 #define GPIO_I2C0_SCL		25
@@ -107,5 +111,4 @@
 #define GPIO_ADC_VBAT		46	/* VBAT_SENSE, 22.1k / 2.2k divider: BAT1_V_DIV 11.045 */
 #define GPIO_ADC_CURRENT	47	/* CURRENT_SENSE from the ESC connector */
 
-#define BOARD_NUM_PIO 2 
 #endif  /* __ARCH_BOARD_BOARD_H */

@@ -55,7 +55,6 @@
 #include <rp23xx_gpio.h>
 #include <hardware/rp23xx_pads_bank0.h>
 #include "arm_internal.h"
-#include <lib/drivers/device/nuttx/pio/pio_uart_manager.hpp>
 
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_board_led.h>
@@ -67,6 +66,7 @@
 #include <px4_platform_common/px4_manifest.h>
 #include <px4_platform_common/px4_mtd.h>
 #include <px4_platform_common/mtd_manifest.h>
+#include <px4_arch/pio_uart.h>
 
 #if defined(FLASH_BASED_PARAMS)
 #  include <parameters/flashparams/flashfs.h>
@@ -238,6 +238,11 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 #endif
 
 	px4_platform_configure();
-	pio_uart_manager_init();
+
+	/* /dev/ttyS2 and /dev/ttyS3: UARTs made from PIO1 state machines */
+	if (rp2350_pio_uart_register() < 0) {
+		syslog(LOG_ERR, "[boot] PIO UART registration failed\n");
+	}
+
 	return OK;
 }

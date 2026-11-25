@@ -12,3 +12,4 @@ if(CONFIG_DRIVERS_DSHOT)
 endif()
 
 add_subdirectory(../rpi_common/flash flash)
+add_subdirectory(pio_uart)

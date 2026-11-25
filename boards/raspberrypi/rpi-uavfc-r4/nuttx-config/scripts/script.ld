@@ -119,6 +119,12 @@ SECTIONS
 		*libc.a:arch_atomic.o(.text .text.*)
 		*libc.a:sem_wait.o(.text .text.*)
 		*libc.a:sem_post.o(.text .text.*)
+		/* 4a. NuttX serial read layer functions */
+		*libdrivers.a:serial.o(.text .text.*)
+		*libdrivers.a:serial_io.o(.text .text.*)
+		*libfs.a:fs_read.o(.text .text.*)
+		*libfs.a:fs_poll.o(.text .text.*)
+		*libfs.a:fs_files.o(.text .text.*)
 		*libuorb_msgs.a:uORBTopics.cpp.obj(.text .text.*)
 		*libgcc.a:_arm_addsubdf3.o(.text .text.*)
 		*libgcc.a:_arm_muldivdf3.o(.text .text.*)
@@ -154,6 +160,7 @@ SECTIONS
 		*libdrivers__dshot.a:(.text .text.*)
 		*libdrivers__pwm_out.a:(.text .text.*)
 		*libarch_dshot.a:(.text .text.*)
+		*libarch_pio_uart.a:(.text .text.*)
 		*libarch_io_pins.a:(.text .text.*)
 		*libarch.a:rp23xx_pio.o(.text .text.*)
 
@@ -214,6 +221,9 @@ SECTIONS
 
 	.bss : {
 		_sbss = ABSOLUTE(.);
+		/* The PIO UART DMA rings are aligned to 16 KB, which also aligns this
+		 * section. Put them first: the alignment padding then occurs one time. */
+		*(.bss.g_pio_uart_rings)
 		/* NuttX's RAM vector table (CONFIG_ARCH_RAMVECTORS); VTOR needs the
 		 * alignment of the next power of two above the table size. */
 		. = ALIGN(512);
